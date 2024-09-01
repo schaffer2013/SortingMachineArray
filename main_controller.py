@@ -19,10 +19,13 @@ class MainController:
         for pile in self.pileManager.piles:
             self.gantry.move_to(pile.x, pile.y)
             image = self.camera.capture_image()
-            card = self.camera.process_image(image)
-            self.pileManager.update_pile(pile, card)
+            name = self.camera.process_image_name(image)
+            self.pileManager.update_pile(pile, name, image)
         self.ui.update_display()
     
+    def run(self):
+        self.ui.run()
+
     def start_sorting(self):
         while not self.pileManager.all_cards_sorted():
             self.scatter()

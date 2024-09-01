@@ -1,6 +1,6 @@
 # camera_system.py
 
-import cv2
+from PIL import Image
 
 class CameraSystem:
     def __init__(self, config):
@@ -10,9 +10,9 @@ class CameraSystem:
     def capture_image(self):
         # Placeholder for image capture logic
         print("Capturing image")
-        return cv2.imread("test_image.png")
+        return Image.open("test_image.jpg")
     
-    def process_image(self, image):
+    def process_image_name(self, image):
         # Placeholder for image processing logic to identify cards
         print("Processing image")
         return "Identified Card"

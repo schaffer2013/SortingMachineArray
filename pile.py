@@ -1,9 +1,13 @@
 # pile.py
 
+from card import Card
+
 class Pile:
-    def __init__(self, x, y, max_cards):
+    def __init__(self, x, y, x_index, y_index, max_cards):
         self.x = x
         self.y = y
+        self.xIndex = x_index
+        self.yIndex = y_index
         self.max_cards = max_cards
         self.cards = []
     
@@ -11,14 +15,14 @@ class Pile:
         return len(self.cards) == 0
     
     def add_card(self, card):
-        if len(self.cards) < self.max_cards:
+        if isinstance(card, Card) and len(self.cards) < self.max_cards:
             self.cards.append(card)
     
-    def remove_card(self):
+    def remove_card(self) -> Card:
         if not self.is_empty():
             return self.cards.pop()
     
-    def get_top_card(self):
+    def get_top_card(self) -> Card:
         if not self.is_empty():
             return self.cards[-1]
     

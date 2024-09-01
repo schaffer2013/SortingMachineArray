@@ -1,12 +1,6 @@
 {
-    "pile_coordinates": [
-        [100, 100],
-        [200, 100],
-        [300, 100],
-        [100, 200],
-        [200, 200],
-        [300, 200]
-    ],
+    "x_column_coordinates": [100, 200, 300],
+    "y_row_coordinates": [100, 200],
     "camera_offset": [10, 20],
     "max_cards_per_pile": 10,
     "z_lowered_position": 5,
