@@ -5,7 +5,6 @@ from gantry_system import GantrySystem
 from camera_system import CameraSystem
 from pile import Pile
 from pile_manager import PileManager
-from ui_system import UISystem
 
 class MainController:
     def __init__(self, config_file):
@@ -17,11 +16,10 @@ class MainController:
         self.gantry = GantrySystem(self.config)
         self.pileManager = PileManager(self.config, simulated = self.config.simulated)
         self.camera = CameraSystem(self.config, simulated = self.config.simulated,  virtualPiles = self.pileManager.virtualPiles)
-        self.ui = UISystem(self.pileManager, self)
+
     
     def initialize(self):
         self.pileManager.initialize_piles()
-        self.ui.initialize()
         for pile in self.pileManager.piles:
             self.gantry.move_to(pile.x, pile.y)
             if self.config.simulated:
@@ -32,10 +30,7 @@ class MainController:
                 image = self.camera.capture_image()
             name = self.camera.process_image_name(image)
             self.pileManager.update_pile(pile, name, image)
-        self.ui.update_display()
-    
-    def run(self):
-        self.ui.run()
+
 
     def start_sorting(self):
         while not self.pileManager.all_cards_sorted():

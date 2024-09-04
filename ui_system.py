@@ -10,13 +10,13 @@ class UISystem:
     CARD_HEIGHT = 88
     BORDER_THICKNESS = 5
 
-    def __init__(self, pile_manager:PileManager, controller: MainController):
-        self.pile_manager = pile_manager
+    def __init__(self, controller: MainController):
+        self.controller = controller  
+        self.pile_manager = controller.pileManager
         pygame.init()
         self.window = pygame.display.set_mode((800, 600))
         pygame.display.set_caption("Card Sorting Machine UI")
         self.clock = pygame.time.Clock()
-        self.controller = controller  
 
         # Example buttons
         self.buttons = [
@@ -25,6 +25,7 @@ class UISystem:
         ]
     
     def initialize(self):
+        self.controller.initialize()
         for pile in self.pile_manager.piles:
             tlX, tlY = self.getTopLeftFromCenter(pile.x, pile.y, self.CARD_WIDTH, self.CARD_HEIGHT)
             self.buttons.append({"rect": pygame.Rect(tlX, tlY, self.CARD_WIDTH, self.CARD_HEIGHT), "color": None, "text": None, "description": f"pile({pile.xIndex}, {pile.yIndex})"})

@@ -1,7 +1,8 @@
 from main_controller import MainController
+from ui_system import UISystem
 
 if __name__ == "__main__":
     controller = MainController("config.json")
-    controller.initialize()
-    controller.run()
-    #controller.start_sorting()
+    ui = UISystem(controller)
+    ui.initialize()
+    ui.run()
