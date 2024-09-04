@@ -1,13 +1,22 @@
 # gantry_system.py
 
 class GantrySystem:
-    def __init__(self, config):
+    def __init__(self, config, simulated = False):
         self.x_position = 0
         self.y_position = 0
         self.z_position = 0
         self.suctionCupState = False
         self.config = config
+        self.active_card = None
     
+    def pickCard(self, card):
+        self.active_card = card
+    
+    def placeCard(self):
+        c = self.active_card.copy()
+        self.active_card = None
+        return c
+
     def move_to(self, x, y):
         self.x_position = x
         self.y_position = y

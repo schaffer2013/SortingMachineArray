@@ -1,30 +1,77 @@
 # pile_manager.py
+from enum import Enum
+import json
 from typing import List
 from card import Card
-from pile import Pile
+from pile import Pile, PileType
 from card_sorter import CardSorter
 
+class Step(Enum):
+    MOVE_FROM_FEED = 0
+    INITIAL_COLLECTION = 1,
+    SCATTER = 2,
+    GATHER = 3
+
 class PileManager:
-    def __init__(self, config):
+    def __init__(self, config, simulated = False, simulatedPiles = None):
         self.config = config
+        self.simulated = simulated
         self.piles: List[Pile] = []
         self.cardSorter = CardSorter()
-        self.initialize_piles()
+        self.virtualPiles = None
+        self.step = Step.MOVE_FROM_FEED
     
     def initialize_piles(self):
-        if len(self.piles) ==0:
-            xCords = self.config.get_config('x_column_coordinates')
-            xCords.sort()
-            yCords = self.config.get_config('y_row_coordinates')
-            yCords.sort(reverse=True)
-            for x in xCords:
-                for y in yCords:
-                    pile = Pile(x, y, xCords.index(x), yCords.index(y), self.config.get_config('max_cards_per_pile'))
+        xCords = self.config.get_config('x_column_coordinates')
+        xCords.sort()
+        yCords = self.config.get_config('y_row_coordinates')
+        yCords.sort(reverse=True)
+        if self.simulated:
+            imagePiles = self.load_image_piles()
+            self.virtualPiles: List[List[Pile]] = []
+            for xC in range(len(xCords)):
+                column = []
+                for yC in range(len(yCords)):
+                    column.append(Pile(xC, yC, xC, yC, self.config.get_config('max_cards_per_pile')))
+                self.virtualPiles.append(column)
+        for x in xCords:
+            for y in yCords:
+                xIndex = xCords.index(x)
+                yIndex = yCords.index(y)
+                pile_type = PileType.SORTING
+                for pile_info in self.config.get_config("initial_feeder_piles"):
+                    x_index = pile_info["x_index"]
+                    y_index = pile_info["y_index"]
+                    if xIndex == x_index and yIndex == y_index:
+                        pile_type = PileType.FEEDER
+                for pile_info in self.config.get_config("initial_collection_piles"):
+                    x_index = pile_info["x_index"]
+                    y_index = pile_info["y_index"]
+                    if xIndex == x_index and yIndex == y_index:
+                        pile_type = PileType.COLLECTION
+                pile = Pile(x, y, xIndex, yIndex, self.config.get_config('max_cards_per_pile'), pile_type=pile_type)
+                try:
+                    #move to a simulated/virtualized pile. when taking an image, return the top image of that pile
+                    imagePile = imagePiles[yIndex * 5 + xIndex]
+                    for image in imagePile:
+                        name = image.split('.')[0]
+                        newCard = Card(name,imageFile=f'SimulatedCardImages\\{image}')
+                        self.virtualPiles[xIndex][yIndex].add_card(newCard)
+                finally:
                     self.piles.append(pile)
     
+    def load_image_piles(self, json_file="image_piles.json"):
+        # Open and load the JSON file
+        with open(json_file, 'r') as file:
+            image_piles = json.load(file)
+        return image_piles
+
     def update_pile(self, pile:Pile, name, image):
-        new_card = Card(name, image = image)
-        pile.add_card(new_card)
+        if image is not None:
+            new_card = Card(name, image = image)
+            pile.add_card(new_card)
+        else:
+            pile.isFullyDiscovered = True
     
     def check_pile_status(self, pile:Pile):
         return pile.is_empty()
@@ -54,3 +101,4 @@ class PileManager:
             if top_card and (not highest_card or self.cardSorter.compare_cards(top_card, highest_card)):
                 highest_card = top_card
         return highest_card
+
