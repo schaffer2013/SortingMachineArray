@@ -21,11 +21,17 @@ class Pile:
         self.cards: List[Card] = []
         self.pile_type = pile_type
 
+    def num_cards(self) -> int:
+        return len(self.cards)
+    
+    def full(self) -> bool:
+        return self.num_cards() >= self.max_cards
+
     def pick(self):
         if len(self.cards) < 1:
             raise
         return self.cards.pop()
-    
+
     def place(self, card:Card):
         self.add_card(card)
     

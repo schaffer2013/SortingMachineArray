@@ -34,8 +34,8 @@ class PileManager:
                 for yC in range(len(yCords)):
                     column.append(Pile(xC, yC, xC, yC, self.config.get_config('max_cards_per_pile')))
                 self.virtualPiles.append(column)
-        for x in xCords:
-            for y in yCords:
+        for y in yCords:
+            for x in xCords:
                 xIndex = xCords.index(x)
                 yIndex = yCords.index(y)
                 pile_type = PileType.SORTING
@@ -59,6 +59,7 @@ class PileManager:
                         self.virtualPiles[xIndex][yIndex].add_card(newCard)
                 finally:
                     self.piles.append(pile)
+            # Sort self.piles by y, then by x
     
     def load_image_piles(self, json_file="image_piles.json"):
         # Open and load the JSON file
@@ -85,6 +86,20 @@ class PileManager:
                 return pile
         return None
     
+    def find_initial_collect_piles(self) -> tuple[Pile, Pile]:
+        from_pile = next(
+            (pile for pile in self.piles if pile.pile_type == PileType.FEEDER and not pile.isFullyDiscovered),
+            None
+        )
+        
+        to_pile = next(
+            (pile for pile in self.piles if pile.pile_type != PileType.FEEDER and pile.isFullyDiscovered and not pile.full()),
+            None
+        )
+        
+        return from_pile, to_pile
+
+
     def find_gather_target(self) -> Pile:
         for pile in reversed(self.piles):
             if len(pile.cards) < pile.max_cards:

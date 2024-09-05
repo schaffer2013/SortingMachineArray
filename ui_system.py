@@ -102,6 +102,7 @@ class UISystem:
 
     def handle_button_action(self, action):
         if action == "sort":
+            from_pile, to_pile = self.pile_manager.find_initial_collect_piles()
             print("Sorting started...")
             # Start sorting process
         elif action == "stop":
@@ -109,6 +110,7 @@ class UISystem:
             # Stop sorting process
         else:
             print(action)
+        a = 1
 
     def resize_image(self, image, max_width=None, max_height=None):
         """Resize the image while maintaining the aspect ratio."""
