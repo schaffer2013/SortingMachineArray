@@ -1,7 +1,7 @@
 # pile.py
 
 from enum import Enum
-from typing import List
+from typing import List, Tuple
 from card import Card
 
 class PileType(Enum):
@@ -9,6 +9,7 @@ class PileType(Enum):
     SORTING = "Sorting"
     COLLECTION = "Collection"
     BLACKHOLE = "Blackhole"
+    TEMP = "Temp"
 
 class Pile:
     def __init__(self, x: int, y: int, x_index: int, y_index: int, max_cards: int, pile_type: PileType = PileType.SORTING):
@@ -49,6 +50,16 @@ class Pile:
     def get_top_card(self) -> Card:
         if not self.is_empty():
             return self.cards[-1]
+        
+    def get_bottom_card(self) -> Card:
+        if not self.is_empty():
+            return self.cards[0]
+        
+    def get_bookends(self) -> Tuple[int]:
+        return (self.get_top_card().rank, self.get_bottom_card().rank)
     
     def is_sorted(self):
-        return all(self.cards[i] <= self.cards[i + 1] for i in range(len(self.cards) - 1))
+        rev = self.cards.copy()
+        rev.reverse()
+        test = all(rev[i].rank <= rev[i + 1].rank for i in range(len(rev) - 1))
+        return all(rev[i].rank <= rev[i + 1].rank for i in range(len(rev) - 1))

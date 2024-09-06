@@ -1,5 +1,6 @@
 # main_controller.py
 
+from PIL import Image
 from config_manager import ConfigManager
 from gantry_system import GantrySystem
 from camera_system import CameraSystem
@@ -29,8 +30,16 @@ class MainController:
             else:
                 image = self.camera.capture_image()
             name = self.camera.process_image_name(image)
-            self.pileManager.update_pile(pile, name, image)
+            self.pileManager.discover_pile(pile, name, image)
 
+    def getVirtualImage(self, pileXIndex: int, pileYIndex: int) -> Image:
+        if not self.config.simulated:
+            raise
+        pile = self.pileManager.getPile(pileXIndex, pileYIndex)
+        activeVirtualPile = self.pileManager.virtualPiles[pile.xIndex][pile.yIndex]
+        topVirtualCard =activeVirtualPile.get_top_card()
+        image = self.camera.capture_image(virtualCard=topVirtualCard)
+        return image
 
     def start_sorting(self):
         while not self.pileManager.all_cards_sorted():
@@ -54,13 +63,31 @@ class MainController:
                 self.move_card(highest_card.pile, target_pile)
     
     def move_card(self, from_pile:Pile, to_pile:Pile):
-        self.gantry.move_to(from_pile.x, from_pile.y)
-        self.gantry.lower_z()
-        self.gantry.activate_suction()
-        self.gantry.raise_z()
-        self.gantry.move_to(to_pile.x, to_pile.y)
-        self.gantry.lower_z()
-        self.gantry.deactivate_suction()
-        self.gantry.raise_z()
-
+        if from_pile is not None and to_pile is not None:
+            self.gantry.move_to(from_pile.x, from_pile.y)
+            self.gantry.lower_z()
+            self.gantry.activate_suction()
+            self.gantry.pickCard(self.pileManager.pick(from_pile.xIndex, from_pile.yIndex))
+            self.gantry.raise_z()
+            self.gantry.move_to(to_pile.x, to_pile.y)
+            self.gantry.lower_z()
+            self.gantry.deactivate_suction()
+            self.gantry.raise_z()
+            self.pileManager.place(to_pile.xIndex, to_pile.yIndex, self.gantry.placeCard())
+            self.gantry.move_to(from_pile.x, from_pile.y)
+            if self.config.simulated:
+                activeVirtualPile = self.pileManager.virtualPiles[from_pile.xIndex][from_pile.yIndex]
+                topVirtualCard =activeVirtualPile.get_top_card()
+                image = self.camera.capture_image(virtualCard=topVirtualCard)
+                try:
+                    name = self.camera.process_image_name(image)
+                except:
+                    name = from_pile.get_top_card().name
+            else:
+                image = self.camera.capture_image()
+                name = self.camera.process_image_name(image)
+            self.pileManager.discover_pile(from_pile, name, image)
+            self.pileManager.updateStep()
+        else:
+            a = 1
     

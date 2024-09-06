@@ -3,7 +3,7 @@ import pygame
 import sys
 from PIL import Image
 from main_controller import MainController
-from pile_manager import PileManager
+from pile_manager import PileManager, Step
 
 class UISystem:
     CARD_WIDTH = 62
@@ -13,8 +13,9 @@ class UISystem:
     def __init__(self, controller: MainController):
         self.controller = controller  
         self.pile_manager = controller.pileManager
+        self.sort = False
         pygame.init()
-        self.window = pygame.display.set_mode((800, 600))
+        self.window = pygame.display.set_mode((1000, 600))
         pygame.display.set_caption("Card Sorting Machine UI")
         self.clock = pygame.time.Clock()
 
@@ -23,6 +24,9 @@ class UISystem:
             {"rect": pygame.Rect(50, 500, 100, 50), "color": (0, 200, 0), "text": "Sort", "description": "sort"},
             {"rect": pygame.Rect(200, 500, 100, 50), "color": (200, 0, 0), "text": "Stop", "description": "stop"}
         ]
+
+        # Hover state
+        self.hovered_pile = None
     
     def initialize(self):
         self.controller.initialize()
@@ -34,6 +38,7 @@ class UISystem:
         self.window.fill((255, 255, 255))
         self.draw_piles()
         self.draw_buttons()
+        self.draw_hover_image()  # Draw the hovered image if any
         pygame.display.flip()
 
     def draw_piles(self):
@@ -76,6 +81,30 @@ class UISystem:
                 text_rect = text_surf.get_rect(center=button["rect"].center)
                 self.window.blit(text_surf, text_rect)
 
+    def draw_hover_image(self):
+        if self.hovered_pile:
+            pile = self.pile_manager.getPile(self.hovered_pile[0], self.hovered_pile[1])
+            if pile and not pile.is_empty():
+                card = pile.get_top_card()
+                if card and card.image:
+                    # Resize the card image
+                    pygame_image, width, height = self.resize_image(card.image, max_width=200, max_height=300)
+                    
+                    # Calculate the position for the image
+                    image_x = self.window.get_width() - width - 20
+                    image_y = 20
+                    
+                    # Blit the image to the window
+                    self.window.blit(pygame_image, (image_x, image_y))
+                    
+                    # Render the rank text
+                    font = pygame.font.Font(None, 24)
+                    rank_text = f"Rank: {card.rank if card.rank is not None else 'N/A'}"
+                    rank_surf = font.render(rank_text, True, (0, 0, 0))  # Black color
+                    rank_rect = rank_surf.get_rect(topleft=(image_x, image_y + height + 10))
+                    self.window.blit(rank_surf, rank_rect)
+
+
     def configure_pile(self, pile):
         # Placeholder for pile configuration logic
         pass
@@ -89,7 +118,11 @@ class UISystem:
                     running = False
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     self.handle_click(event.pos)
+                elif event.type == pygame.MOUSEMOTION:
+                    self.handle_mouse_motion(event.pos)
 
+            if self.sort:
+                self.get_action_and_move()
             self.update_display()
 
         pygame.quit()
@@ -100,12 +133,28 @@ class UISystem:
             if button["rect"].collidepoint(mouse_pos):
                 self.handle_button_action(button["description"])
 
+    def handle_mouse_motion(self, mouse_pos):
+        self.hovered_pile = None
+        for button in self.buttons:
+            if button["rect"].collidepoint(mouse_pos):
+                description = button["description"]
+                if description.startswith("pile"):
+                    xIndex, yIndex = map(int, description.strip("pile()").split(", "))
+                    self.hovered_pile = (xIndex, yIndex)
+                break
+
+    def get_action_and_move(self):
+        from_pile, to_pile = self.pile_manager.get_action_piles()
+        if (from_pile, to_pile) == (None, None):
+            return
+        self.controller.move_card(from_pile, to_pile)
+
     def handle_button_action(self, action):
         if action == "sort":
-            from_pile, to_pile = self.pile_manager.find_initial_collect_piles()
+            self.sort = True
             print("Sorting started...")
-            # Start sorting process
         elif action == "stop":
+            self.sort = False
             print("Sorting stopped...")
             # Stop sorting process
         else:
