@@ -1,22 +1,25 @@
+from io import BytesIO
 from PIL import Image
 import copy
+import requests
 from sortedcontainers import SortedSet
+import scrython
 
 class Card:
     RARITY_ORDER = {
         "MYTHIC": 1,
-        "RARE": 2,
+        "RARE": 1,
         "OTHER": 3  # Add more rarities as needed
     }
 
     TYPE_ORDER = {
         "creature": 1,
-        "artifact": 2,
-        "battle": 3,
-        "instant": 4,
-        "sorcery": 5,
-        "planeswalker": 6,
-        "enchantment": 7,
+        "artifact": 1,
+        "battle": 1,
+        "instant": 1,
+        "sorcery": 1,
+        "planeswalker": 1,
+        "enchantment": 1,
         "non-basic land": 8,
         "basic land": 9,
         "other": 10  # Default for unrecognized types
@@ -28,8 +31,18 @@ class Card:
         "black": 3,
         "red": 4,
         "green": 5,
-        "colorless": 6,
-        "default": 7  # Default for cards without recognized color
+        "multi": 6,
+        "colorless": 7,
+        "default": 8  # Default for cards without recognized color
+    }
+
+    COLOR_TRANSLATION = {
+        'w': 'white',
+        'u': 'blue',
+        'b': 'black',
+        'r': 'red',
+        'g': 'green',
+        'c': 'colorless'  # 'c' is sometimes used for colorless mana
     }
 
     def __init__(self, name, rarity=None, card_type=None, color=None, image: Image = None, imageFile=None):
@@ -41,6 +54,62 @@ class Card:
         self.rank = 99999
         if image is None and imageFile is not None:
             self.image = Image.open(imageFile)
+
+        # Fetch card data from Scryfall API if necessary
+        self.fetch_card_data(imageFile)
+
+    def fetch_card_data(self, imageFile):
+        try:
+            card_data = scrython.cards.Named(fuzzy=self.name)
+
+            # Set card attributes from Scryfall API response
+            self.rarity = card_data.rarity().upper()
+            try:
+                dummy = self.RARITY_ORDER[self.rarity]
+            except:
+                self.rarity = "OTHER"
+            try:
+                self.card_type = card_data.type_line().split(" — ")[0].lower()  # Basic type
+                if 'creature' in self.card_type:
+                    self.card_type = 'creature'
+                dummy = self.TYPE_ORDER[self.card_type]
+            except:
+                self.card_type = card_data.type_line().split(" — ")[0].lower().split(" ")[-1]
+            try:
+                if self.card_type == 'land':
+                    self.card_type = 'non-basic land'
+                dummy = self.TYPE_ORDER[self.card_type]
+            except:
+                self.card_type = 'other'
+
+
+
+            # Handle color for lands differently
+            if 'land' in self.card_type:
+                color_identity = card_data.color_identity()
+                self.color = 'colorless' if not color_identity else ','.join(
+                    [self.COLOR_TRANSLATION[color.lower()] for color in color_identity]
+                ).lower()
+            else:
+                colors = card_data.colors()
+                self.color = 'colorless' if not colors else ','.join(
+                    [self.COLOR_TRANSLATION[color.lower()] for color in colors]
+                ).lower()
+            if ',' in self.color:
+                self.color = 'multi'
+
+            if self.image == None:
+            # Download and assign image
+                image_urls = card_data.image_uris()
+                if 'normal' in image_urls:
+                    url = image_urls['normal'].rsplit('?', 1)[0]
+                else: 
+                    url = image_urls[0].rsplit('?', 1)[0]
+                response = requests.get(url)
+                self.image = Image.open(BytesIO(response.content))
+
+        except Exception as e:
+            print(f"Error fetching data for {self.name}: {e}")
 
     def __lt__(self, other):
         # Compare rarity first
@@ -71,7 +140,8 @@ class Card:
         return hash((self.name, self.rarity, self.card_type, self.color))
 
     def show(self):
-        self.image.show()
+        if self.image:
+            self.image.show()
 
     def copy(self):
         return copy.deepcopy(self)
@@ -97,22 +167,16 @@ class CardSet:
 if __name__ == "__main__":
     card_set = CardSet()
     
-    # Create some card instances with colors
-    card1 = Card(name="Fireball", rarity="MYTHIC", card_type="sorcery", color="red")
-    card2 = Card(name="Lightning Bolt", rarity="RARE", card_type="instant", color="red")
-    card3 = Card(name="Forest", rarity="OTHER", card_type="basic land", color="green")
-    card4 = Card(name="Grizzly Bears", rarity="OTHER", card_type="creature", color="green")
-    card5 = Card(name="Island", rarity="OTHER", card_type="basic land", color="blue")
-    card6 = Card(name="Plains", rarity="OTHER", card_type="basic land", color="white")
-
-    # Add cards to the set
-    card_set.add_card(card1)
-    card_set.add_card(card2)
-    card_set.add_card(card3)
-    card_set.add_card(card4)
-    card_set.add_card(card5)
-    card_set.add_card(card6)
-
+    # Fetch data for cards using Scrython
+    card_set.add_card(Card(name="Fireball"))
+    card_set.add_card(Card(name="Lightning Bolt"))
+    card_set.add_card(Card(name="Forest"))
+    card_set.add_card(Card(name="Grizzly Bears"))
+    card_set.add_card(Card(name="Island"))
+    card_set.add_card(Card(name="Plains"))
+    card_set.add_card(Card(name="Atraxa, Grand Unifier"))
+    card_set.add_card(Card(name="Kamahl, Fist of Krosa"))
+    
     # Get rank of a specific card
     rank = card_set.get_rank("Grizzly Bears")
     print(f"Rank of 'Grizzly Bears': {rank}")
