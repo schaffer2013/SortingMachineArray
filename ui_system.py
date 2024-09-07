@@ -1,3 +1,4 @@
+from enum import Enum
 from functools import cache
 import pygame
 import sys
@@ -6,9 +7,15 @@ from main_controller import MainController
 from pile_manager import PileManager, Step
 
 class UISystem:
-    CARD_WIDTH = 62
-    CARD_HEIGHT = 88
+    CARD_WIDTH = 70
+    CARD_HEIGHT = 97
     BORDER_THICKNESS = 5
+
+    class ActionStep(Enum):
+        INITIAL_MOVE = 0
+        PICK_AND_MOVE = 1,
+        PLACE_AND_MOVE = 2,
+        FINISH = 3
 
     def __init__(self, controller: MainController):
         self.controller = controller  
@@ -38,6 +45,7 @@ class UISystem:
         self.window.fill((255, 255, 255))
         self.draw_piles()
         self.draw_buttons()
+        self.draw_gantry()
         self.draw_hover_image()  # Draw the hovered image if any
         pygame.display.flip()
 
@@ -63,6 +71,23 @@ class UISystem:
                     pygame.Rect(top_left[0]- self.BORDER_THICKNESS, top_left[1] - self.BORDER_THICKNESS, self.CARD_WIDTH + self.BORDER_THICKNESS *2, self.CARD_HEIGHT+ self.BORDER_THICKNESS *2),
                     self.BORDER_THICKNESS
                 )
+
+    def draw_gantry(self):
+    # Draw the piles (placeholder implementation)
+        card = self.controller.gantry.active_card
+        x = self.controller.gantry.x_position
+        y = self.controller.gantry.y_position
+        if card:
+            topCardImage = card.image
+            pygame_image, width, height = self.resize_image(topCardImage, max_width = self.CARD_WIDTH, max_height=self.CARD_HEIGHT)
+            self.window.blit(pygame_image, self.getTopLeftFromCenter(x, y, width, height))
+        else:
+            s = 10
+            pygame.draw.rect(
+                self.window,
+                (255, 0, 0),  # Red cotlor in RGB
+                pygame.Rect(x - s, y - s, 2*s, 2*s)
+            )
 
     @cache
     def getTopLeftFromCenter(self, cardCenterX, cardCenterY, width, height):
@@ -111,6 +136,9 @@ class UISystem:
 
     def run(self):
         running = True
+        step = self.ActionStep.INITIAL_MOVE
+        to_pile = None
+        from_pile = None
         while running:
             self.clock.tick(30)  # Run at 30 frames per second
             for event in pygame.event.get():
@@ -122,7 +150,35 @@ class UISystem:
                     self.handle_mouse_motion(event.pos)
 
             if self.sort:
-                self.get_action_and_move()
+                if step == self.ActionStep.INITIAL_MOVE and not self.controller.gantry.isMoving:
+                    (from_pile, to_pile) = (None, None)
+                    count = 0
+                    while (from_pile, to_pile) == (None, None):
+                        (from_pile, to_pile) = self.get_action_pile()
+                        count += 1
+                        if count > 4:
+                            self.sort = False
+                            print(f'Total travel: {self.controller.gantry.total_dist} mm')
+                            self.controller.gantry.reset()
+                            break
+                    self.controller.move_to_pile(from_pile)
+                elif step == self.ActionStep.PICK_AND_MOVE and not self.controller.gantry.isMoving:
+                    self.controller.pick_card_and_move(from_pile, to_pile)
+                elif step == self.ActionStep.PLACE_AND_MOVE and not self.controller.gantry.isMoving:
+                    self.controller.place_card_and_move(from_pile, to_pile)
+                elif step == self.ActionStep.FINISH and not self.controller.gantry.isMoving:
+                    self.controller.process_and_finish(from_pile)
+                moveDone = self.controller.gantry.update()
+                if moveDone:
+                    if step == self.ActionStep.INITIAL_MOVE:
+                        nextStep = self.ActionStep.PICK_AND_MOVE
+                    if step == self.ActionStep.PICK_AND_MOVE:
+                        nextStep = self.ActionStep.PLACE_AND_MOVE
+                    if step == self.ActionStep.PLACE_AND_MOVE:
+                        nextStep = self.ActionStep.FINISH
+                    if step == self.ActionStep.FINISH:
+                        nextStep = self.ActionStep.INITIAL_MOVE
+                    step = nextStep
             self.update_display()
 
         pygame.quit()
@@ -143,11 +199,10 @@ class UISystem:
                     self.hovered_pile = (xIndex, yIndex)
                 break
 
-    def get_action_and_move(self):
+    def get_action_pile(self):
         from_pile, to_pile = self.pile_manager.get_action_piles()
-        if (from_pile, to_pile) == (None, None):
-            return
-        self.controller.move_card(from_pile, to_pile)
+        return (from_pile, to_pile)
+        #self.controller.move_card(from_pile, to_pile)
 
     def handle_button_action(self, action):
         if action == "sort":

@@ -40,54 +40,52 @@ class MainController:
         topVirtualCard =activeVirtualPile.get_top_card()
         image = self.camera.capture_image(virtualCard=topVirtualCard)
         return image
-
-    def start_sorting(self):
-        while not self.pileManager.all_cards_sorted():
-            self.scatter()
-            self.gather()
-        self.gantry.return_home()
-    
-    def scatter(self):
-        for pile in self.pileManager.feed_piles:
-            card = pile.get_top_card()
-            if card:
-                target_pile = self.pileManager.find_scatter_target(card)
-                if target_pile:
-                    self.move_card(pile, target_pile)
-    
-    def gather(self):
-        while self.pileManager.active_sort_piles:
-            highest_card = self.pileManager.get_highest_card()
-            target_pile = self.pileManager.find_gather_target()
-            if highest_card and target_pile:
-                self.move_card(highest_card.pile, target_pile)
     
     def move_card(self, from_pile:Pile, to_pile:Pile):
         if from_pile is not None and to_pile is not None:
-            self.gantry.move_to(from_pile.x, from_pile.y)
-            self.gantry.lower_z()
-            self.gantry.activate_suction()
-            self.gantry.pickCard(self.pileManager.pick(from_pile.xIndex, from_pile.yIndex))
-            self.gantry.raise_z()
-            self.gantry.move_to(to_pile.x, to_pile.y)
-            self.gantry.lower_z()
-            self.gantry.deactivate_suction()
-            self.gantry.raise_z()
-            self.pileManager.place(to_pile.xIndex, to_pile.yIndex, self.gantry.placeCard())
-            self.gantry.move_to(from_pile.x, from_pile.y)
-            if self.config.simulated:
-                activeVirtualPile = self.pileManager.virtualPiles[from_pile.xIndex][from_pile.yIndex]
-                topVirtualCard =activeVirtualPile.get_top_card()
-                image = self.camera.capture_image(virtualCard=topVirtualCard)
-                try:
-                    name = self.camera.process_image_name(image)
-                except:
-                    name = from_pile.get_top_card().name
-            else:
-                image = self.camera.capture_image()
-                name = self.camera.process_image_name(image)
-            self.pileManager.discover_pile(from_pile, name, image)
-            self.pileManager.updateStep()
+            # Move to initial Pile
+            self.move_to_pile(from_pile)
+            self.pick_card_and_move(from_pile, to_pile)
+            self.place_card_and_move(from_pile, to_pile)
+            self.process_and_finish(from_pile)
         else:
-            a = 1
+            raise
+
+    def move_to_pile(self, from_pile: Pile):
+        if from_pile is not None:
+            self.gantry.move_to(from_pile.x, from_pile.y, immediateMove=False)
+
+    def pick_card_and_move(self, from_pile:Pile, to_pile:Pile):
+        """Lower gantry, activate suction, and pick the card from the pile."""
+            # Move to second pile
+        self.gantry.lower_z()
+        self.gantry.activate_suction()
+        self.gantry.pickCard(self.pileManager.pick(from_pile.xIndex, from_pile.yIndex))
+        self.gantry.raise_z()
+        self.gantry.move_to(to_pile.x, to_pile.y, immediateMove=False)
+
+    def place_card_and_move(self, from_pile:Pile, to_pile:Pile):
+        # Back to first pile
+        self.gantry.lower_z()
+        self.gantry.deactivate_suction()
+        self.gantry.raise_z()
+        self.pileManager.place(to_pile.xIndex, to_pile.yIndex, self.gantry.placeCard())
+        self.gantry.move_to(from_pile.x, from_pile.y, immediateMove=False)
+
+    def process_and_finish(self, from_pile: Pile):
+        """Process image and finish the pile update."""
+        # Process and finish
+        if self.config.simulated:
+            activeVirtualPile = self.pileManager.virtualPiles[from_pile.xIndex][from_pile.yIndex]
+            topVirtualCard =activeVirtualPile.get_top_card()
+            image = self.camera.capture_image(virtualCard=topVirtualCard)
+            try:
+                name = self.camera.process_image_name(image)
+            except:
+                name = from_pile.get_top_card().name
+        else:
+            image = self.camera.capture_image()
+            name = self.camera.process_image_name(image)
+        self.pileManager.discover_pile(from_pile, name, image)
+        self.pileManager.updateStep()
     
