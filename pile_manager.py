@@ -58,7 +58,10 @@ class PileManager:
                     imagePile = imagePiles[yIndex * 5 + xIndex]
                     for image in imagePile:
                         name = image.split('.')[0]
-                        newCard = Card(name,imageFile=f'SimulatedCardImages\\{image}')
+                        file = f'SimulatedCardImages\\{image}'
+                        newCard = Card(name,imageFile = file)
+                        if newCard.image.filename == '':
+                            newCard.image.filename = file
                         self.virtualPiles[xIndex][yIndex].add_card(newCard)
                 finally:
                     self.piles.append(pile)

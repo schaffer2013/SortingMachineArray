@@ -1,3 +1,5 @@
+import json
+import os
 from io import BytesIO
 from PIL import Image
 import copy
@@ -45,6 +47,8 @@ class Card:
         'c': 'colorless'  # 'c' is sometimes used for colorless mana
     }
 
+    JSON_FILE = "card_data.json"
+
     def __init__(self, name, rarity=None, card_type=None, color=None, image: Image = None, imageFile=None):
         self.name = name
         self.rarity = rarity if rarity is not None else "OTHER"  # Default to 'OTHER' if not provided
@@ -55,12 +59,54 @@ class Card:
         if image is None and imageFile is not None:
             self.image = Image.open(imageFile)
 
-        # Fetch card data from Scryfall API if necessary
-        self.fetch_card_data(imageFile)
+        # Load card data from JSON or fetch from Scryfall if necessary
+        self.load_or_fetch_data()
 
-    def fetch_card_data(self, imageFile):
+    def load_or_fetch_data(self):
+        card_data = self.load_card_data()
+
+        if card_data:
+            # Load attributes from JSON file
+            self.rarity = card_data.get('rarity', "OTHER")
+            self.card_type = card_data.get('card_type', "other")
+            self.color = card_data.get('color', "default")
+            image_url = card_data.get('image_url')
+
+            # Download and assign image
+            if image_url and not self.image:
+                response = requests.get(image_url)
+                self.image = Image.open(BytesIO(response.content))
+        else:
+            # Fetch from Scryfall and save to JSON
+            self.fetch_card_data()
+
+    def load_card_data(self):
+        """Load card data from a JSON file if available."""
+        if os.path.exists(self.JSON_FILE):
+            with open(self.JSON_FILE, 'r') as file:
+                card_data = json.load(file)
+                if self.name in card_data:
+                    return card_data[self.name]
+                if self.name.replace('_', ' ') in card_data:
+                    return card_data[self.name]
+        return None
+
+    def save_card_data(self, card_data):
+        """Save card data to a JSON file."""
+        if os.path.exists(self.JSON_FILE):
+            with open(self.JSON_FILE, 'r') as file:
+                all_card_data = json.load(file)
+        else:
+            all_card_data = {}
+
+        all_card_data[self.name] = card_data
+
+        with open(self.JSON_FILE, 'w') as file:
+            json.dump(all_card_data, file, indent=4)
+
+    def fetch_card_data(self):
         try:
-            card_data = scrython.cards.Named(fuzzy=self.name)
+            card_data = scrython.cards.Named(fuzzy=self.name.replace('_', ' '))
 
             # Set card attributes from Scryfall API response
             self.rarity = card_data.rarity().upper()
@@ -82,8 +128,6 @@ class Card:
             except:
                 self.card_type = 'other'
 
-
-
             # Handle color for lands differently
             if 'land' in self.card_type:
                 color_identity = card_data.color_identity()
@@ -98,15 +142,23 @@ class Card:
             if ',' in self.color:
                 self.color = 'multi'
 
-            if self.image == None:
             # Download and assign image
-                image_urls = card_data.image_uris()
-                if 'normal' in image_urls:
-                    url = image_urls['normal'].rsplit('?', 1)[0]
-                else: 
-                    url = image_urls[0].rsplit('?', 1)[0]
-                response = requests.get(url)
-                self.image = Image.open(BytesIO(response.content))
+            image_urls = card_data.image_uris()
+            if 'normal' in image_urls:
+                url = image_urls['normal'].rsplit('?', 1)[0]
+            else: 
+                url = image_urls[0].rsplit('?', 1)[0]
+            response = requests.get(url)
+            self.image = Image.open(BytesIO(response.content))
+
+            # Save card data to JSON file
+            card_info = {
+                "rarity": self.rarity,
+                "card_type": self.card_type,
+                "color": self.color,
+                "image_url": url
+            }
+            self.save_card_data(card_info)
 
         except Exception as e:
             print(f"Error fetching data for {self.name}: {e}")
