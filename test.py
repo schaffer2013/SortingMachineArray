@@ -59,6 +59,9 @@ for combo in combinations:
 # Now we have the best combination (best_combo), find the closest non-testing locations
 closest_piles = []  # Store the closest non-testing piles
 
+for pile in piles:
+    pile.testing = pile.id in best_combo
+
 for non_testing_pile in [p for p in piles if not p.testing]:
     # Calculate the sum of distances to all testing piles
     distance_sum = sum(non_testing_pile.distance_to(testing_pile) for testing_pile in [p for p in piles if p.testing])
