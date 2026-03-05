@@ -1,0 +1,7 @@
+{
+  "name": "mixed_rarity",
+  "seed": 123,
+  "grid": {"cols": 2, "rows": 2},
+  "piles": [],
+  "faults": []
+}

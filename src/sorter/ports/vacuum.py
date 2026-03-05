@@ -1,0 +1,9 @@
+from __future__ import annotations
+
+from typing import Protocol
+
+
+class VacuumPort(Protocol):
+    def on(self) -> None: ...
+    def off(self) -> None: ...
+    def is_on(self) -> bool: ...

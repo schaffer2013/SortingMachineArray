@@ -1,0 +1,9 @@
+{
+  "name": "pickup_failure",
+  "seed": 42,
+  "grid": {"cols": 2, "rows": 2},
+  "piles": [],
+  "faults": [
+    {"type": "pickup_fail", "after_move": 1}
+  ]
+}
