@@ -23,6 +23,7 @@ class PygameDebugUI:
         self.run_thread: threading.Thread | None = None
         self.last_result: dict | None = None
         self.last_error: str | None = None
+        self.image_cache: dict[str, pygame.Surface] = {}
         self.start_btn = pygame.Rect(30, 20, 120, 40)
         self.stop_btn = pygame.Rect(170, 20, 120, 40)
         self.slow_btn = pygame.Rect(310, 20, 180, 40)
@@ -133,6 +134,12 @@ class PygameDebugUI:
             if top_id:
                 meta = self.orchestrator.world.card_by_id.get(top_id)
                 top_name = meta.name if meta else top_id
+            image_path = self.orchestrator.world.top_card_image_path(pile.pile_id)
+            if image_path:
+                surface = self._get_image_surface(image_path)
+                if surface is not None:
+                    scaled = pygame.transform.smoothscale(surface, (70, 98))
+                    self.window.blit(scaled, (px + rect.width - 82, py + 10))
 
             self.window.blit(self.font.render(f"Pile {pile.pile_id.as_key()}", True, (255, 255, 255)), (px + 10, py + 10))
             self.window.blit(self.font.render(pile.role.value, True, (240, 240, 240)), (px + 10, py + 34))
@@ -142,3 +149,14 @@ class PygameDebugUI:
         pose = snapshot.pose
         pose_text = f"Pose x={pose.x_mm:.1f} y={pose.y_mm:.1f} z={pose.z_mm:.1f} vacuum={pose.vacuum_on}"
         self.window.blit(self.font.render(pose_text, True, (220, 220, 220)), (30, 640))
+
+    def _get_image_surface(self, image_path: str) -> pygame.Surface | None:
+        cached = self.image_cache.get(image_path)
+        if cached is not None:
+            return cached
+        try:
+            surface = pygame.image.load(image_path)
+            self.image_cache[image_path] = surface
+            return surface
+        except pygame.error:
+            return None

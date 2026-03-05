@@ -23,6 +23,7 @@ class SimWorld:
     seed: int
     snapshot: MachineSnapshot
     card_by_id: dict[str, CardMeta]
+    image_by_card_id: dict[str, str | None]
     coords: dict[str, tuple[float, float]]
     held_card_id: str | None = None
 
@@ -34,7 +35,9 @@ class SimWorld:
         random.seed(seed)
         piles: dict[str, PileState] = {}
         card_by_id: dict[str, CardMeta] = {}
+        image_by_card_id: dict[str, str | None] = {}
         coords: dict[str, tuple[float, float]] = {}
+        project_root = path.parents[2]
 
         for pile_cfg in data.get("piles", []):
             pile_id = PileId(
@@ -55,7 +58,9 @@ class SimWorld:
                 else:
                     card_id = f"{raw_card}#{uuid4().hex[:6]}"
                 stack.append(card_id)
-                card_by_id[card_id] = CardMeta(name=base if "#" in raw_card else raw_card)
+                card_name = base if "#" in raw_card else raw_card
+                card_by_id[card_id] = CardMeta(name=card_name)
+                image_by_card_id[card_id] = _resolve_image_for_name(card_name, project_root)
             piles[key] = PileState(
                 pile_id=pile_id,
                 role=role,
@@ -70,6 +75,7 @@ class SimWorld:
             seed=seed,
             snapshot=snapshot,
             card_by_id=card_by_id,
+            image_by_card_id=image_by_card_id,
             coords=coords,
         )
 
@@ -109,3 +115,54 @@ class SimWorld:
             pile.discovered = True
             return None
         return self.card_by_id[top_id].name
+
+    def top_card_image_path(self, pile_id: PileId) -> str | None:
+        pile = self.snapshot.get_pile(pile_id)
+        if pile is None:
+            return None
+        top_id = pile.top_card_id()
+        if top_id is None:
+            return None
+        return self.image_by_card_id.get(top_id)
+
+
+def _resolve_image_for_name(card_name: str, project_root: Path) -> str | None:
+    image_dirs = [
+        project_root / "SimulatedCardImages",
+        project_root / "data" / "card_catalog" / "images",
+    ]
+    variants = [
+        card_name,
+        card_name.replace(" ", "_"),
+        card_name.replace("/", "_"),
+        card_name.replace(" ", "_").replace("/", "_"),
+    ]
+
+    for directory in image_dirs:
+        if not directory.exists():
+            continue
+        for variant in variants:
+            candidate = directory / f"{variant}.jpg"
+            if candidate.exists():
+                return str(candidate)
+            candidate_png = directory / f"{variant}.png"
+            if candidate_png.exists():
+                return str(candidate_png)
+
+    target = _normalize_name(card_name)
+    for directory in image_dirs:
+        if not directory.exists():
+            continue
+        for file_path in directory.iterdir():
+            if not file_path.is_file():
+                continue
+            if file_path.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
+                continue
+            if _normalize_name(file_path.stem) == target:
+                return str(file_path)
+
+    return None
+
+
+def _normalize_name(value: str) -> str:
+    return "".join(ch for ch in value.lower() if ch.isalnum())

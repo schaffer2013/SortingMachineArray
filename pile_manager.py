@@ -13,8 +13,6 @@ class Step(Enum):
     GATHER = 3,
     FINISH = 4
 
-
-
 class PileManager:
     def __init__(self, config, simulated = False, simulatedPiles = None):
         self.config = config

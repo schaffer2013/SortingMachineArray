@@ -1,7 +1,7 @@
 {
   "cards": [
-    {"name": "Sol Ring", "rarity": "UNCOMMON", "card_type": "artifact", "color": "colorless", "sort_rank": 1, "images": []},
-    {"name": "Counterspell", "rarity": "COMMON", "card_type": "instant", "color": "blue", "sort_rank": 2, "images": []},
-    {"name": "Swamp", "rarity": "COMMON", "card_type": "basic land", "color": "black", "sort_rank": 3, "images": []}
+    {"name": "Aberrant", "rarity": "OTHER", "card_type": "other", "color": "default", "sort_rank": 1, "images": ["SimulatedCardImages/Aberrant.jpg"]},
+    {"name": "Abandoned Sarcophagus", "rarity": "OTHER", "card_type": "other", "color": "default", "sort_rank": 2, "images": ["SimulatedCardImages/Abandoned_Sarcophagus.jpg"]},
+    {"name": "Abandon the Post", "rarity": "OTHER", "card_type": "other", "color": "default", "sort_rank": 3, "images": ["SimulatedCardImages/Abandon_the_Post.jpg"]}
   ]
 }
