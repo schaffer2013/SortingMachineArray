@@ -47,6 +47,15 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 - Run all tests:
 	- `pytest -q`
 
+## Sim image sync
+
+- Log extracted card names and rebuild missing simulation images only when needed:
+	- `python scripts/sync_simulated_images.py`
+- Dry-run without downloading:
+	- `python scripts/sync_simulated_images.py --no-fetch`
+- The script writes a card log to `data/logs/simulated_cards.log`.
+- Sim runs call this sync automatically before bootstrapping (`SORTER_AUTO_IMAGE_SYNC=1`).
+
 ## Legacy to new module mapping
 
 - `card.py` -> `src/sorter/domain/models.py` (+ `scripts/build_card_catalog.py`)

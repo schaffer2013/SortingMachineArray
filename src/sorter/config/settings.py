@@ -15,6 +15,8 @@ class AppSettings:
     sqlite_path: Path
     calibration_path: Path
     slow_ms: int = 0
+    auto_image_sync: bool = True
+    project_root: Path | None = None
 
     @staticmethod
     def from_env(project_root: Path | None = None) -> "AppSettings":
@@ -31,6 +33,7 @@ class AppSettings:
         sqlite_path = root / _setting("SORTER_RUN_DB", "data/runs.sqlite3")
         calibration_path = root / _setting("SORTER_CALIBRATION", "config/calibration.json")
         slow_ms = int(_setting("SORTER_SLOW_MS", "0"))
+        auto_image_sync = _setting("SORTER_AUTO_IMAGE_SYNC", "1") not in {"0", "false", "False"}
         return AppSettings(
             mode=mode,
             random_seed=seed,
@@ -39,6 +42,8 @@ class AppSettings:
             sqlite_path=sqlite_path,
             calibration_path=calibration_path,
             slow_ms=slow_ms,
+            auto_image_sync=auto_image_sync,
+            project_root=root,
         )
 
 

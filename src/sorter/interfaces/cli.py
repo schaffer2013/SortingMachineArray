@@ -23,6 +23,8 @@ def main() -> int:
             sqlite_path=settings.sqlite_path,
             calibration_path=settings.calibration_path,
             slow_ms=settings.slow_ms,
+            auto_image_sync=settings.auto_image_sync,
+            project_root=settings.project_root,
         )
 
     if settings.mode != "sim":
