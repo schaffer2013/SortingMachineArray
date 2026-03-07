@@ -14,6 +14,7 @@ def test_small_stack_runs_headless(tmp_path):
         card_catalog_path=root / "data/card_catalog/cards.json",
         sqlite_path=tmp_path / "runs.sqlite3",
         calibration_path=root / "config/calibration.json",
+        sort_policy_path=root / "config/sort_policies/default_color_then_alpha.json",
     )
     orchestrator = build_sim_orchestrator(settings)
     calibration = CalibrationProfile.from_file(settings.calibration_path)

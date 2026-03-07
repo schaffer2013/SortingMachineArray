@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "policy_name": "over_5_then_default",
+  "criteria": [
+    {
+      "kind": "threshold_bucket",
+      "field": "market_price_usd",
+      "buckets": [
+        { "label": "over_5", "gte": 5.0 },
+        { "label": "under_5", "lt": 5.0 }
+      ],
+      "order": ["over_5", "under_5"],
+      "missing_bucket": "under_5"
+    },
+    {
+      "kind": "category_rank",
+      "field": "primary_bucket",
+      "order": [
+        "white",
+        "blue",
+        "black",
+        "red",
+        "green",
+        "multicolor",
+        "colorless",
+        "nonbasic_land",
+        "basic_land"
+      ]
+    },
+    {
+      "kind": "alpha",
+      "field": "name"
+    }
+  ]
+}

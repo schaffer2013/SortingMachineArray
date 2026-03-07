@@ -4,7 +4,7 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 
 ## What is implemented
 
-- `src/sorter/domain`: pure data/state, command/event models, sort policy, workflow state.
+- `src/sorter/domain`: pure data/state, command/event models, policy-config ranking service, workflow state.
 - `src/sorter/application`: orchestrator + use cases for planning/executing/verifying atomic moves.
 - `src/sorter/ports`: motion, camera, vacuum, lights, recognizer, card catalog, run store.
 - `src/sorter/adapters/sim`: deterministic `SimWorld` and simulation adapters.
@@ -13,6 +13,7 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 - `src/sorter/interfaces`: CLI and thin Pygame debug shell.
 - `scenarios/fixtures`: deterministic simulation fixtures.
 - `data/card_catalog/cards.json`: local runtime card catalog.
+- `config/sort_policies/*.json`: ranking preference source-of-truth policies.
 - `tests/unit`, `tests/contract`, `tests/integration`: baseline automated tests.
 
 ## Architecture rules
@@ -60,7 +61,7 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 
 - `card.py` -> `src/sorter/domain/models.py` (+ `scripts/build_card_catalog.py`)
 - `pile.py` -> `src/sorter/domain/models.py`
-- `card_sorter.py` -> `src/sorter/domain/sort_policy.py`
+- `card_sorter.py` -> `src/sorter/domain/ranking_service.py` + `src/sorter/domain/policy_evaluator.py`
 - `pile_manager.py` -> `src/sorter/domain/machine_state.py` + application use cases
 - `gantry_system.py` -> `src/sorter/ports/motion.py` + `adapters/sim/sim_motion.py` + `adapters/hardware/marlin_motion.py`
 - `camera_system.py` -> `src/sorter/ports/camera.py` + `adapters/sim/sim_camera.py` + `adapters/hardware/picamera2_camera.py`

@@ -1,0 +1,31 @@
+{
+	"version": 1,
+	"policy_name": "rarity_then_color_then_alpha",
+	"criteria": [
+		{
+			"kind": "category_rank",
+			"field": "rarity",
+			"order": ["mythic", "rare", "uncommon", "common"],
+			"unknown_last": true
+		},
+		{
+			"kind": "category_rank",
+			"field": "primary_bucket",
+			"order": [
+				"white",
+				"blue",
+				"black",
+				"red",
+				"green",
+				"multicolor",
+				"colorless",
+				"nonbasic_land",
+				"basic_land"
+			]
+		},
+		{
+			"kind": "alpha",
+			"field": "name"
+		}
+	]
+}

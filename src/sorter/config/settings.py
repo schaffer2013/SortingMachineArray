@@ -14,6 +14,7 @@ class AppSettings:
     card_catalog_path: Path
     sqlite_path: Path
     calibration_path: Path
+    sort_policy_path: Path
     slow_ms: int = 0
     auto_image_sync: bool = True
     project_root: Path | None = None
@@ -32,6 +33,10 @@ class AppSettings:
         catalog = root / _setting("SORTER_CATALOG", "data/card_catalog/cards.json")
         sqlite_path = root / _setting("SORTER_RUN_DB", "data/runs.sqlite3")
         calibration_path = root / _setting("SORTER_CALIBRATION", "config/calibration.json")
+        sort_policy_path = root / _setting(
+            "SORTER_SORT_POLICY",
+            "config/sort_policies/default_color_then_alpha.json",
+        )
         slow_ms = int(_setting("SORTER_SLOW_MS", "0"))
         auto_image_sync = _setting("SORTER_AUTO_IMAGE_SYNC", "1") not in {"0", "false", "False"}
         return AppSettings(
@@ -41,6 +46,7 @@ class AppSettings:
             card_catalog_path=catalog,
             sqlite_path=sqlite_path,
             calibration_path=calibration_path,
+            sort_policy_path=sort_policy_path,
             slow_ms=slow_ms,
             auto_image_sync=auto_image_sync,
             project_root=root,

@@ -1,7 +1,43 @@
 {
   "cards": [
-    {"name": "Aberrant", "rarity": "OTHER", "card_type": "other", "color": "default", "sort_rank": 1, "images": ["SimulatedCardImages/Aberrant.jpg"]},
-    {"name": "Abandoned Sarcophagus", "rarity": "OTHER", "card_type": "other", "color": "default", "sort_rank": 2, "images": ["SimulatedCardImages/Abandoned_Sarcophagus.jpg"]},
-    {"name": "Abandon the Post", "rarity": "OTHER", "card_type": "other", "color": "default", "sort_rank": 3, "images": ["SimulatedCardImages/Abandon_the_Post.jpg"]}
+    {
+      "name": "Aberrant",
+      "rarity": null,
+      "colors": [],
+      "color_identity": [],
+      "card_types": [],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null,
+      "images": ["SimulatedCardImages/Aberrant.jpg"]
+    },
+    {
+      "name": "Abandoned Sarcophagus",
+      "rarity": null,
+      "colors": [],
+      "color_identity": [],
+      "card_types": [],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null,
+      "images": ["SimulatedCardImages/Abandoned_Sarcophagus.jpg"]
+    },
+    {
+      "name": "Abandon the Post",
+      "rarity": null,
+      "colors": [],
+      "color_identity": [],
+      "card_types": [],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null,
+      "images": ["SimulatedCardImages/Abandon_the_Post.jpg"]
+    }
   ]
 }

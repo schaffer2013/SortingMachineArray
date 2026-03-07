@@ -12,10 +12,15 @@ def build_catalog(image_dir: Path, output_path: Path) -> None:
             cards.append(
                 {
                     "name": name,
-                    "rarity": "OTHER",
-                    "card_type": "other",
-                    "color": "default",
-                    "sort_rank": 99999,
+                    "rarity": None,
+                    "colors": [],
+                    "color_identity": [],
+                    "card_types": [],
+                    "supertypes": [],
+                    "is_land": False,
+                    "is_basic_land": False,
+                    "mana_value": None,
+                    "market_price_usd": None,
                     "images": [str(image)],
                 }
             )

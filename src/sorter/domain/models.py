@@ -6,58 +6,26 @@ from typing import Literal
 from sorter.domain.enums import PileRole
 
 
-RARITY_ORDER = {
-    "MYTHIC": 1,
-    "RARE": 1,
-    "OTHER": 3,
-}
-
-TYPE_ORDER = {
-    "creature": 1,
-    "artifact": 1,
-    "battle": 1,
-    "instant": 1,
-    "sorcery": 1,
-    "planeswalker": 1,
-    "enchantment": 1,
-    "non-basic land": 8,
-    "basic land": 9,
-    "other": 10,
-}
-
-COLOR_ORDER = {
-    "white": 1,
-    "blue": 2,
-    "black": 3,
-    "red": 4,
-    "green": 5,
-    "multi": 6,
-    "colorless": 7,
-    "default": 8,
-}
-
-
 @dataclass(frozen=True)
 class CardMeta:
     name: str
-    rarity: str = "OTHER"
-    card_type: str = "other"
-    color: str = "default"
-    sort_rank: int = 99999
+    rarity: str | None = None
+    colors: list[str] = field(default_factory=list)
+    color_identity: list[str] = field(default_factory=list)
+    card_types: list[str] = field(default_factory=list)
+    supertypes: list[str] = field(default_factory=list)
+    is_land: bool = False
+    is_basic_land: bool = False
+    mana_value: float | int | None = None
+    market_price_usd: float | None = None
+    # Legacy migration field: this is not an authoritative rank source.
+    sort_rank: int | None = None
 
 
 @dataclass(frozen=True)
 class CardInstance:
     card_id: str
     meta: CardMeta
-
-    def sort_key(self) -> tuple[int, int, int, str]:
-        return (
-            RARITY_ORDER.get(self.meta.rarity, RARITY_ORDER["OTHER"]),
-            TYPE_ORDER.get(self.meta.card_type, TYPE_ORDER["other"]),
-            COLOR_ORDER.get(self.meta.color, COLOR_ORDER["default"]),
-            self.meta.name,
-        )
 
 
 @dataclass(frozen=True)

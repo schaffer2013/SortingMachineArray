@@ -6,6 +6,7 @@ import json
 import random
 from uuid import uuid4
 
+from sorter.domain.ranking_service import CompiledRanking
 from sorter.domain.models import (
     CardMeta,
     MachinePose,
@@ -25,6 +26,7 @@ class SimWorld:
     card_by_id: dict[str, CardMeta]
     image_by_card_id: dict[str, str | None]
     coords: dict[str, tuple[float, float]]
+    compiled_ranking: CompiledRanking | None = None
     held_card_id: str | None = None
 
     @staticmethod
@@ -80,9 +82,27 @@ class SimWorld:
         )
 
     def rank_lookup(self) -> dict[str, int]:
-        card_names = sorted({meta.name for meta in self.card_by_id.values()})
-        rank_name = {name: idx + 1 for idx, name in enumerate(card_names)}
-        return {card_id: rank_name[meta.name] for card_id, meta in self.card_by_id.items()}
+        if self.compiled_ranking is None:
+            raise RuntimeError("SimWorld rank lookup requested before compiled ranking was injected")
+        return self.compiled_ranking.card_id_to_rank
+
+    def set_compiled_ranking(self, compiled_ranking: CompiledRanking) -> None:
+        self.compiled_ranking = compiled_ranking
+
+    def explain_card(self, card_id_or_name: str) -> dict | None:
+        if self.compiled_ranking is None:
+            return None
+        explanation = self.compiled_ranking.explain_card(card_id_or_name)
+        if explanation is None:
+            return None
+        return {
+            "card_id": explanation.card_id,
+            "card_name": explanation.card_name,
+            "factual_fields": explanation.factual_fields,
+            "derived_fields": explanation.derived_fields,
+            "sort_key": explanation.sort_key,
+            "ordinal_rank": explanation.ordinal_rank,
+        }
 
     def move_to_pile(self, pile_id: PileId) -> None:
         x_mm, y_mm = self.coords.get(pile_id.as_key(), (0.0, 0.0))

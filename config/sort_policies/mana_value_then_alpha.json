@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "policy_name": "mana_value_then_alpha",
+  "criteria": [
+    {
+      "kind": "numeric",
+      "field": "mana_value",
+      "direction": "asc",
+      "missing_last": true
+    },
+    {
+      "kind": "alpha",
+      "field": "name"
+    }
+  ]
+}

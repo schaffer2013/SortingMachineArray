@@ -22,6 +22,7 @@ def main() -> int:
             card_catalog_path=settings.card_catalog_path,
             sqlite_path=settings.sqlite_path,
             calibration_path=settings.calibration_path,
+            sort_policy_path=settings.sort_policy_path,
             slow_ms=settings.slow_ms,
             auto_image_sync=settings.auto_image_sync,
             project_root=settings.project_root,
