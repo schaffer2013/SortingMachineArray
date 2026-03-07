@@ -90,10 +90,7 @@ def _download_missing_cards(card_names: list[str], image_dir: Path) -> tuple[int
     for card_name in card_names:
         try:
             card_data = scrython.cards.Named(fuzzy=card_name)
-            image_url = None
-            image_uris = card_data.image_uris()
-            if isinstance(image_uris, dict):
-                image_url = image_uris.get("normal") or image_uris.get("large")
+            image_url = _extract_image_url(card_data)
             if image_url is None:
                 failed += 1
                 continue
@@ -108,6 +105,41 @@ def _download_missing_cards(card_names: list[str], image_dir: Path) -> tuple[int
             failed += 1
 
     return downloaded, failed
+
+
+def _extract_image_url(card_data: object) -> str | None:
+    # Scryfall may provide images on the card itself or in card_faces for DFC cards.
+    image_uris = None
+    try:
+        image_uris = card_data.image_uris()  # type: ignore[attr-defined]
+    except Exception:
+        image_uris = None
+
+    if isinstance(image_uris, dict):
+        image_url = image_uris.get("normal") or image_uris.get("large")
+        if image_url:
+            return str(image_url)
+
+    raw_payload = getattr(card_data, "scryfallJson", None)
+    if isinstance(raw_payload, dict):
+        root_uris = raw_payload.get("image_uris")
+        if isinstance(root_uris, dict):
+            image_url = root_uris.get("normal") or root_uris.get("large")
+            if image_url:
+                return str(image_url)
+
+        faces = raw_payload.get("card_faces")
+        if isinstance(faces, list):
+            for face in faces:
+                if not isinstance(face, dict):
+                    continue
+                face_uris = face.get("image_uris")
+                if not isinstance(face_uris, dict):
+                    continue
+                image_url = face_uris.get("normal") or face_uris.get("large")
+                if image_url:
+                    return str(image_url)
+    return None
 
 
 def _write_log(log_path: Path, cards: list[str], missing: list[str]) -> None:

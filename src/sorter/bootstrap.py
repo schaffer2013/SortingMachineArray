@@ -6,6 +6,8 @@ from sorter.adapters.sim.sim_vacuum import SimVacuumAdapter
 from sorter.adapters.sim.sim_lights import SimLightsAdapter
 from sorter.adapters.sim.sim_recognizer import SimRecognizerAdapter
 from sorter.adapters.persistence.file_card_catalog import FileCardCatalog
+from sorter.adapters.persistence.sim_card_list_loader import load_expand_shuffle_instance_ids
+from sorter.adapters.persistence.sim_fixture_builder import build_runtime_fixture
 from sorter.adapters.persistence.sim_image_sync import sync_simulated_images
 from sorter.adapters.persistence.sqlite_run_store import SQLiteRunStore
 from sorter.application.orchestrator import Orchestrator
@@ -14,11 +16,13 @@ from sorter.domain.sort_policy_config import load_sort_policy_file
 
 
 def build_sim_orchestrator(settings: AppSettings) -> Orchestrator:
+    root = settings.project_root or settings.scenario_fixture.parents[2]
+    runtime_fixture_path = _resolve_runtime_fixture(settings)
+
     if settings.auto_image_sync:
-        root = settings.project_root or settings.scenario_fixture.parents[2]
         summary = sync_simulated_images(
             project_root=root,
-            fixture_path=settings.scenario_fixture,
+            fixture_path=runtime_fixture_path,
             image_dir=root / "SimulatedCardImages",
             log_path=root / "data" / "logs" / "simulated_cards.log",
             pile_manager_path=root / "pile_manager.py",
@@ -30,7 +34,7 @@ def build_sim_orchestrator(settings: AppSettings) -> Orchestrator:
                 f"Image sync incomplete: {summary.missing_after} card images still missing. See {summary.log_path}"
             )
 
-    world = SimWorld.from_fixture(settings.scenario_fixture, settings.random_seed)
+    world = SimWorld.from_fixture(runtime_fixture_path, settings.random_seed)
     catalog = FileCardCatalog(settings.card_catalog_path)
     for card_id, card_meta in list(world.card_by_id.items()):
         catalog_meta = catalog.get_card_meta(card_meta.name)
@@ -51,4 +55,18 @@ def build_sim_orchestrator(settings: AppSettings) -> Orchestrator:
         catalog=catalog,
         run_store=run_store,
         world=world,
+    )
+
+
+def _resolve_runtime_fixture(settings: AppSettings):
+    if settings.sim_card_list_path is None:
+        return settings.scenario_fixture
+    if settings.generated_runtime_fixture_path is None:
+        return settings.scenario_fixture
+
+    _, shuffled_cards = load_expand_shuffle_instance_ids(settings.sim_card_list_path)
+    return build_runtime_fixture(
+        base_fixture_path=settings.scenario_fixture,
+        shuffled_card_instance_ids=shuffled_cards,
+        output_fixture_path=settings.generated_runtime_fixture_path,
     )

@@ -57,6 +57,16 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 - The script writes a card log to `data/logs/simulated_cards.log`.
 - Sim runs call this sync automatically before bootstrapping (`SORTER_AUTO_IMAGE_SYNC=1`).
 
+## Configurable sim card list
+
+- Card list source-of-truth: `config/sim_card_lists/default_cards.json`
+- Runtime derived fixture: `data/generated/runtime_fixture.json`
+- Defaults are controlled by:
+	- `SORTER_SIM_CARD_LIST`
+	- `SORTER_RUNTIME_FIXTURE`
+- To disable this flow and use `SORTER_SCENARIO` directly, set:
+	- `SORTER_SIM_CARD_LIST=none`
+
 ## Legacy to new module mapping
 
 - `card.py` -> `src/sorter/domain/models.py` (+ `scripts/build_card_catalog.py`)

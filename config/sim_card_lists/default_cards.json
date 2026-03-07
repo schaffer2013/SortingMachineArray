@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "list_name": "default_demo_cards",
+  "description": "Seeded demo list for sim visuals",
+  "random_seed": 42,
+  "shuffle": true,
+  "entries": [
+    {"name": "Lightning Bolt", "count": 4},
+    {"name": "Counterspell", "count": 4},
+    {"name": "Llanowar Elves", "count": 4},
+    {"name": "Doom Blade", "count": 4},
+    {"name": "Pacifism", "count": 4},
+    {"name": "Arcane Signet", "count": 4},
+    {"name": "Evolving Wilds", "count": 4},
+    {"name": "Island", "count": 8},
+    {"name": "Mountain", "count": 8}
+  ]
+}

@@ -15,6 +15,8 @@ class AppSettings:
     sqlite_path: Path
     calibration_path: Path
     sort_policy_path: Path
+    sim_card_list_path: Path | None = None
+    generated_runtime_fixture_path: Path | None = None
     slow_ms: int = 0
     auto_image_sync: bool = True
     project_root: Path | None = None
@@ -37,6 +39,9 @@ class AppSettings:
             "SORTER_SORT_POLICY",
             "config/sort_policies/default_color_then_alpha.json",
         )
+        sim_card_list_raw = _setting("SORTER_SIM_CARD_LIST", "config/sim_card_lists/default_cards.json")
+        sim_card_list_path = None if sim_card_list_raw.lower() in {"", "none", "null"} else (root / sim_card_list_raw)
+        runtime_fixture_path = root / _setting("SORTER_RUNTIME_FIXTURE", "data/generated/runtime_fixture.json")
         slow_ms = int(_setting("SORTER_SLOW_MS", "0"))
         auto_image_sync = _setting("SORTER_AUTO_IMAGE_SYNC", "1") not in {"0", "false", "False"}
         return AppSettings(
@@ -47,6 +52,8 @@ class AppSettings:
             sqlite_path=sqlite_path,
             calibration_path=calibration_path,
             sort_policy_path=sort_policy_path,
+            sim_card_list_path=sim_card_list_path,
+            generated_runtime_fixture_path=runtime_fixture_path,
             slow_ms=slow_ms,
             auto_image_sync=auto_image_sync,
             project_root=root,
