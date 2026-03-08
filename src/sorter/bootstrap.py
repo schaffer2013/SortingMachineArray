@@ -17,7 +17,8 @@ from sorter.domain.sort_policy_config import load_sort_policy_file
 
 def build_sim_orchestrator(settings: AppSettings) -> Orchestrator:
     root = settings.project_root or settings.scenario_fixture.parents[2]
-    runtime_fixture_path = _resolve_runtime_fixture(settings)
+    catalog = FileCardCatalog(settings.card_catalog_path)
+    runtime_fixture_path = _resolve_runtime_fixture(settings, catalog)
 
     if settings.auto_image_sync:
         summary = sync_simulated_images(
@@ -35,7 +36,6 @@ def build_sim_orchestrator(settings: AppSettings) -> Orchestrator:
             )
 
     world = SimWorld.from_fixture(runtime_fixture_path, settings.random_seed)
-    catalog = FileCardCatalog(settings.card_catalog_path)
     for card_id, card_meta in list(world.card_by_id.items()):
         catalog_meta = catalog.get_card_meta(card_meta.name)
         if catalog_meta is not None:
@@ -58,15 +58,26 @@ def build_sim_orchestrator(settings: AppSettings) -> Orchestrator:
     )
 
 
-def _resolve_runtime_fixture(settings: AppSettings):
+def _resolve_runtime_fixture(settings: AppSettings, catalog: FileCardCatalog):
     if settings.sim_card_list_path is None:
         return settings.scenario_fixture
     if settings.generated_runtime_fixture_path is None:
         return settings.scenario_fixture
 
-    _, shuffled_cards = load_expand_shuffle_instance_ids(settings.sim_card_list_path)
+    suffix_map = {
+        card.name: (card.oracle_id or _fallback_identity_suffix(card.name))
+        for card in catalog.all_cards()
+    }
+    _, shuffled_cards = load_expand_shuffle_instance_ids(
+        settings.sim_card_list_path,
+        id_suffix_by_name=suffix_map,
+    )
     return build_runtime_fixture(
         base_fixture_path=settings.scenario_fixture,
         shuffled_card_instance_ids=shuffled_cards,
         output_fixture_path=settings.generated_runtime_fixture_path,
     )
+
+
+def _fallback_identity_suffix(name: str) -> str:
+    return "".join(ch for ch in name.strip().lower() if ch.isalnum()) or "unknown"

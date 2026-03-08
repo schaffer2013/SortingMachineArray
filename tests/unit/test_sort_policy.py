@@ -71,3 +71,17 @@ def test_explain_card_returns_facts_derived_key_and_rank():
     assert explanation.derived_fields["primary_bucket"] == "white"
     assert isinstance(explanation.sort_key, tuple)
     assert explanation.ordinal_rank == 1
+
+
+def test_equal_sort_keys_share_the_same_rank():
+    root = Path(__file__).resolve().parents[2]
+    policy = load_sort_policy_file(root / "config/sort_policies/default_color_then_alpha.json")
+    ranking = RankingService(policy).compile(
+        {
+            "dup_a": CardMeta(name="Lightning Bolt"),
+            "dup_b": CardMeta(name="Lightning Bolt"),
+            "other": CardMeta(name="Counterspell"),
+        }
+    )
+
+    assert ranking.card_id_to_rank["dup_a"] == ranking.card_id_to_rank["dup_b"]

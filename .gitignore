@@ -166,3 +166,4 @@ data/logs/
 card_cache.json
 card_data.json
 data/runs.sqlite3
+data/runs.sqlite3

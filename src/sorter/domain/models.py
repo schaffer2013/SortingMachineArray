@@ -10,6 +10,7 @@ from sorter.domain.enums import PileRole
 @dataclass(frozen=True)
 class CardMeta:
     name: str
+    oracle_id: str | None = None
     rarity: str | None = None
     colors: list[str] = field(default_factory=list)
     color_identity: list[str] = field(default_factory=list)

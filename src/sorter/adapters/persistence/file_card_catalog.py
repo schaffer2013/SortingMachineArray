@@ -58,6 +58,11 @@ def _normalize_card_meta(item: dict) -> CardMeta:
 
     return CardMeta(
         name=str(item["name"]),
+        oracle_id=_normalize_optional_text(
+            item.get("oracle_id")
+            or item.get("scryfall_oracle_id")
+            or item.get("oracleId")
+        ),
         rarity=_normalize_optional_text(item.get("rarity")),
         colors=colors,
         color_identity=color_identity,

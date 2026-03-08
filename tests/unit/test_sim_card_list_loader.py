@@ -43,7 +43,7 @@ def test_expansion_and_shuffle_is_deterministic_with_seed_42(tmp_path: Path) -> 
     _, first = load_expand_shuffle_instance_ids(card_list_path)
     _, second = load_expand_shuffle_instance_ids(card_list_path)
 
-    expected = ["Alpha#1", "Alpha#2", "Beta#1", "Beta#2"]
+    expected = ["Alpha#alpha", "Alpha#alpha", "Beta#beta", "Beta#beta"]
     random.Random(42).shuffle(expected)
     assert first == expected
     assert second == expected
@@ -65,7 +65,29 @@ def test_expansion_without_shuffle_preserves_order() -> None:
 
     expanded = expand_and_shuffle_instance_ids(config)
 
-    assert expanded == ["Gamma#1", "Gamma#2", "Delta#1"]
+    assert expanded == ["Gamma#gamma", "Gamma#gamma", "Delta#delta"]
+
+
+def test_expansion_uses_supplied_identity_suffix_map() -> None:
+    config_payload = {
+        "version": 1,
+        "list_name": "oracle",
+        "description": "oracle ids",
+        "random_seed": 42,
+        "shuffle": False,
+        "entries": [
+            {"name": "Gamma", "count": 2},
+            {"name": "Delta", "count": 1},
+        ],
+    }
+    config = load_sim_card_list_from_payload(config_payload)
+
+    expanded = expand_and_shuffle_instance_ids(
+        config,
+        id_suffix_by_name={"Gamma": "oracle-gamma", "Delta": "oracle-delta"},
+    )
+
+    assert expanded == ["Gamma#oracle-gamma", "Gamma#oracle-gamma", "Delta#oracle-delta"]
 
 
 def load_sim_card_list_from_payload(payload: dict):

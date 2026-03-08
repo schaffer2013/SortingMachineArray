@@ -177,11 +177,12 @@ def test_rank_lookup_drives_scatter_and_gather_top_of_pile_choices():
     }
 
     workflow = LegacyWorkflowState(snapshot)
+    workflow._set_pile_priorities()
     workflow.step = LegacyStep.SCATTER
     scatter_move = workflow.plan_next(rank_lookup)
     assert scatter_move is not None
     assert scatter_move.from_pile == feeder_b.pile_id
-    assert scatter_move.to_pile == sorting_a.pile_id
+    assert scatter_move.to_pile == sorting_b.pile_id
 
     workflow.step = LegacyStep.GATHER
     gather_move = workflow.plan_next(rank_lookup)

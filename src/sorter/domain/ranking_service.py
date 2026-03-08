@@ -53,10 +53,15 @@ class RankingService:
             card_id_to_sort_key.keys(),
             key=lambda card_id: (card_id_to_sort_key[card_id], card_id),
         )
-        card_id_to_rank = {
-            card_id: index + 1
-            for index, card_id in enumerate(ordered_ids)
-        }
+        card_id_to_rank: dict[str, int] = {}
+        current_rank = 0
+        last_sort_key: tuple | None = None
+        for card_id in ordered_ids:
+            sort_key = card_id_to_sort_key[card_id]
+            if sort_key != last_sort_key:
+                current_rank += 1
+                last_sort_key = sort_key
+            card_id_to_rank[card_id] = current_rank
 
         explain_by_card_id = {
             card_id: CardRankingExplanation(
@@ -80,6 +85,7 @@ class RankingService:
 def _factual_fields(card_meta: CardMeta) -> dict[str, object]:
     return {
         "name": card_meta.name,
+        "oracle_id": card_meta.oracle_id,
         "rarity": card_meta.rarity,
         "colors": list(card_meta.colors),
         "color_identity": list(card_meta.color_identity),

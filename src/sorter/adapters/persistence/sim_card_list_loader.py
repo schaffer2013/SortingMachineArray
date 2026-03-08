@@ -56,11 +56,17 @@ def load_sim_card_list(path: Path) -> SimCardListConfig:
     return _validate_and_parse(data)
 
 
-def expand_and_shuffle_instance_ids(config: SimCardListConfig) -> list[str]:
+def expand_and_shuffle_instance_ids(
+    config: SimCardListConfig,
+    id_suffix_by_name: dict[str, str] | None = None,
+) -> list[str]:
     expanded: list[str] = []
     for entry in config.entries:
-        for index in range(1, entry.count + 1):
-            expanded.append(f"{entry.name}#{index}")
+        suffix = None if id_suffix_by_name is None else id_suffix_by_name.get(entry.name)
+        if not suffix:
+            suffix = _identity_suffix(entry.name)
+        for _ in range(entry.count):
+            expanded.append(f"{entry.name}#{suffix}")
 
     if config.shuffle:
         rng = random.Random(config.random_seed)
@@ -68,9 +74,17 @@ def expand_and_shuffle_instance_ids(config: SimCardListConfig) -> list[str]:
     return expanded
 
 
-def load_expand_shuffle_instance_ids(path: Path) -> tuple[SimCardListConfig, list[str]]:
+def load_expand_shuffle_instance_ids(
+    path: Path,
+    id_suffix_by_name: dict[str, str] | None = None,
+) -> tuple[SimCardListConfig, list[str]]:
     config = load_sim_card_list(path)
-    return config, expand_and_shuffle_instance_ids(config)
+    return config, expand_and_shuffle_instance_ids(config, id_suffix_by_name=id_suffix_by_name)
+
+
+def _identity_suffix(name: str) -> str:
+    # Fallback when no oracle id is supplied externally: stable token by name.
+    return "".join(ch for ch in name.strip().lower() if ch.isalnum()) or "unknown"
 
 
 def _validate_and_parse(data: dict) -> SimCardListConfig:

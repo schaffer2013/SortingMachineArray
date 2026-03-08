@@ -152,32 +152,19 @@ class LegacyWorkflowState:
         return rank_lookup.get(top_card, 10_000_000)
 
     def _find_scatter(self, rank_lookup: dict[str, int]):
+        if self.priority_sorting is None:
+            raise RuntimeError("Workflow scatter planning requested before pile priorities were set")
         feeder = [pile for pile in self._piles_by_role(PileRole.FEEDER) if not pile.is_empty()]
         if not feeder:
             self._set_step(LegacyStep.GATHER, "all feeder piles empty during scatter")
             return None
         from_pile = min(feeder, key=lambda pile: self._top_rank(pile, rank_lookup))
         from_rank = self._top_rank(from_pile, rank_lookup)
-        candidates = [
-            pile
-            for pile in self._piles_by_role(PileRole.SORTING)
-            if not pile.is_full()
-            and (pile.is_empty() or self._top_rank(pile, rank_lookup) <= from_rank)
-        ]
         target = None
-        if candidates:
-            # Prefer exact top-rank matches first, then the closest lower rank,
-            # then empty piles, so duplicates naturally stack together.
-            target = min(
-                candidates,
-                key=lambda pile: (
-                    0 if (not pile.is_empty() and self._top_rank(pile, rank_lookup) == from_rank) else 1,
-                    1 if pile.is_empty() else 0,
-                    abs(from_rank - self._top_rank(pile, rank_lookup)) if not pile.is_empty() else 10_000_000,
-                    pile.pile_id.x_index,
-                    pile.pile_id.y_index,
-                ),
-            )
+        for sorting_pile in self.priority_sorting:
+            if sorting_pile.discovered and not sorting_pile.is_full() and self._top_rank(sorting_pile, rank_lookup) >= from_rank:
+                target = sorting_pile
+                break
         if target:
             logger.debug(
                 "planned SCATTER move: from=%s rank=%s to=%s",
@@ -191,19 +178,26 @@ class LegacyWorkflowState:
         return None
 
     def _find_gather(self, rank_lookup: dict[str, int]):
+        if self.priority_feeder_collection_a is None or self.priority_feeder_collection_b is None:
+            raise RuntimeError("Workflow gather planning requested before pile priorities were set")
         sorting_non_empty = [pile for pile in self._piles_by_role(PileRole.SORTING) if not pile.is_empty()]
         if self._all_sorted(self.snapshot.piles.values(), rank_lookup):
             self._set_step(LegacyStep.FINISH, "collection piles fully sorted")
             return None
         if not sorting_non_empty:
-            self._swap_collection_and_feeder_roles()
+            feed_empty = all(pile.is_empty() for pile in self._piles_by_role(PileRole.FEEDER))
+            if feed_empty:
+                self._swap_collection_and_feeder_roles()
             self._set_step(LegacyStep.SCATTER, "all sorting piles empty during gather")
             return None
         from_pile = max(sorting_non_empty, key=lambda pile: self._top_rank(pile, rank_lookup))
+        # TODO: If we have multiple collection piles, we may want to swap the priority of them to better riffle sort them.
+        # Effectively, this would gather into a rotating priority of collection piles, to better interleave cards when gathering from multiple sorting piles with different ranks at the top.
+        priority_collection = self.priority_feeder_collection_a if self.priority_feeder_collection_a[0].role == PileRole.COLLECTION else self.priority_feeder_collection_b
         to_pile = next(
             (
                 pile
-                for pile in self._piles_by_role(PileRole.COLLECTION)
+                for pile in priority_collection
                 if pile.discovered and not pile.is_full()
             ),
             None,
