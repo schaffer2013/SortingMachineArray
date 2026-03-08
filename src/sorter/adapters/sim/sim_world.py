@@ -67,6 +67,8 @@ class SimWorld:
                 pile_id=pile_id,
                 role=role,
                 capacity=int(pile_cfg.get("capacity", 85)),
+                x_mm=coords[key][0],
+                y_mm=coords[key][1],
                 card_stack=stack,
                 discovered=bool(pile_cfg.get("discovered", role != PileRole.FEEDER)),
             )
@@ -105,7 +107,11 @@ class SimWorld:
         }
 
     def move_to_pile(self, pile_id: PileId) -> None:
-        x_mm, y_mm = self.coords.get(pile_id.as_key(), (0.0, 0.0))
+        pile = self.snapshot.get_pile(pile_id)
+        if pile is not None:
+            x_mm, y_mm = pile.x_mm, pile.y_mm
+        else:
+            x_mm, y_mm = self.coords.get(pile_id.as_key(), (0.0, 0.0))
         self.snapshot.pose.x_mm = x_mm
         self.snapshot.pose.y_mm = y_mm
 

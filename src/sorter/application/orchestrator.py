@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, UTC
+import logging
 import uuid
-from typing import Callable
+from typing import Any, Callable
 import time
 
 from sorter.application.use_cases.execute_move import build_pick_place_sequence
@@ -21,6 +22,9 @@ from sorter.ports.card_catalog import CardCatalogPort
 from sorter.ports.run_store import RunStorePort
 
 
+logger = logging.getLogger(__name__)
+
+
 @dataclass
 class Orchestrator:
     motion: MotionPort
@@ -30,7 +34,7 @@ class Orchestrator:
     recognizer: RecognizerPort
     catalog: CardCatalogPort
     run_store: RunStorePort
-    world: any
+    world: Any
 
     def _run_id(self) -> str:
         return f"run-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:8]}"
@@ -48,23 +52,45 @@ class Orchestrator:
         self.run_store.start_run(run_id, mode="sim", scenario_name=self.world.scenario_name, config_snapshot={"seed": self.world.seed})
         self.lights.set_status("running")
         seq = 0
+        logger.info(
+            "run started: run_id=%s scenario=%s seed=%s",
+            run_id,
+            self.world.scenario_name,
+            self.world.seed,
+        )
 
         while True:
             if should_stop and should_stop():
                 self.lights.set_status("idle")
                 self.run_store.finish_run(run_id, "STOPPED")
+                logger.info("run stopped: run_id=%s seq=%s", run_id, seq)
                 return {"run_id": run_id, "status": "STOPPED", "seq": seq}
 
             next_move = workflow.plan_next(rank_lookup)
             if next_move is None:
                 workflow.update_step()
                 if workflow.step.name == "FINISH":
+                    logger.debug("workflow reached FINISH step: run_id=%s seq=%s", run_id, seq)
                     break
                 next_move = workflow.plan_next(rank_lookup)
                 if next_move is None:
+                    logger.debug(
+                        "no move available after step update: run_id=%s step=%s seq=%s",
+                        run_id,
+                        workflow.step.name,
+                        seq,
+                    )
                     break
 
             seq += 1
+            logger.debug(
+                "executing move: run_id=%s seq=%s step=%s from=%s to=%s",
+                run_id,
+                seq,
+                workflow.step.name,
+                next_move.from_pile.as_key(),
+                next_move.to_pile.as_key(),
+            )
             self._execute_atomic_move(
                 run_id,
                 seq,
@@ -79,6 +105,14 @@ class Orchestrator:
                 "confidence": confidence,
                 "card_name": card_name,
             }))
+            logger.debug(
+                "move verification: run_id=%s seq=%s verified=%s confidence=%.3f card=%s",
+                run_id,
+                seq,
+                verified,
+                confidence,
+                card_name,
+            )
             frame = self.camera.capture_top_card(next_move.from_pile)
             self.run_store.save_frame(
                 run_id,
@@ -93,10 +127,18 @@ class Orchestrator:
             if not verified:
                 self.lights.set_status("fault")
                 self.run_store.finish_run(run_id, "FAULTED")
+                logger.warning(
+                    "run faulted: run_id=%s seq=%s card=%s confidence=%.3f",
+                    run_id,
+                    seq,
+                    card_name,
+                    confidence,
+                )
                 return {"run_id": run_id, "status": "FAULTED", "seq": seq}
 
         self.lights.set_status("idle")
         self.run_store.finish_run(run_id, "COMPLETED")
+        logger.info("run completed: run_id=%s seq=%s", run_id, seq)
         return {"run_id": run_id, "status": "COMPLETED", "seq": seq}
 
     def _execute_atomic_move(
@@ -111,6 +153,13 @@ class Orchestrator:
         commands = build_pick_place_sequence(next_move, calibration)
         for command in commands:
             self.run_store.append_event(run_id, seq, DomainEvent.now("command", {"name": command.name, "payload": command.payload}))
+            logger.debug(
+                "command: run_id=%s seq=%s name=%s payload=%s",
+                run_id,
+                seq,
+                command.name,
+                command.payload,
+            )
             if command.name == "MoveToSourceXY":
                 self.world.move_to_pile(next_move.from_pile)
                 pose = self.motion.get_pose()

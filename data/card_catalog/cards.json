@@ -179,6 +179,21 @@
       "images": [
         "SimulatedCardImages\\Mountain.jpg"
       ]
+    },
+    {
+      "name": "Shivan Dragon",
+      "rarity": null,
+      "colors": [],
+      "color_identity": [],
+      "card_types": [],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null,
+      "images": [
+        "SimulatedCardImages\\Shivan_Dragon.jpg"
+      ]
     }
   ]
 }

@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from sorter.bootstrap import build_sim_orchestrator
 from sorter.config.settings import AppSettings
 from sorter.config.calibration import CalibrationProfile
+from sorter.interfaces.logging_setup import configure_app_logging
 
 
 def main() -> int:
+    project_root = Path(__file__).resolve().parents[3]
+    configure_app_logging(project_root)
+
     parser = argparse.ArgumentParser(description="Card sorter test bed CLI")
     parser.add_argument("--mode", choices=["sim", "hardware"], default="sim")
     parser.add_argument("--slow-ms", type=int, default=None, help="Delay per atomic command in milliseconds")

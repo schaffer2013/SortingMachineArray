@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 from typing import Literal
 
 from sorter.domain.enums import PileRole
@@ -49,6 +50,8 @@ class PileState:
     pile_id: PileId
     role: PileRole
     capacity: int
+    x_mm: float = 0.0
+    y_mm: float = 0.0
     card_stack: list[str] = field(default_factory=list)
     discovered: bool = False
 
@@ -70,6 +73,10 @@ class PileState:
         if self.is_empty():
             return None
         return self.card_stack[0]
+
+    def distance_from(self, other: "PileState") -> float:
+        """Return Euclidean XY distance in millimeters to another pile."""
+        return math.hypot(self.x_mm - other.x_mm, self.y_mm - other.y_mm)
 
 
 @dataclass

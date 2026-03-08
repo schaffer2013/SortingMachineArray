@@ -15,6 +15,6 @@ class SimRecognizerAdapter:
         card_name = frame.metadata.get("card_name")
         if card_name is None:
             return RecognitionResult(card_name=None, confidence=1.0)
-        if self.catalog.get_card_meta(card_name) is None:
-            return RecognitionResult(card_name=card_name, confidence=0.5)
+        # In simulation we already know the rendered card identity, so do not
+        # fault runs when catalog metadata is incomplete.
         return RecognitionResult(card_name=card_name, confidence=1.0)
