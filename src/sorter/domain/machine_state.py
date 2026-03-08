@@ -252,7 +252,7 @@ class LegacyWorkflowState:
         self.sorted_feeder_collection_a = sorted(self.priority_feeder_collection_a, key=lambda pile: temp_priorities[pile.pile_id.as_key()])
         self.sorted_feeder_collection_b = sorted(self.priority_feeder_collection_b, key=lambda pile: temp_priorities[pile.pile_id.as_key()])
         self.sorted_sorting = sorted(self.priority_sorting, key=lambda pile: temp_priorities[pile.pile_id.as_key()])
-
+        return True
 
     def plan_next(self, rank_lookup: dict[str, int]) -> NextMove | None:
         if self.step == LegacyStep.MOVE_FROM_FEED:
