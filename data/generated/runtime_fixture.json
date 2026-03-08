@@ -1,0 +1,70 @@
+{
+  "name": "runtime_small_stack",
+  "seed": 42,
+  "grid": {
+    "cols": 2,
+    "rows": 2
+  },
+  "piles": [
+    {
+      "pile_id": {
+        "x_index": 0,
+        "y_index": 0
+      },
+      "role": "FEEDER",
+      "cards": [
+        "Dark Ritual#1",
+        "Llanowar Elves#1",
+        "Counterspell#1",
+        "Swords to Plowshares#1",
+        "Serra Angel#1",
+        "Giant Growth#1",
+        "Shivan Dragon#1",
+        "Doom Blade#1",
+        "Lightning Bolt#1",
+        "Lightning Bolt#2"
+      ],
+      "capacity": 85,
+      "discovered": false,
+      "x_mm": 100,
+      "y_mm": 100
+    },
+    {
+      "pile_id": {
+        "x_index": 1,
+        "y_index": 0
+      },
+      "role": "SORTING",
+      "cards": [],
+      "capacity": 85,
+      "discovered": true,
+      "x_mm": 200,
+      "y_mm": 100
+    },
+    {
+      "pile_id": {
+        "x_index": 0,
+        "y_index": 1
+      },
+      "role": "COLLECTION",
+      "cards": [],
+      "capacity": 85,
+      "discovered": true,
+      "x_mm": 100,
+      "y_mm": 200
+    },
+    {
+      "pile_id": {
+        "x_index": 1,
+        "y_index": 1
+      },
+      "role": "SORTING",
+      "cards": [],
+      "capacity": 85,
+      "discovered": true,
+      "x_mm": 200,
+      "y_mm": 200
+    }
+  ],
+  "faults": []
+}

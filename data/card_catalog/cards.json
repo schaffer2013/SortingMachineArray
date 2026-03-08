@@ -11,7 +11,9 @@
       "is_basic_land": false,
       "mana_value": null,
       "market_price_usd": null,
-      "images": ["SimulatedCardImages/Aberrant.jpg"]
+      "images": [
+        "SimulatedCardImages/Aberrant.jpg"
+      ]
     },
     {
       "name": "Abandoned Sarcophagus",
@@ -24,7 +26,9 @@
       "is_basic_land": false,
       "mana_value": null,
       "market_price_usd": null,
-      "images": ["SimulatedCardImages/Abandoned_Sarcophagus.jpg"]
+      "images": [
+        "SimulatedCardImages/Abandoned_Sarcophagus.jpg"
+      ]
     },
     {
       "name": "Abandon the Post",
@@ -37,7 +41,144 @@
       "is_basic_land": false,
       "mana_value": null,
       "market_price_usd": null,
-      "images": ["SimulatedCardImages/Abandon_the_Post.jpg"]
+      "images": [
+        "SimulatedCardImages/Abandon_the_Post.jpg"
+      ]
+    },
+    {
+      "name": "Lightning Bolt",
+      "rarity": null,
+      "colors": [],
+      "color_identity": [],
+      "card_types": [],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null,
+      "images": [
+        "SimulatedCardImages\\Lightning_Bolt.jpg"
+      ]
+    },
+    {
+      "name": "Counterspell",
+      "rarity": null,
+      "colors": [],
+      "color_identity": [],
+      "card_types": [],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null,
+      "images": [
+        "SimulatedCardImages\\Counterspell.jpg"
+      ]
+    },
+    {
+      "name": "Llanowar Elves",
+      "rarity": null,
+      "colors": [],
+      "color_identity": [],
+      "card_types": [],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null,
+      "images": [
+        "SimulatedCardImages\\Llanowar_Elves.jpg"
+      ]
+    },
+    {
+      "name": "Doom Blade",
+      "rarity": null,
+      "colors": [],
+      "color_identity": [],
+      "card_types": [],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null,
+      "images": [
+        "SimulatedCardImages\\Doom_Blade.jpg"
+      ]
+    },
+    {
+      "name": "Pacifism",
+      "rarity": null,
+      "colors": [],
+      "color_identity": [],
+      "card_types": [],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null,
+      "images": [
+        "SimulatedCardImages\\Pacifism.jpg"
+      ]
+    },
+    {
+      "name": "Arcane Signet",
+      "rarity": null,
+      "colors": [],
+      "color_identity": [],
+      "card_types": [],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null,
+      "images": [
+        "SimulatedCardImages\\Arcane_Signet.jpg"
+      ]
+    },
+    {
+      "name": "Evolving Wilds",
+      "rarity": null,
+      "colors": [],
+      "color_identity": [],
+      "card_types": [],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null,
+      "images": [
+        "SimulatedCardImages\\Evolving_Wilds.jpg"
+      ]
+    },
+    {
+      "name": "Island",
+      "rarity": null,
+      "colors": [],
+      "color_identity": [],
+      "card_types": [],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null,
+      "images": [
+        "SimulatedCardImages\\Island.jpg"
+      ]
+    },
+    {
+      "name": "Mountain",
+      "rarity": null,
+      "colors": [],
+      "color_identity": [],
+      "card_types": [],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null,
+      "images": [
+        "SimulatedCardImages\\Mountain.jpg"
+      ]
     }
   ]
 }

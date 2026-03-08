@@ -108,19 +108,25 @@ def _download_missing_cards(card_names: list[str], image_dir: Path) -> tuple[int
 
 
 def _extract_image_url(card_data: object) -> str | None:
-    # Scryfall may provide images on the card itself or in card_faces for DFC cards.
-    image_uris = None
-    try:
-        image_uris = card_data.image_uris()  # type: ignore[attr-defined]
-    except Exception:
-        image_uris = None
+    # Scryfall data can be exposed as properties (newer scrython) or callables (older scrython).
+    image_uris_attr = getattr(card_data, "image_uris", None)
+    if callable(image_uris_attr):
+        try:
+            image_uris_attr = image_uris_attr()
+        except Exception:
+            image_uris_attr = None
 
-    if isinstance(image_uris, dict):
-        image_url = image_uris.get("normal") or image_uris.get("large")
+    if isinstance(image_uris_attr, dict):
+        image_url = image_uris_attr.get("normal") or image_uris_attr.get("large")
         if image_url:
             return str(image_url)
 
-    raw_payload = getattr(card_data, "scryfallJson", None)
+    # Try common raw payload attribute names used by different scrython versions.
+    raw_payload = (
+        getattr(card_data, "scryfallJson", None)
+        or getattr(card_data, "scryfall_json", None)
+        or getattr(card_data, "_json", None)
+    )
     if isinstance(raw_payload, dict):
         root_uris = raw_payload.get("image_uris")
         if isinstance(root_uris, dict):
@@ -139,6 +145,19 @@ def _extract_image_url(card_data: object) -> str | None:
                 image_url = face_uris.get("normal") or face_uris.get("large")
                 if image_url:
                     return str(image_url)
+
+    # Fallback: look for card_faces directly on the object.
+    faces_attr = getattr(card_data, "card_faces", None)
+    if isinstance(faces_attr, list):
+        for face in faces_attr:
+            if not isinstance(face, dict):
+                continue
+            face_uris = face.get("image_uris")
+            if not isinstance(face_uris, dict):
+                continue
+            image_url = face_uris.get("normal") or face_uris.get("large")
+            if image_url:
+                return str(image_url)
     return None
 
 
