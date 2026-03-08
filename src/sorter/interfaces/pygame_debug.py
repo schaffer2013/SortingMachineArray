@@ -123,6 +123,11 @@ class PygameDebugUI:
         if not snapshot.piles:
             return
 
+        try:
+            rank_lookup = self.orchestrator.world.rank_lookup()
+        except Exception:
+            rank_lookup = {}
+
         self._update_animation_from_pose()
         anim_x_mm, anim_y_mm, anim_z_mm = self._animated_pose_xyz()
 
@@ -153,9 +158,12 @@ class PygameDebugUI:
 
             top_id = pile.top_card_id()
             top_name = "(empty)"
+            top_rank_text = "-"
             if top_id:
                 meta = self.orchestrator.world.card_by_id.get(top_id)
                 top_name = meta.name if meta else top_id
+                rank_value = rank_lookup.get(top_id)
+                top_rank_text = str(rank_value) if rank_value is not None else "-"
             image_path = self.orchestrator.world.top_card_image_path(pile.pile_id)
             if image_path:
                 surface = self._get_image_surface(image_path)
@@ -165,7 +173,7 @@ class PygameDebugUI:
 
             self.window.blit(self.font.render(f"Pile {pile.pile_id.as_key()}", True, (255, 255, 255)), (px + 10, py + 10))
             self.window.blit(self.font.render(pile.role.value, True, (240, 240, 240)), (px + 10, py + 34))
-            self.window.blit(self.font.render(f"Count: {pile.num_cards()}", True, (240, 240, 240)), (px + 10, py + 58))
+            self.window.blit(self.font.render(f"Count: {pile.num_cards()}  Rank: {top_rank_text}", True, (240, 240, 240)), (px + 10, py + 58))
             self.window.blit(self.font.render(f"Top: {top_name[:22]}", True, (240, 240, 240)), (px + 10, py + 82))
 
         self._draw_held_card(anim_x_mm, anim_y_mm, anim_z_mm, area_left, area_top, area_width, area_height)

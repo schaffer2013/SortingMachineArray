@@ -162,7 +162,11 @@ class LegacyWorkflowState:
         from_rank = self._top_rank(from_pile, rank_lookup)
         target = None
         for sorting_pile in self.priority_sorting:
-            if sorting_pile.discovered and not sorting_pile.is_full() and self._top_rank(sorting_pile, rank_lookup) >= from_rank:
+            if (
+                sorting_pile.discovered
+                and not sorting_pile.is_full()
+                and (sorting_pile.is_empty() or self._top_rank(sorting_pile, rank_lookup) <= from_rank)
+            ):
                 target = sorting_pile
                 break
         if target:
