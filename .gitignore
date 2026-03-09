@@ -156,6 +156,7 @@ cython_debug/
 SimulatedCardImages/
 data/card_catalog/images/
 data/logs/
+*.jpg
 
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
@@ -165,5 +166,4 @@ data/logs/
 #.idea/
 card_cache.json
 card_data.json
-data/runs.sqlite3
 data/runs.sqlite3
