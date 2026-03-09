@@ -5,6 +5,8 @@ from pathlib import Path
 import json
 import re
 
+from sorter.adapters.persistence.sim_card_list_loader import load_sim_card_list
+
 
 def _normalize_name(value: str) -> str:
     return "".join(ch for ch in value.lower() if ch.isalnum())
@@ -15,46 +17,69 @@ def _card_name_from_instance(value: str) -> str:
     return base.strip().replace("_", " ")
 
 
-def _extract_cards_from_fixture(fixture_path: Path) -> list[str]:
+@dataclass(frozen=True)
+class CardImageRef:
+    name: str
+    set_id: str | None
+
+
+def _extract_cards_from_fixture(fixture_path: Path) -> list[CardImageRef]:
     if not fixture_path.exists():
         return []
     data = json.loads(fixture_path.read_text(encoding="utf-8"))
-    cards: list[str] = []
+    set_map_raw = data.get("card_set_by_instance_id", {})
+    set_map = {
+        str(card_id): str(set_id).strip().lower()
+        for card_id, set_id in set_map_raw.items()
+        if isinstance(card_id, str) and isinstance(set_id, str) and set_id.strip()
+    }
+    cards: list[CardImageRef] = []
     for pile in data.get("piles", []):
         for raw_card in pile.get("cards", []):
-            cards.append(_card_name_from_instance(str(raw_card)))
+            card_id = str(raw_card)
+            cards.append(CardImageRef(name=_card_name_from_instance(card_id), set_id=set_map.get(card_id)))
     return cards
 
 
-def _extract_cards_from_image_piles(image_piles_path: Path) -> list[str]:
+def _extract_cards_from_image_piles(image_piles_path: Path) -> list[CardImageRef]:
     if not image_piles_path.exists():
         return []
     image_piles = json.loads(image_piles_path.read_text(encoding="utf-8"))
-    cards: list[str] = []
+    cards: list[CardImageRef] = []
     for pile in image_piles:
         for image_name in pile:
             stem = Path(str(image_name)).stem
-            cards.append(stem.replace("_", " "))
+            cards.append(CardImageRef(name=stem.replace("_", " "), set_id=None))
     return cards
 
 
-def _extract_literal_cards_from_python(py_path: Path) -> list[str]:
+def _extract_literal_cards_from_python(py_path: Path) -> list[CardImageRef]:
     if not py_path.exists():
         return []
     text = py_path.read_text(encoding="utf-8")
-    cards: list[str] = []
+    cards: list[CardImageRef] = []
     for match in re.findall(r"['\"]([^'\"]+\.(?:jpg|jpeg|png))['\"]", text, flags=re.IGNORECASE):
-        cards.append(Path(match).stem.replace("_", " "))
+        cards.append(CardImageRef(name=Path(match).stem.replace("_", " "), set_id=None))
     for match in re.findall(r"['\"]([^'\"]+#[0-9]+)['\"]", text):
-        cards.append(_card_name_from_instance(match))
+        cards.append(CardImageRef(name=_card_name_from_instance(match), set_id=None))
     return cards
 
 
-def _unique_preserving_order(values: list[str]) -> list[str]:
-    out: list[str] = []
-    seen: set[str] = set()
+def _extract_cards_from_sim_card_list(sim_card_list_path: Path | None) -> list[CardImageRef]:
+    if sim_card_list_path is None or not sim_card_list_path.exists():
+        return []
+    config = load_sim_card_list(sim_card_list_path)
+    refs: list[CardImageRef] = []
+    for entry in config.entries:
+        refs.append(CardImageRef(name=entry.name, set_id=entry.set_id))
+    return refs
+
+
+def _unique_refs_preserving_order(values: list[CardImageRef]) -> list[CardImageRef]:
+    out: list[CardImageRef] = []
+    seen: set[tuple[str, str]] = set()
     for value in values:
-        key = _normalize_name(value)
+        key = (_normalize_name(value.name), (value.set_id or "").lower())
         if not key or key in seen:
             continue
         seen.add(key)
@@ -62,15 +87,32 @@ def _unique_preserving_order(values: list[str]) -> list[str]:
     return out
 
 
-def _existing_image_index(image_dir: Path) -> dict[str, Path]:
-    index: dict[str, Path] = {}
+def _existing_image_index(image_dir: Path) -> dict[tuple[str, str], Path]:
+    index: dict[tuple[str, str], Path] = {}
     if not image_dir.exists():
         return index
-    for file_path in image_dir.iterdir():
+    for file_path in image_dir.rglob("*"):
+        if not file_path.is_file():
+            continue
         if file_path.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
             continue
-        index[_normalize_name(file_path.stem)] = file_path
+        try:
+            relative_parent = file_path.relative_to(image_dir).parent
+            if relative_parent == Path("."):
+                set_id = "default"
+            else:
+                set_id = relative_parent.parts[0].lower()
+        except ValueError:
+            set_id = "default"
+        index[(set_id, _normalize_name(file_path.stem))] = file_path
     return index
+
+
+def _has_image_for_ref(index: dict[tuple[str, str], Path], card_ref: CardImageRef) -> bool:
+    normalized_name = _normalize_name(card_ref.name)
+    if card_ref.set_id:
+        return (card_ref.set_id.lower(), normalized_name) in index
+    return any(name == normalized_name for _, name in index.keys())
 
 
 def _safe_filename(card_name: str) -> str:
@@ -79,7 +121,7 @@ def _safe_filename(card_name: str) -> str:
     return cleaned
 
 
-def _download_missing_cards(card_names: list[str], image_dir: Path) -> tuple[int, int]:
+def _download_missing_cards(card_refs: list[CardImageRef], image_dir: Path) -> tuple[int, int]:
     import requests
     import scrython
 
@@ -87,9 +129,14 @@ def _download_missing_cards(card_names: list[str], image_dir: Path) -> tuple[int
     downloaded = 0
     failed = 0
 
-    for card_name in card_names:
+    for card_ref in card_refs:
+        card_name = card_ref.name
+        set_id = (card_ref.set_id or "default").lower()
         try:
-            card_data = scrython.cards.Named(fuzzy=card_name)
+            if card_ref.set_id:
+                card_data = scrython.cards.Named(fuzzy=card_name, set=card_ref.set_id)
+            else:
+                card_data = scrython.cards.Named(fuzzy=card_name)
             image_url = _extract_image_url(card_data)
             if image_url is None:
                 failed += 1
@@ -98,7 +145,9 @@ def _download_missing_cards(card_names: list[str], image_dir: Path) -> tuple[int
             response = requests.get(image_url, timeout=30)
             response.raise_for_status()
 
-            file_path = image_dir / f"{_safe_filename(card_name)}.jpg"
+            target_dir = image_dir / card_data.set
+            target_dir.mkdir(parents=True, exist_ok=True)
+            file_path = target_dir / f"{_safe_filename(card_name)}.jpg"
             file_path.write_bytes(response.content)
             downloaded += 1
         except Exception:
@@ -195,18 +244,20 @@ def sync_simulated_images(
     log_path: Path,
     pile_manager_path: Path | None = None,
     image_piles_path: Path | None = None,
+    sim_card_list_path: Path | None = None,
     auto_fetch: bool = True,
 ) -> SyncSummary:
-    cards: list[str] = []
+    cards: list[CardImageRef] = []
     cards.extend(_extract_cards_from_fixture(fixture_path))
+    cards.extend(_extract_cards_from_sim_card_list(sim_card_list_path))
     if image_piles_path is not None:
         cards.extend(_extract_cards_from_image_piles(image_piles_path))
     if pile_manager_path is not None:
         cards.extend(_extract_literal_cards_from_python(pile_manager_path))
-    cards = _unique_preserving_order(cards)
+    cards = _unique_refs_preserving_order(cards)
 
     index = _existing_image_index(image_dir)
-    missing_before = [card for card in cards if _normalize_name(card) not in index]
+    missing_before = [card for card in cards if not _has_image_for_ref(index, card)]
 
     downloaded = 0
     failed = 0
@@ -214,9 +265,12 @@ def sync_simulated_images(
         downloaded, failed = _download_missing_cards(missing_before, image_dir)
 
     refreshed = _existing_image_index(image_dir)
-    missing_after = [card for card in cards if _normalize_name(card) not in refreshed]
+    missing_after = [card for card in cards if not _has_image_for_ref(refreshed, card)]
 
-    _write_log(log_path, cards, missing_after)
+    card_names = [card.name if card.set_id is None else f"{card.name} [{card.set_id}]" for card in cards]
+    missing_names = [card.name if card.set_id is None else f"{card.name} [{card.set_id}]" for card in missing_after]
+
+    _write_log(log_path, card_names, missing_names)
     return SyncSummary(
         total_cards=len(cards),
         missing_before=len(missing_before),

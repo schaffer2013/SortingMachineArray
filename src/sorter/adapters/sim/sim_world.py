@@ -40,6 +40,12 @@ class SimWorld:
         image_by_card_id: dict[str, str | None] = {}
         coords: dict[str, tuple[float, float]] = {}
         project_root = path.parents[2]
+        card_set_by_instance_id_raw = data.get("card_set_by_instance_id", {})
+        card_set_by_instance_id = {
+            str(card_id): str(set_id).strip().lower()
+            for card_id, set_id in card_set_by_instance_id_raw.items()
+            if isinstance(card_id, str) and isinstance(set_id, str) and set_id.strip()
+        }
 
         for pile_cfg in data.get("piles", []):
             pile_id = PileId(
@@ -62,7 +68,11 @@ class SimWorld:
                 stack.append(card_id)
                 card_name = base if "#" in raw_card else raw_card
                 card_by_id[card_id] = CardMeta(name=card_name)
-                image_by_card_id[card_id] = _resolve_image_for_name(card_name, project_root)
+                image_by_card_id[card_id] = _resolve_image_for_name(
+                    card_name,
+                    project_root,
+                    set_id=card_set_by_instance_id.get(card_id),
+                )
             piles[key] = PileState(
                 pile_id=pile_id,
                 role=role,
@@ -152,11 +162,12 @@ class SimWorld:
         return self.image_by_card_id.get(top_id)
 
 
-def _resolve_image_for_name(card_name: str, project_root: Path) -> str | None:
+def _resolve_image_for_name(card_name: str, project_root: Path, set_id: str | None = None) -> str | None:
     image_dirs = [
         project_root / "SimulatedCardImages",
         project_root / "data" / "card_catalog" / "images",
     ]
+    preferred_subdirs = [set_id.lower()] if set_id else ["default", ""]
     variants = [
         card_name,
         card_name.replace(" ", "_"),
@@ -167,19 +178,38 @@ def _resolve_image_for_name(card_name: str, project_root: Path) -> str | None:
     for directory in image_dirs:
         if not directory.exists():
             continue
-        for variant in variants:
-            candidate = directory / f"{variant}.jpg"
-            if candidate.exists():
-                return str(candidate)
-            candidate_png = directory / f"{variant}.png"
-            if candidate_png.exists():
-                return str(candidate_png)
+        for subdir in preferred_subdirs:
+            scoped_dir = directory / subdir if subdir else directory
+            if not scoped_dir.exists():
+                continue
+            for variant in variants:
+                candidate = scoped_dir / f"{variant}.jpg"
+                if candidate.exists():
+                    return str(candidate)
+                candidate_png = scoped_dir / f"{variant}.png"
+                if candidate_png.exists():
+                    return str(candidate_png)
 
     target = _normalize_name(card_name)
     for directory in image_dirs:
         if not directory.exists():
             continue
-        for file_path in directory.iterdir():
+        if set_id:
+            for subdir in preferred_subdirs:
+                scoped_dir = directory / subdir if subdir else directory
+                if not scoped_dir.exists():
+                    continue
+                for file_path in scoped_dir.iterdir():
+                    if not file_path.is_file():
+                        continue
+                    if file_path.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
+                        continue
+                    if _normalize_name(file_path.stem) == target:
+                        return str(file_path)
+            continue
+
+        # No explicit set: allow any set folder match as fallback.
+        for file_path in directory.rglob("*"):
             if not file_path.is_file():
                 continue
             if file_path.suffix.lower() not in {".jpg", ".jpeg", ".png"}:

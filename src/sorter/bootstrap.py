@@ -6,7 +6,7 @@ from sorter.adapters.sim.sim_vacuum import SimVacuumAdapter
 from sorter.adapters.sim.sim_lights import SimLightsAdapter
 from sorter.adapters.sim.sim_recognizer import SimRecognizerAdapter
 from sorter.adapters.persistence.file_card_catalog import FileCardCatalog
-from sorter.adapters.persistence.sim_card_list_loader import load_expand_shuffle_instance_ids
+from sorter.adapters.persistence.sim_card_list_loader import expand_and_shuffle_instances, load_sim_card_list
 from sorter.adapters.persistence.sim_fixture_builder import build_runtime_fixture
 from sorter.adapters.persistence.sim_image_sync import sync_simulated_images
 from sorter.adapters.persistence.sqlite_run_store import SQLiteRunStore
@@ -28,6 +28,7 @@ def build_sim_orchestrator(settings: AppSettings) -> Orchestrator:
             log_path=root / "data" / "logs" / "simulated_cards.log",
             pile_manager_path=root / "pile_manager.py",
             image_piles_path=root / "image_piles.json",
+            sim_card_list_path=settings.sim_card_list_path,
             auto_fetch=True,
         )
         if summary.missing_after > 0:
@@ -68,14 +69,19 @@ def _resolve_runtime_fixture(settings: AppSettings, catalog: FileCardCatalog):
         card.name: (card.oracle_id or _fallback_identity_suffix(card.name))
         for card in catalog.all_cards()
     }
-    _, shuffled_cards = load_expand_shuffle_instance_ids(
-        settings.sim_card_list_path,
-        id_suffix_by_name=suffix_map,
-    )
+    config = load_sim_card_list(settings.sim_card_list_path)
+    expanded_instances = expand_and_shuffle_instances(config, id_suffix_by_name=suffix_map)
+    shuffled_cards = [entry.card_id for entry in expanded_instances]
+    card_set_by_instance_id = {
+        entry.card_id: entry.set_id
+        for entry in expanded_instances
+        if entry.set_id
+    }
     return build_runtime_fixture(
         base_fixture_path=settings.scenario_fixture,
         shuffled_card_instance_ids=shuffled_cards,
         output_fixture_path=settings.generated_runtime_fixture_path,
+        card_set_by_instance_id=card_set_by_instance_id,
     )
 
 

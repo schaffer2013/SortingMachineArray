@@ -22,7 +22,8 @@
         "Shivan Dragon#shivandragon",
         "Doom Blade#doomblade",
         "Lightning Bolt#lightningbolt",
-        "Lightning Bolt#lightningbolt"
+        "Lightning Bolt#lightningbolt",
+        "Blacker Lotus#blackerlotus"
       ],
       "capacity": 85,
       "discovered": false,
@@ -66,5 +67,8 @@
       "y_mm": 200
     }
   ],
-  "faults": []
+  "faults": [],
+  "card_set_by_instance_id": {
+    "Lightning Bolt#lightningbolt": "m10"
+  }
 }

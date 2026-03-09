@@ -7,6 +7,7 @@ import tempfile
 
 from sorter.adapters.persistence.sim_card_list_loader import (
     DEFAULT_SIM_CARD_LIST_PAYLOAD,
+    expand_and_shuffle_instances,
     expand_and_shuffle_instance_ids,
     load_expand_shuffle_instance_ids,
     load_sim_card_list,
@@ -88,6 +89,51 @@ def test_expansion_uses_supplied_identity_suffix_map() -> None:
     )
 
     assert expanded == ["Gamma#oracle-gamma", "Gamma#oracle-gamma", "Delta#oracle-delta"]
+
+
+def test_sim_card_list_parses_set_aliases() -> None:
+    config_payload = {
+        "version": 1,
+        "list_name": "set aliases",
+        "description": "set parsing",
+        "random_seed": 42,
+        "shuffle": False,
+        "entries": [
+            {"name": "Lightning Bolt", "set": "6ED", "count": 1},
+            {"name": "Counterspell", "setId": "lea", "count": 1},
+            {"name": "Island", "count": 1},
+        ],
+    }
+
+    config = load_sim_card_list_from_payload(config_payload)
+
+    assert config.entries[0].set_id == "6ed"
+    assert config.entries[1].set_id == "lea"
+    assert config.entries[2].set_id is None
+
+
+def test_expand_instances_keeps_set_id_metadata() -> None:
+    config_payload = {
+        "version": 1,
+        "list_name": "set expansion",
+        "description": "set parsing",
+        "random_seed": 42,
+        "shuffle": False,
+        "entries": [
+            {"name": "Lightning Bolt", "set": "6ED", "count": 2},
+            {"name": "Counterspell", "count": 1},
+        ],
+    }
+    config = load_sim_card_list_from_payload(config_payload)
+
+    expanded = expand_and_shuffle_instances(config)
+
+    assert [entry.card_id for entry in expanded] == [
+        "Lightning Bolt#lightningbolt",
+        "Lightning Bolt#lightningbolt",
+        "Counterspell#counterspell",
+    ]
+    assert [entry.set_id for entry in expanded] == ["6ed", "6ed", None]
 
 
 def load_sim_card_list_from_payload(payload: dict):

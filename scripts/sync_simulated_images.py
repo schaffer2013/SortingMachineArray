@@ -13,6 +13,7 @@ def main() -> int:
     parser.add_argument("--image-piles", default="image_piles.json")
     parser.add_argument("--image-dir", default="SimulatedCardImages")
     parser.add_argument("--log-file", default="data/logs/simulated_cards.log")
+    parser.add_argument("--sim-card-list", default="config/sim_card_lists/default_cards.json")
     parser.add_argument("--no-fetch", action="store_true", help="Do not download missing images")
     args = parser.parse_args()
 
@@ -22,6 +23,7 @@ def main() -> int:
     image_piles_path = root / args.image_piles
     image_dir = root / args.image_dir
     log_path = root / args.log_file
+    sim_card_list_path = root / args.sim_card_list
 
     summary = sync_simulated_images(
         project_root=root,
@@ -30,6 +32,7 @@ def main() -> int:
         log_path=log_path,
         pile_manager_path=pile_manager_path,
         image_piles_path=image_piles_path,
+        sim_card_list_path=sim_card_list_path,
         auto_fetch=not args.no_fetch,
     )
     print(f"Extracted {summary.total_cards} cards")

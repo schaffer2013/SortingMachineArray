@@ -60,6 +60,7 @@ def test_build_runtime_fixture_distributes_cards_round_robin_across_feeders(tmp_
         base_fixture_path=base_path,
         shuffled_card_instance_ids=["A#1", "B#1", "C#1", "D#1", "E#1"],
         output_fixture_path=output_path,
+        card_set_by_instance_id={"A#1": "6ed", "C#1": "lea"},
     )
 
     generated = json.loads(result_path.read_text(encoding="utf-8"))
@@ -72,3 +73,4 @@ def test_build_runtime_fixture_distributes_cards_round_robin_across_feeders(tmp_
     assert piles[0]["x_mm"] == 100
     assert piles[1]["y_mm"] == 100
     assert generated["name"] == "runtime_base"
+    assert generated["card_set_by_instance_id"] == {"A#1": "6ed", "C#1": "lea"}

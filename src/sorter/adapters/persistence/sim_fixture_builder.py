@@ -11,6 +11,7 @@ def build_runtime_fixture(
     base_fixture_path: Path,
     shuffled_card_instance_ids: list[str],
     output_fixture_path: Path,
+    card_set_by_instance_id: dict[str, str] | None = None,
 ) -> Path:
     if not base_fixture_path.exists():
         raise FileNotFoundError(f"Base fixture not found: {base_fixture_path}")
@@ -34,6 +35,11 @@ def build_runtime_fixture(
     for card_index, card_id in enumerate(shuffled_card_instance_ids):
         pile_index = feeder_indexes[card_index % len(feeder_indexes)]
         piles[pile_index].setdefault("cards", []).append(card_id)
+
+    if card_set_by_instance_id:
+        payload["card_set_by_instance_id"] = card_set_by_instance_id
+    elif "card_set_by_instance_id" in payload:
+        payload.pop("card_set_by_instance_id", None)
 
     payload["name"] = f"runtime_{payload.get('name', 'fixture')}"
 

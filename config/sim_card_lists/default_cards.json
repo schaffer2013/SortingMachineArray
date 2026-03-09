@@ -5,14 +5,379 @@
   "random_seed": 42,
   "shuffle": true,
   "entries": [
-    {"name": "Lightning Bolt", "count": 2},
-    {"name": "Counterspell", "count": 1},
-    {"name": "Llanowar Elves", "count": 1},
-    {"name": "Doom Blade", "count": 1},
-    {"name": "Serra Angel", "count": 1},
-    {"name": "Giant Growth", "count": 1},
-    {"name": "Dark Ritual", "count": 1},
-    {"name": "Swords to Plowshares", "count": 1},
-    {"name": "Shivan Dragon", "count": 1}
+    {
+      "name": "Shivan Dragon",
+      "count": 1
+    },
+    {
+      "name": "Fire Snake",
+      "set": "POR",
+      "count": 1
+    },
+    {
+      "name": "Doom Reigns Supreme",
+      "set": "MSH",
+      "count": 1
+    },
+    {
+      "name": "Future Sight",
+      "set": "MH1",
+      "count": 1
+    },
+    {
+      "name": "Watchful Naga",
+      "set": "AKH",
+      "count": 1
+    },
+    {
+      "name": "Trap the Trespassers",
+      "set": "LTC",
+      "count": 1
+    },
+    {
+      "name": "Hampering Snare",
+      "set": "IKO",
+      "count": 1
+    },
+    {
+      "name": "Inheritance",
+      "set": "ALL",
+      "count": 1
+    },
+    {
+      "name": "Chittering Rats",
+      "set": "DST",
+      "count": 1
+    },
+    {
+      "name": "Wave Goodbye",
+      "set": "TMC",
+      "count": 1
+    },
+    {
+      "name": "Defiant Survivor",
+      "set": "DSK",
+      "count": 1
+    },
+    {
+      "name": "Footsteps of the Goryo",
+      "set": "SOK",
+      "count": 1
+    },
+    {
+      "name": "Alpharael, Dreaming Acolyte",
+      "set": "EOE",
+      "count": 1
+    },
+    {
+      "name": "Razorgrass Ambush // Razorgrass Field",
+      "set": "MH3",
+      "count": 1
+    },
+    {
+      "name": "Rune of Protection: Red",
+      "set": "USG",
+      "count": 1
+    },
+    {
+      "name": "Garenbrig Carver // Shield's Might",
+      "set": "ELD",
+      "count": 1
+    },
+    {
+      "name": "Woodland Bellower",
+      "set": "ORI",
+      "count": 1
+    },
+    {
+      "name": "Beastcaller Savant",
+      "set": "BFZ",
+      "count": 1
+    },
+    {
+      "name": "Piracy Charm",
+      "set": "TSR",
+      "count": 1
+    },
+    {
+      "name": "Storm of Forms",
+      "set": "NCC",
+      "count": 1
+    },
+    {
+      "name": "Hamato Ninp\u014d",
+      "set": "TMC",
+      "count": 1
+    },
+    {
+      "name": "Hypersonic Dragon",
+      "set": "CLU",
+      "count": 1
+    },
+    {
+      "name": "Revel in Riches",
+      "set": "XLN",
+      "count": 1
+    },
+    {
+      "name": "Pulsating Illusion",
+      "set": "ODY",
+      "count": 1
+    },
+    {
+      "name": "Track Down",
+      "set": "M21",
+      "count": 1
+    },
+    {
+      "name": "Spectral Grasp",
+      "set": "CMM",
+      "count": 1
+    },
+    {
+      "name": "Elspeth, Storm Slayer",
+      "set": "TDM",
+      "count": 1
+    },
+    {
+      "name": "Heroism",
+      "set": "FEM",
+      "count": 1
+    },
+    {
+      "name": "Volt Charge",
+      "set": "ONE",
+      "count": 1
+    },
+    {
+      "name": "Furious Forebear",
+      "set": "TDM",
+      "count": 1
+    },
+    {
+      "name": "Presence of the Master",
+      "set": "USG",
+      "count": 1
+    },
+    {
+      "name": "Lens Flare",
+      "set": "MH2",
+      "count": 1
+    },
+    {
+      "name": "Archelos, Lagoon Mystic",
+      "set": "DMC",
+      "count": 1
+    },
+    {
+      "name": "Flood",
+      "set": "5ED",
+      "count": 1
+    },
+    {
+      "name": "Mycologist",
+      "set": "TSR",
+      "count": 1
+    },
+    {
+      "name": "Anurid Brushhopper",
+      "set": "JUD",
+      "count": 1
+    },
+    {
+      "name": "Gigapede",
+      "set": "ONS",
+      "count": 1
+    },
+    {
+      "name": "Easy Prey",
+      "set": "IKO",
+      "count": 1
+    },
+    {
+      "name": "Valley Dasher",
+      "set": "KTK",
+      "count": 1
+    },
+    {
+      "name": "Crystal Dragon // Rob the Hoard",
+      "set": "CLB",
+      "count": 1
+    },
+    {
+      "name": "Adaptive Sporesinger",
+      "set": "ONE",
+      "count": 1
+    },
+    {
+      "name": "Rakdos Ringleader",
+      "set": "RTR",
+      "count": 1
+    },
+    {
+      "name": "Haunted Hellride",
+      "set": "DFT",
+      "count": 1
+    },
+    {
+      "name": "Emergency Powers",
+      "set": "RNA",
+      "count": 1
+    },
+    {
+      "name": "Elder Gargaroth",
+      "set": "M21",
+      "count": 1
+    },
+    {
+      "name": "Snapcaster Mage",
+      "set": "UMA",
+      "count": 1
+    },
+    {
+      "name": "Storm, Force of Nature",
+      "set": "SLD",
+      "count": 1
+    },
+    {
+      "name": "Pendrell Flux",
+      "set": "USG",
+      "count": 1
+    },
+    {
+      "name": "Dripping Dead",
+      "set": "LGN",
+      "count": 1
+    },
+    {
+      "name": "Realm Seekers",
+      "set": "C16",
+      "count": 1
+    },
+    {
+      "name": "Cephalid Coliseum",
+      "set": "TDC",
+      "count": 1
+    },
+    {
+      "name": "Whalebone Glider",
+      "set": "ICE",
+      "count": 1
+    },
+    {
+      "name": "Spiketail Hatchling",
+      "set": "10E",
+      "count": 1
+    },
+    {
+      "name": "Cephalid Retainer",
+      "set": "ODY",
+      "count": 1
+    },
+    {
+      "name": "Turtle Power!",
+      "set": "TMT",
+      "count": 1
+    },
+    {
+      "name": "Daru Lancer",
+      "set": "ONS",
+      "count": 1
+    },
+    {
+      "name": "Oketra's Monument",
+      "set": "DMC",
+      "count": 1
+    },
+    {
+      "name": "Syr Alin, the Lion's Claw",
+      "set": "FDN",
+      "count": 1
+    },
+    {
+      "name": "Scourge Wolf",
+      "set": "SOI",
+      "count": 1
+    },
+    {
+      "name": "Reset",
+      "set": "LEG",
+      "count": 1
+    },
+    {
+      "name": "Fire Nation Soldier",
+      "set": "TLE",
+      "count": 1
+    },
+    {
+      "name": "Rowan's Grim Search",
+      "set": "WOE",
+      "count": 1
+    },
+    {
+      "name": "Ogre Siegebreaker",
+      "set": "M20",
+      "count": 1
+    },
+    {
+      "name": "Rodolf Duskbringer",
+      "set": "J25",
+      "count": 1
+    },
+    {
+      "name": "Fledgling Dragon",
+      "set": "MH3",
+      "count": 1
+    },
+    {
+      "name": "Fortunate Few",
+      "set": "C17",
+      "count": 1
+    },
+    {
+      "name": "Venser, the Sojourner",
+      "set": "DDI",
+      "count": 1
+    },
+    {
+      "name": "Sire of Stagnation",
+      "set": "BFZ",
+      "count": 1
+    },
+    {
+      "name": "The Cabbage Merchant",
+      "set": "TLE",
+      "count": 1
+    },
+    {
+      "name": "Mary Jane Watson",
+      "set": "SPM",
+      "count": 1
+    },
+    {
+      "name": "Annie Flash, the Veteran",
+      "set": "OTJ",
+      "count": 1
+    },
+    {
+      "name": "Samite Elder",
+      "set": "PLS",
+      "count": 1
+    },
+    {
+      "name": "Lifeblood",
+      "set": "LEG",
+      "count": 1
+    },
+    {
+      "name": "Soulcage Fiend",
+      "set": "AVR",
+      "count": 1
+    },
+    {
+      "name": "Clockspinning",
+      "set": "TSP",
+      "count": 1
+    }
   ]
 }

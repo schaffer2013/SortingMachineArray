@@ -30,6 +30,13 @@ DEFAULT_SIM_CARD_LIST_PAYLOAD = {
 class SimCardListEntry:
     name: str
     count: int
+    set_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ExpandedSimCardInstance:
+    card_id: str
+    set_id: str | None
 
 
 @dataclass(frozen=True)
@@ -60,13 +67,21 @@ def expand_and_shuffle_instance_ids(
     config: SimCardListConfig,
     id_suffix_by_name: dict[str, str] | None = None,
 ) -> list[str]:
-    expanded: list[str] = []
+    expanded = expand_and_shuffle_instances(config, id_suffix_by_name=id_suffix_by_name)
+    return [entry.card_id for entry in expanded]
+
+
+def expand_and_shuffle_instances(
+    config: SimCardListConfig,
+    id_suffix_by_name: dict[str, str] | None = None,
+) -> list[ExpandedSimCardInstance]:
+    expanded: list[ExpandedSimCardInstance] = []
     for entry in config.entries:
         suffix = None if id_suffix_by_name is None else id_suffix_by_name.get(entry.name)
         if not suffix:
             suffix = _identity_suffix(entry.name)
         for _ in range(entry.count):
-            expanded.append(f"{entry.name}#{suffix}")
+            expanded.append(ExpandedSimCardInstance(card_id=f"{entry.name}#{suffix}", set_id=entry.set_id))
 
     if config.shuffle:
         rng = random.Random(config.random_seed)
@@ -109,7 +124,10 @@ def _validate_and_parse(data: dict) -> SimCardListConfig:
         count = _require_int(entry, "count")
         if count <= 0:
             raise ValueError(f"Sim card list entry {index} count must be > 0")
-        entries.append(SimCardListEntry(name=name, count=count))
+        set_id = _optional_non_empty_str(entry, "setId")
+        if set_id is None:
+            set_id = _optional_non_empty_str(entry, "set")
+        entries.append(SimCardListEntry(name=name, count=count, set_id=set_id.lower() if set_id else None))
 
     return SimCardListConfig(
         version=version,
@@ -133,6 +151,16 @@ def _require_non_empty_str(payload: dict, key: str) -> str:
     if not value:
         raise ValueError(f"Sim card list field '{key}' must not be empty")
     return value
+
+
+def _optional_non_empty_str(payload: dict, key: str) -> str | None:
+    value = payload.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f"Sim card list field '{key}' must be a string when provided")
+    stripped = value.strip()
+    return stripped or None
 
 
 def _require_int(payload: dict, key: str) -> int:
