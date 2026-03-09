@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 import json
 
-FEEDER_ROLE = "FEEDER"
 _CLEAR_ROLES = {"FEEDER", "SORTING", "COLLECTION"}
 
 
@@ -21,19 +20,18 @@ def build_runtime_fixture(
     if not isinstance(piles, list):
         raise ValueError("Fixture payload must include a 'piles' list")
 
-    feeder_indexes: list[int] = []
+    target_indexes: list[int] = []
     for index, pile in enumerate(piles):
         role = str(pile.get("role", "SORTING"))
         if role in _CLEAR_ROLES:
             pile["cards"] = []
-        if role == FEEDER_ROLE:
-            feeder_indexes.append(index)
+        target_indexes.append(index)
 
-    if not feeder_indexes:
-        raise ValueError("Fixture must include at least one FEEDER pile")
+    if not target_indexes:
+        raise ValueError("Fixture must include at least one pile")
 
     for card_index, card_id in enumerate(shuffled_card_instance_ids):
-        pile_index = feeder_indexes[card_index % len(feeder_indexes)]
+        pile_index = target_indexes[card_index % len(target_indexes)]
         piles[pile_index].setdefault("cards", []).append(card_id)
 
     if card_set_by_instance_id:
