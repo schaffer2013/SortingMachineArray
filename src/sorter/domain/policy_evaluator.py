@@ -25,7 +25,7 @@ def _criterion_key(card_meta: CardMeta, derived_fields: dict[str, object], crite
     if criterion.kind == "threshold_bucket":
         return _threshold_bucket_key(value, criterion)
     if criterion.kind == "alpha":
-        return _alpha_key(value)
+        return _alpha_key(value, ignore_leading_article=(criterion.field == "name"))
 
     raise ValueError(f"Unsupported criterion kind: {criterion.kind}")
 
@@ -78,11 +78,20 @@ def _threshold_bucket_key(value: object, criterion: SortCriterion) -> tuple[int,
     return (unknown_flag, len(mapping), chosen)
 
 
-def _alpha_key(value: object) -> tuple[int, str]:
+def _alpha_key(value: object, ignore_leading_article: bool = False) -> tuple[int, str]:
     normalized = _normalize_text(value)
+    if ignore_leading_article:
+        normalized = _strip_leading_article(normalized)
     if not normalized:
         return (1, "")
     return (0, normalized)
+
+
+def _strip_leading_article(value: str) -> str:
+    for prefix in ("the ", "an ", "a "):
+        if value.startswith(prefix):
+            return value[len(prefix) :]
+    return value
 
 
 def _match_threshold_bucket(number: float, buckets: list[ThresholdBucket]) -> str:

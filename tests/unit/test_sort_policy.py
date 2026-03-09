@@ -85,3 +85,20 @@ def test_equal_sort_keys_share_the_same_rank():
     )
 
     assert ranking.card_id_to_rank["dup_a"] == ranking.card_id_to_rank["dup_b"]
+
+
+def test_name_alpha_sort_ignores_leading_articles() -> None:
+    root = Path(__file__).resolve().parents[2]
+    policy = load_sort_policy_file(root / "config/sort_policies/default_color_then_alpha.json")
+    ranking = RankingService(policy).compile(
+        {
+            "the_card": CardMeta(name="The Great Henge", colors=["g"]),
+            "a_card": CardMeta(name="A Dragon", colors=["g"]),
+            "plain": CardMeta(name="Giant Growth", colors=["g"]),
+        }
+    )
+
+    # "The Great Henge" sorts by "great henge", which comes after "giant growth".
+    assert ranking.card_id_to_rank["plain"] < ranking.card_id_to_rank["the_card"]
+    # "A Dragon" sorts by "dragon", so it should rank before both others.
+    assert ranking.card_id_to_rank["a_card"] < ranking.card_id_to_rank["plain"]
