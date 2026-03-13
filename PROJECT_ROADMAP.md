@@ -54,6 +54,7 @@
 - Data and tooling: frame ingestion, labeling, benchmark splits, missing-asset reporting, and regression evaluation.
 - Hardware runtime: bootstrap, calibration, motion safety, pick confirmation, operator controls, and recovery flows.
 - Validation and operations: test gates, acceptance scripts, replay, debugging UI, and run documentation.
+- Code health and cleanup: coverage baselines, static analysis, import-graph review, and retirement of dead-end compatibility code.
 
 ## Planned Artifacts
 
@@ -67,6 +68,7 @@
 - [ ] `scripts/ingest_frames.py`: metadata-preserving frame import.
 - [ ] `scripts/replay_recognition.py`: run the recognizer pipeline over saved frames.
 - [ ] `scripts/benchmark_recognizer.py`: produce measurable recognition reports.
+- [ ] `scripts/audit_code_health.py`: summarize import-graph outliers, low-coverage modules, and likely vestigial code.
 - [ ] `tests/golden_frames/`: curated perception regression set.
 - [ ] `tests/noisy_sim/`: simulated conditions that intentionally break ideal assumptions.
 
@@ -103,6 +105,7 @@
 
 **Primary outputs**
 
+- [ ] Where card names are tracked in the form "Snapcaster Mage#snapcastermage", it should be "Snapcaster Mage#{card.scryfall_id}" 
 - [ ] Split hidden world truth from observed machine state so the planner cannot read the full `card_stack` in normal execution.
 - [ ] Replace the binary `discovered` concept with richer pile observations such as `unknown`, `top_card_seen`, `empty_confirmed`, `confidence`, `last_seen_at`, and `frame_id`.
 - [ ] Make feeder discovery realistic: the picker only learns the next visible card after a scan and only learns a pile is empty when a scan or pick/verify sequence confirms it.
@@ -245,6 +248,9 @@
 - [ ] Add contract tests for camera and recognizer adapters using saved frames rather than perfect sim metadata.
 - [ ] Add golden-frame regression tests so recognition changes can be measured before and after refactors.
 - [ ] Add noisy sim scenarios that mimic real hardware conditions instead of always returning perfect identity data.
+- [ ] Establish a repeatable coverage baseline for `src/sorter` and track which modules remain effectively untested.
+- [ ] Add static analysis or scripted import-graph checks to flag modules, wrappers, and symbols with no live callers.
+- [ ] Perform a vestigial-code audit to classify low-signal files as entrypoint, compatibility shim, future placeholder, or removal candidate.
 - [ ] Add hardware acceptance scripts for homing, frame quality, repeated pick-place cycles, and supervised end-to-end sorts.
 - [ ] Define pass-fail thresholds that must be met before the project is called complete.
 - [ ] Add one command or documented workflow that runs the benchmark suite and summarizes whether the project is currently inside or outside the acceptance envelope.
@@ -254,6 +260,7 @@
 - Acceptance should include both correctness and operational behavior. A sorter that only works in ideal lighting or only with hand-reset intervention is not complete.
 - Golden-frame tests should include both easy and adversarial examples.
 - Keep benchmark reports lightweight enough that they can be run often, not only before major releases.
+- Coverage and static analysis should be used to drive cleanup, not just to chase percentages. The goal is to expose code that no longer participates in the supported path.
 
 **Exit criteria**
 
@@ -273,6 +280,7 @@
 - [ ] Document the supported operating envelope: lighting, sleeves or no sleeves, card condition, pile height, and expected operator checks.
 - [ ] Write a short operator checklist for startup, supervised run, pause or resume, and fault recovery.
 - [ ] Write a maintainer checklist for adding new recognition logic, updating ROI configs, and validating thresholds.
+- [ ] Document which legacy or compatibility files remain intentionally and why, so unexplained leftovers stop accumulating.
 - [ ] Retire or archive the remaining legacy root-level flow once the new architecture has full feature parity.
 
 **Implementation notes**
