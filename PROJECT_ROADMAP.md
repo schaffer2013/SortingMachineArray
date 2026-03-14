@@ -59,6 +59,7 @@
 ## Planned Artifacts
 
 - [ ] `docs/completion_spec.md`: one-page definition of the machine target and supported operating envelope.
+- [x] `docs/calibration_spec.md`: definition of initialization config ownership, pile-coordinate calibration, and supervised calibration flow.
 - [ ] `docs/acceptance_gates.md`: measurable test gates that define completion.
 - [ ] `config/vision/roi_profiles.json`: shared ROI definitions for sim and hardware captures.
 - [ ] `config/vision/recognition_thresholds.json`: thresholds for empty detection, OCR confidence, retries, and manual review.
@@ -85,10 +86,13 @@
 
 **Goal:** Freeze the intended outcome so later implementation choices stay aligned.
 
+**Status:** Complete on 2026-03-13. The Phase 1 definition is considered locked, with only implementation-detail polish still open.
+
 **Locked decisions from 2026-03-13**
 
 - The machine is primarily for personal use, but the project should remain understandable and followable by others.
 - V1 is supervised, not unattended, and should include strong operator tools for seeing and correcting the active card identity.
+- Interactive pile-role editing before a run is not required for v1 and can be deferred to v2.
 - The fixed hardware baseline is:
   - `BIGTREETECH SKR V1.4 Turbo`
   - `16-pixel NeoPixel ring`
@@ -99,10 +103,40 @@
 - V1 supports all `Magic: The Gathering` cards, unsleeved, in reasonable condition.
 - V1 uses one top-down camera surrounded by NeoPixels.
 - Calibration should include a pile-coordinate fine adjustment routine that visually aligns using the icon on the back of Magic cards.
+- Initialization should use two config files: a main runtime config and a calibration-specific config.
+- The main runtime config should hold global machine values, initial pile roles, and `x,y` coordinates for all piles.
+- Piles should use stable integer IDs rather than assuming a rectangular array or coordinate-shaped identity.
+- Pile role should be separate from pile ID because that role can change during a run, while the config only defines the initial role.
+- Initial pile roles should be persisted as enums in the runtime config.
+- V1 should assume `6` total piles with initial roles of `1` feeder, `1` collection, and `4` sorting piles.
+- The configuration should include a global max placement height, with `105 mm` as the current baseline default.
+- The calibration config should hold only calibration-routine values such as maximum fine-adjustment movement, acceptable error band, ideal image-space target location, and calibration-specific vision targets.
+- Fine calibration should assume an upside-down Magic card is present in each bin, visually detect the back-of-card icon, iteratively move toward a configured ideal image-space location, and overwrite the stored pile `x,y` coordinate in the main runtime config once within the configured error band.
+- Fine-adjustment calibration should run on operator demand rather than automatically at startup.
+- Fine-adjustment calibration should support a single selected pile, not only full-machine recalibration.
+- If single-pile calibration changes whether a pile is enabled, role reassignment should happen at the next run start rather than immediately during calibration.
+- If calibration cannot find the Magic back icon for a pile after retries, that pile should be marked `disabled`.
+- Disabled piles should have no active role and should not be used in a run.
+- Startup may reassign roles across the remaining enabled piles if needed, but v1 does not need an optimized reassignment strategy.
+- Disabled state should persist in the main runtime config as part of the last known calibration result.
+- Startup reassignment should prefer to keep the collection pile unchanged when that still allows a valid minimum-role layout.
+- If startup cannot satisfy at least `1` feeder, `1` collection, and `2` sorting piles after disabled-pile handling, the run should fail completely.
+- A disabled pile may be brought back only by running calibration again and successfully recalibrating that pile.
 - A pile is fully discovered only when it is empty and all cards that were in it during the run have been recognized.
 - The machine may move onto an undiscovered pile only during the feeder-to-other-pile transfer stage, which implies a defined maximum safe placement height is required.
 - Ranking is progressive during discovery and final only once the last pile has been fully discovered and all cards in the run have been recognized.
 - Low-confidence or wrong identification should escalate to operator confirmation or operator-defined correction in v1.
+- Supervised operation should include a UI that pauses the run, shows the current card image and predicted identity, lets the operator type the correct card name, provides a way to verify that actual identity, and then confirm the card before resuming.
+- The supervised operator surface for v1 should be a local desktop-style UI.
+- Separate windows are acceptable if that produces a cleaner split between live run status and manual review.
+- The v1 supervision surface should stay on `pygame` rather than introducing a new GUI stack.
+- Manual correction should verify against a valid card using `Scrython` fuzzy matching and should not allow invalid card identities to be confirmed.
+- Operator-confirmed card identities should be captured as fallback recognition values for the same physical card instance if it later fails recognition again during the current run.
+- The UI should keep the recognizer's original guess visible for debugging even after a manual overwrite.
+- Manual overwrite should not stop future recognition attempts for that card instance. It should provide a fallback value only when later recognition fails.
+- The supervision UI should visibly distinguish manually overwritten identities from organically discovered recognitions.
+- Operator confirmation and run resume should be separate UI actions.
+- In sim mode, the downloaded or rendered card image should be treated as the observed frame, and recognition should be able to toggle over to known sim info when explicitly enabled for debugging or controlled tests.
 - The top success priorities are:
   - sort correctness
   - card recognition accuracy
@@ -113,15 +147,18 @@
 
 - [x] Write a one-page completion spec with target hardware, supported card conditions, lighting assumptions, pile height limits, and expected operator involvement.
 - [x] Decide the MVP boundary: CLI-only vs UI-assisted, supervised vs unattended, single camera vs future multi-camera.
-- [ ] Freeze the pile layout, coordinate system, and calibration ownership so later perception and planning work has a stable target.
+- [x] Freeze the initialization config ownership, pile coordinate source, safe placement baseline, and fine-adjustment direction so later perception and planning work have a stable target.
 - [x] Define success metrics now: sort accuracy, recognition accuracy, empty-pile detection accuracy, retry rate, acceptable run time, and operator interventions per run.
 - [x] Write down explicit non-goals for v1 so the project does not sprawl.
+- [x] Define the required supervised operator verification surface for low-confidence card identification.
+- [x] Freeze the config split, pile ID model, and separation of pile identity from pile role.
+- [x] Define the minimum viable enabled-pile set and fallback behavior after calibration disables piles.
 
 **Exit criteria**
 
-- A future contributor can tell what "complete" means without reading code.
-- The supported machine setup and constraints are documented clearly enough that later ROI and calibration work has a stable reference.
-- There is a single source of truth for project success metrics.
+- [x] A future contributor can tell what "complete" means without reading code.
+- [x] The supported machine setup and constraints are documented clearly enough that later ROI and calibration work has a stable reference.
+- [x] There is a single source of truth for project success metrics.
 
 ## Phase 2: Make The Simulator Honest About Observation Limits
 
@@ -162,6 +199,7 @@
 - [ ] Expand the `Frame` contract so frames can carry image path or bytes, timestamp, camera id, pile id, pose, exposure context, and calibration metadata.
 - [ ] Define shared ROI configuration files for common regions such as title bar, art box, set code, collector number, border edges, and empty-pile region.
 - [ ] Define calibration-specific vision targets and ROIs for pile-coordinate fine adjustment, including the back-of-card Magic icon.
+- [ ] Use calibration config to store the ideal image-space target location, acceptable error band, and maximum fine-adjustment movement for Magic back icon alignment.
 - [ ] Build preprocessing steps that work in both sim and hardware captures: crop, perspective correction, brightness normalization, denoise, sharpen, threshold, and glare handling.
 - [ ] Implement empty-vs-card-present detection before card identity recognition.
 - [ ] Implement OCR on stable ROIs and combine it with image matching or embedding-based matching for final card identity scoring.
@@ -246,8 +284,17 @@
 - [ ] Finish motion, camera, vacuum, and lights integration with safe homing, bounds checking, and startup validation.
 - [ ] Add calibration flows for pile coordinates, camera offset, focus or exposure locking, and ROI alignment.
 - [ ] Add a pile-coordinate fine adjustment routine that refines pile XY placement by visually locating the back-of-card Magic icon.
+- [ ] Persist refined pile coordinates back into the main runtime config so future runs start from the calibrated pile map.
+- [ ] Disable piles that repeatedly fail icon-based fine adjustment and apply simple minimum-role reassignment before allowing a run to start.
 - [ ] Decide and implement pick confirmation for hardware: vacuum sensing, camera verification, current draw, or a hybrid method.
 - [ ] Add supervised run controls for pause, retry, re-scan, skip, and safe abort.
+- [ ] Add a `pygame`-based human-verification UI that shows the current mode-appropriate card image, predicted identity, operator-entered correction, and explicit verify/confirm actions.
+- [ ] Keep confirm and resume as separate actions in the supervision UI.
+- [ ] Build the supervision surface as a local desktop-style UI rather than a web app.
+- [ ] Make the UI clearly label manually overwritten identities versus organically discovered recognitions.
+- [ ] Validate operator-entered corrections through `Scrython` fuzzy matching and block confirmation unless the correction resolves to a valid card.
+- [ ] Feed operator-confirmed card identities back into runtime recognition as fallback values for later failures on the same physical card instance.
+- [ ] Keep original recognizer guesses visible in the UI after manual overwrite for debugging and auditability.
 - [ ] Add recovery procedures for jam, mispick, mismatch, dropped card, and unrecoverable low-confidence recognition.
 - [ ] Add operator-visible machine state transitions so the human can tell whether the machine is discovering, moving, verifying, paused, or faulted.
 
