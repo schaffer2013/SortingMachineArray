@@ -85,13 +85,37 @@
 
 **Goal:** Freeze the intended outcome so later implementation choices stay aligned.
 
+**Locked decisions from 2026-03-13**
+
+- The machine is primarily for personal use, but the project should remain understandable and followable by others.
+- V1 is supervised, not unattended, and should include strong operator tools for seeing and correcting the active card identity.
+- The fixed hardware baseline is:
+  - `BIGTREETECH SKR V1.4 Turbo`
+  - `16-pixel NeoPixel ring`
+  - `Raspberry Pi camera` with exact version still to be confirmed
+  - `Raspberry Pi` for local control and identification
+  - a smaller redundant `Z` axis relative to the crossbar
+  - a vacuum subsystem with its own microcontroller, digital vacuum request input, and digital setpoint-reached status output
+- V1 supports all `Magic: The Gathering` cards, unsleeved, in reasonable condition.
+- V1 uses one top-down camera surrounded by NeoPixels.
+- Calibration should include a pile-coordinate fine adjustment routine that visually aligns using the icon on the back of Magic cards.
+- A pile is fully discovered only when it is empty and all cards that were in it during the run have been recognized.
+- The machine may move onto an undiscovered pile only during the feeder-to-other-pile transfer stage, which implies a defined maximum safe placement height is required.
+- Ranking is progressive during discovery and final only once the last pile has been fully discovered and all cards in the run have been recognized.
+- Low-confidence or wrong identification should escalate to operator confirmation or operator-defined correction in v1.
+- The top success priorities are:
+  - sort correctness
+  - card recognition accuracy
+  - ease of debugging
+- Throughput is explicitly out of scope as a primary v1 goal.
+
 **Primary outputs**
 
-- [ ] Write a one-page completion spec with target hardware, supported card conditions, lighting assumptions, pile height limits, and expected operator involvement.
-- [ ] Decide the MVP boundary: CLI-only vs UI-assisted, supervised vs unattended, single camera vs future multi-camera.
+- [x] Write a one-page completion spec with target hardware, supported card conditions, lighting assumptions, pile height limits, and expected operator involvement.
+- [x] Decide the MVP boundary: CLI-only vs UI-assisted, supervised vs unattended, single camera vs future multi-camera.
 - [ ] Freeze the pile layout, coordinate system, and calibration ownership so later perception and planning work has a stable target.
-- [ ] Define success metrics now: sort accuracy, recognition accuracy, empty-pile detection accuracy, retry rate, acceptable run time, and operator interventions per run.
-- [ ] Write down explicit non-goals for v1 so the project does not sprawl.
+- [x] Define success metrics now: sort accuracy, recognition accuracy, empty-pile detection accuracy, retry rate, acceptable run time, and operator interventions per run.
+- [x] Write down explicit non-goals for v1 so the project does not sprawl.
 
 **Exit criteria**
 
@@ -137,6 +161,7 @@
 
 - [ ] Expand the `Frame` contract so frames can carry image path or bytes, timestamp, camera id, pile id, pose, exposure context, and calibration metadata.
 - [ ] Define shared ROI configuration files for common regions such as title bar, art box, set code, collector number, border edges, and empty-pile region.
+- [ ] Define calibration-specific vision targets and ROIs for pile-coordinate fine adjustment, including the back-of-card Magic icon.
 - [ ] Build preprocessing steps that work in both sim and hardware captures: crop, perspective correction, brightness normalization, denoise, sharpen, threshold, and glare handling.
 - [ ] Implement empty-vs-card-present detection before card identity recognition.
 - [ ] Implement OCR on stable ROIs and combine it with image matching or embedding-based matching for final card identity scoring.
@@ -220,6 +245,7 @@
 - [ ] Build a true hardware bootstrap path in the CLI instead of relying on a smoke-test-only entrypoint.
 - [ ] Finish motion, camera, vacuum, and lights integration with safe homing, bounds checking, and startup validation.
 - [ ] Add calibration flows for pile coordinates, camera offset, focus or exposure locking, and ROI alignment.
+- [ ] Add a pile-coordinate fine adjustment routine that refines pile XY placement by visually locating the back-of-card Magic icon.
 - [ ] Decide and implement pick confirmation for hardware: vacuum sensing, camera verification, current draw, or a hybrid method.
 - [ ] Add supervised run controls for pause, retry, re-scan, skip, and safe abort.
 - [ ] Add recovery procedures for jam, mispick, mismatch, dropped card, and unrecoverable low-confidence recognition.
@@ -230,6 +256,7 @@
 - Hardware mode should fail safe on startup if calibration, connectivity, or required peripherals are missing.
 - Keep hardware side effects behind adapter boundaries so the rest of the system remains testable.
 - Calibrations should be explicit versioned data, not hand-edited magic in code.
+- Fine calibration should combine coarse machine coordinates with camera-based visual refinement rather than relying on raw machine coordinates alone.
 - The first real-world goal should be supervised repeatability, not autonomy.
 
 **Exit criteria**
