@@ -60,6 +60,7 @@
 
 - [ ] `docs/completion_spec.md`: one-page definition of the machine target and supported operating envelope.
 - [x] `docs/calibration_spec.md`: definition of initialization config ownership, pile-coordinate calibration, and supervised calibration flow.
+- [x] `docs/phase2_gameplan.md`: actionable execution plan for observation-honest simulator behavior.
 - [ ] `docs/acceptance_gates.md`: measurable test gates that define completion.
 - [ ] `config/vision/roi_profiles.json`: shared ROI definitions for sim and hardware captures.
 - [ ] `config/vision/recognition_thresholds.json`: thresholds for empty detection, OCR confidence, retries, and manual review.
@@ -166,7 +167,7 @@
 
 **Primary outputs**
 
-- [ ] Where card names are tracked in the form "Snapcaster Mage#snapcastermage", it should be "Snapcaster Mage#{card.scryfall_id}" 
+- [x] Where card names are tracked in the form "Snapcaster Mage#snapcastermage", it should be "Snapcaster Mage#{card.scryfall_id}" 
 - [ ] Split hidden world truth from observed machine state so the planner cannot read the full `card_stack` in normal execution.
 - [ ] Replace the binary `discovered` concept with richer pile observations such as `unknown`, `top_card_seen`, `empty_confirmed`, `confidence`, `last_seen_at`, and `frame_id`.
 - [ ] Make feeder discovery realistic: the picker only learns the next visible card after a scan and only learns a pile is empty when a scan or pick/verify sequence confirms it.

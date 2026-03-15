@@ -105,6 +105,7 @@ class RankingService:
 def _factual_fields(card_meta: CardMeta) -> dict[str, object]:
     return {
         "name": card_meta.name,
+        "scryfall_id": card_meta.scryfall_id,
         "oracle_id": card_meta.oracle_id,
         "rarity": card_meta.rarity,
         "colors": list(card_meta.colors),
@@ -180,6 +181,12 @@ def _meta_from_scryfall_payload(name: str, payload: dict[str, Any]) -> CardMeta:
     color_identity = _normalize_text_list(payload.get("color_identity"))
     rarity_raw = payload.get("rarity")
     rarity = str(rarity_raw).strip().lower() if isinstance(rarity_raw, str) and rarity_raw.strip() else None
+    scryfall_id_raw = payload.get("id")
+    scryfall_id = (
+        str(scryfall_id_raw).strip().lower()
+        if isinstance(scryfall_id_raw, str) and scryfall_id_raw.strip()
+        else None
+    )
     oracle_id_raw = payload.get("oracle_id")
     oracle_id = (
         str(oracle_id_raw).strip().lower()
@@ -193,6 +200,7 @@ def _meta_from_scryfall_payload(name: str, payload: dict[str, Any]) -> CardMeta:
 
     return CardMeta(
         name=name,
+        scryfall_id=scryfall_id,
         oracle_id=oracle_id,
         rarity=rarity,
         colors=colors,
@@ -207,6 +215,7 @@ def _meta_from_scryfall_payload(name: str, payload: dict[str, Any]) -> CardMeta:
 def _merge_meta(existing: CardMeta, fetched: CardMeta) -> CardMeta:
     return CardMeta(
         name=existing.name,
+        scryfall_id=existing.scryfall_id or fetched.scryfall_id,
         oracle_id=existing.oracle_id or fetched.oracle_id,
         rarity=existing.rarity or fetched.rarity,
         colors=existing.colors or fetched.colors,

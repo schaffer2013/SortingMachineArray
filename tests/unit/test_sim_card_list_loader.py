@@ -91,6 +91,34 @@ def test_expansion_uses_supplied_identity_suffix_map() -> None:
     assert expanded == ["Gamma#oracle-gamma", "Gamma#oracle-gamma", "Delta#oracle-delta"]
 
 
+def test_expansion_prefers_supplied_scryfall_id_style_suffixes() -> None:
+    config_payload = {
+        "version": 1,
+        "list_name": "scryfall ids",
+        "description": "scryfall ids",
+        "random_seed": 42,
+        "shuffle": False,
+        "entries": [
+            {"name": "Snapcaster Mage", "count": 1},
+            {"name": "Lightning Bolt", "count": 1},
+        ],
+    }
+    config = load_sim_card_list_from_payload(config_payload)
+
+    expanded = expand_and_shuffle_instance_ids(
+        config,
+        id_suffix_by_name={
+            "Snapcaster Mage": "c1a2b3c4-d5e6-7890-abcd-ef1234567890",
+            "Lightning Bolt": "11111111-2222-3333-4444-555555555555",
+        },
+    )
+
+    assert expanded == [
+        "Snapcaster Mage#c1a2b3c4-d5e6-7890-abcd-ef1234567890",
+        "Lightning Bolt#11111111-2222-3333-4444-555555555555",
+    ]
+
+
 def test_sim_card_list_parses_set_aliases() -> None:
     config_payload = {
         "version": 1,

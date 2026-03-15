@@ -1,7 +1,7 @@
 import math
 
 from sorter.domain.enums import PileRole
-from sorter.domain.models import PileId, PileState
+from sorter.domain.models import CardMeta, PileId, PileState
 
 
 def test_pile_state_distance_from_uses_xy_mm_coordinates():
@@ -10,3 +10,9 @@ def test_pile_state_distance_from_uses_xy_mm_coordinates():
 
     assert math.isclose(left.distance_from(right), 5.0)
     assert math.isclose(right.distance_from(left), 5.0)
+
+
+def test_card_meta_can_store_scryfall_id():
+    meta = CardMeta(name="Snapcaster Mage", scryfall_id="11111111-2222-3333-4444-555555555555")
+
+    assert meta.scryfall_id == "11111111-2222-3333-4444-555555555555"

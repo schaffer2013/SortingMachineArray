@@ -1,3 +1,5 @@
+import logging
+
 from sorter.config.settings import AppSettings
 from sorter.adapters.sim.sim_world import SimWorld
 from sorter.adapters.sim.sim_motion import SimMotionAdapter
@@ -13,6 +15,9 @@ from sorter.adapters.persistence.sqlite_run_store import SQLiteRunStore
 from sorter.application.orchestrator import Orchestrator
 from sorter.domain.ranking_service import RankingService
 from sorter.domain.sort_policy_config import load_sort_policy_file
+
+
+logger = logging.getLogger(__name__)
 
 
 def build_sim_orchestrator(settings: AppSettings) -> Orchestrator:
@@ -32,8 +37,10 @@ def build_sim_orchestrator(settings: AppSettings) -> Orchestrator:
             auto_fetch=True,
         )
         if summary.missing_after > 0:
-            raise RuntimeError(
-                f"Image sync incomplete: {summary.missing_after} card images still missing. See {summary.log_path}"
+            logger.warning(
+                "Image sync incomplete: %s card images still missing. Continuing without them. See %s",
+                summary.missing_after,
+                summary.log_path,
             )
 
     world = SimWorld.from_fixture(runtime_fixture_path, settings.random_seed)
@@ -66,7 +73,7 @@ def _resolve_runtime_fixture(settings: AppSettings, catalog: FileCardCatalog):
         return settings.scenario_fixture
 
     suffix_map = {
-        card.name: (card.oracle_id or _fallback_identity_suffix(card.name))
+        card.name: (_instance_identity_suffix(card))
         for card in catalog.all_cards()
     }
     config = load_sim_card_list(settings.sim_card_list_path)
@@ -83,6 +90,14 @@ def _resolve_runtime_fixture(settings: AppSettings, catalog: FileCardCatalog):
         output_fixture_path=settings.generated_runtime_fixture_path,
         card_set_by_instance_id=card_set_by_instance_id,
     )
+
+
+def _instance_identity_suffix(card) -> str:
+    if card.scryfall_id:
+        return card.scryfall_id
+    if card.oracle_id:
+        return card.oracle_id
+    return _fallback_identity_suffix(card.name)
 
 
 def _fallback_identity_suffix(name: str) -> str:
