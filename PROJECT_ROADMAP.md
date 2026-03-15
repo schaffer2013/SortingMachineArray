@@ -169,7 +169,7 @@
 
 - [x] Where card names are tracked in the form "Snapcaster Mage#snapcastermage", it should be "Snapcaster Mage#{card.scryfall_id}" 
 - [ ] Split hidden world truth from observed machine state so the planner cannot read the full `card_stack` in normal execution.
-- [ ] Replace the binary `discovered` concept with richer pile observations such as `unknown`, `top_card_seen`, `empty_confirmed`, `confidence`, `last_seen_at`, and `frame_id`.
+- [x] Replace the binary `discovered` concept with richer pile observations such as `unknown`, `top_card_seen`, `empty_confirmed`, `confidence`, `last_seen_at`, and `frame_id`.
 - [ ] Make feeder discovery realistic: the picker only learns the next visible card after a scan and only learns a pile is empty when a scan or pick/verify sequence confirms it.
 - [ ] Ensure every move updates state through observations and verification, not direct knowledge shortcuts.
 - [ ] Define discovery-driven ranking behavior so newly identified cards can enter a provisional rank set before the final rank set is locked.

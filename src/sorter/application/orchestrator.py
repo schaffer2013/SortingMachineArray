@@ -80,7 +80,15 @@ class Orchestrator:
                         workflow.step.name,
                         seq,
                     )
-                    break
+                    self.lights.set_status("fault")
+                    self.run_store.finish_run(run_id, "FAULTED")
+                    logger.warning(
+                        "run faulted: run_id=%s seq=%s reason=no_move_available step=%s",
+                        run_id,
+                        seq,
+                        workflow.step.name,
+                    )
+                    return {"run_id": run_id, "status": "FAULTED", "seq": seq}
 
             seq += 1
             logger.debug(

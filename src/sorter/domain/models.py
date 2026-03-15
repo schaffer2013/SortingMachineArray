@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 import math
 from typing import Literal
 
-from sorter.domain.enums import PileRole
+from sorter.domain.enums import PileObservationState, PileRole
 
 
 @dataclass(frozen=True)
@@ -48,6 +48,24 @@ class PileId:
 
 
 @dataclass
+class PileObservation:
+    state: PileObservationState = PileObservationState.UNKNOWN
+    top_card_name: str | None = None
+    confidence: float = 0.0
+    source: str | None = None
+    frame_id: str | None = None
+
+    def is_known(self) -> bool:
+        return self.state != PileObservationState.UNKNOWN
+
+    def has_top_card(self) -> bool:
+        return self.state == PileObservationState.TOP_CARD_SEEN
+
+    def is_empty_confirmed(self) -> bool:
+        return self.state == PileObservationState.EMPTY_CONFIRMED
+
+
+@dataclass
 class PileState:
     pile_id: PileId
     role: PileRole
@@ -56,6 +74,19 @@ class PileState:
     y_mm: float = 0.0
     card_stack: list[str] = field(default_factory=list)
     discovered: bool = False
+    observation: PileObservation = field(default_factory=PileObservation)
+
+    def __post_init__(self) -> None:
+        if self.observation.state != PileObservationState.UNKNOWN:
+            self.discovered = True
+            return
+        if self.discovered:
+            if self.is_empty():
+                self.mark_empty_confirmed(source="legacy_discovered")
+            else:
+                self.observation.state = PileObservationState.TOP_CARD_SEEN
+                self.observation.confidence = 1.0
+                self.observation.source = "legacy_discovered"
 
     def num_cards(self) -> int:
         return len(self.card_stack)
@@ -75,6 +106,50 @@ class PileState:
         if self.is_empty():
             return None
         return self.card_stack[0]
+
+    def has_known_state(self) -> bool:
+        return self.observation.is_known()
+
+    def has_observed_top_card(self) -> bool:
+        return self.observation.has_top_card()
+
+    def is_empty_confirmed(self) -> bool:
+        return self.observation.is_empty_confirmed()
+
+    def mark_unknown(self) -> None:
+        self.discovered = False
+        self.observation = PileObservation()
+
+    def mark_top_card_seen(
+        self,
+        card_name: str | None,
+        confidence: float = 1.0,
+        source: str | None = None,
+        frame_id: str | None = None,
+    ) -> None:
+        self.discovered = True
+        self.observation = PileObservation(
+            state=PileObservationState.TOP_CARD_SEEN,
+            top_card_name=card_name,
+            confidence=confidence,
+            source=source,
+            frame_id=frame_id,
+        )
+
+    def mark_empty_confirmed(
+        self,
+        confidence: float = 1.0,
+        source: str | None = None,
+        frame_id: str | None = None,
+    ) -> None:
+        self.discovered = True
+        self.observation = PileObservation(
+            state=PileObservationState.EMPTY_CONFIRMED,
+            top_card_name=None,
+            confidence=confidence,
+            source=source,
+            frame_id=frame_id,
+        )
 
     def distance_from(self, other: "PileState") -> float:
         """Return Euclidean XY distance in millimeters to another pile."""

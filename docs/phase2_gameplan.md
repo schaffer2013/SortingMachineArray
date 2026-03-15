@@ -4,6 +4,7 @@
 
 Drafted on 2026-03-14.
 Slice 1 status: complete on 2026-03-14.
+Slice 2 status: complete on 2026-03-14.
 
 This document turns the Phase 2 roadmap into an execution plan for making the simulator obey the same observation limits the real machine will have.
 
@@ -172,9 +173,9 @@ Target outcomes:
 
 ### Slice 2. Domain observation model
 
-- introduce richer pile observation data in `models.py`
-- update `machine_state.py` to reason from observation states instead of hidden certainty
-- adjust `events.py` if explicit observation events are needed
+- [x] introduce richer pile observation data in `models.py`
+- [x] update `machine_state.py` to reason from observation states instead of binary discovered flags
+- [x] teach sim world and sim camera to populate `unknown`, `top_card_seen`, and `empty_confirmed` states during runtime
 
 ### Slice 3. Sim world truth split
 

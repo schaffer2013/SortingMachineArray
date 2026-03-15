@@ -73,7 +73,7 @@ class SimWorld:
                     project_root,
                     set_id=card_set_by_instance_id.get(card_id),
                 )
-            piles[key] = PileState(
+            pile = PileState(
                 pile_id=pile_id,
                 role=role,
                 capacity=int(pile_cfg.get("capacity", 85)),
@@ -82,6 +82,17 @@ class SimWorld:
                 card_stack=stack,
                 discovered=bool(pile_cfg.get("discovered", role != PileRole.FEEDER)),
             )
+            if pile.discovered:
+                top_id = pile.top_card_id()
+                if top_id is None:
+                    pile.mark_empty_confirmed(source="fixture")
+                else:
+                    pile.mark_top_card_seen(
+                        card_name=card_by_id[top_id].name,
+                        confidence=1.0,
+                        source="fixture",
+                    )
+            piles[key] = pile
 
         snapshot = MachineSnapshot(piles=piles, pose=MachinePose(), run_state=RunState(phase="IDLE"))
         return SimWorld(
@@ -130,6 +141,7 @@ class SimWorld:
         if pile is None or pile.is_empty():
             raise RuntimeError("Cannot pick from empty pile")
         self.held_card_id = pile.card_stack.pop()
+        pile.mark_unknown()
         self.snapshot.pose.holding_card_id = self.held_card_id
 
     def place_to(self, pile_id: PileId) -> None:
@@ -139,18 +151,39 @@ class SimWorld:
         if pile is None:
             raise RuntimeError("Destination pile missing")
         pile.card_stack.append(self.held_card_id)
+        placed_card_name = self.card_by_id[self.held_card_id].name
+        pile.mark_top_card_seen(
+            card_name=placed_card_name,
+            confidence=1.0,
+            source="placement_assumption",
+        )
         self.held_card_id = None
         self.snapshot.pose.holding_card_id = None
 
-    def top_card_name(self, pile_id: PileId) -> str | None:
+    def observe_top_card(
+        self,
+        pile_id: PileId,
+        frame_id: str | None = None,
+        source: str = "sim_camera",
+    ) -> str | None:
         pile = self.snapshot.get_pile(pile_id)
         if pile is None:
             return None
         top_id = pile.top_card_id()
         if top_id is None:
-            pile.discovered = True
+            pile.mark_empty_confirmed(source=source, frame_id=frame_id)
             return None
-        return self.card_by_id[top_id].name
+        card_name = self.card_by_id[top_id].name
+        pile.mark_top_card_seen(
+            card_name=card_name,
+            confidence=1.0,
+            source=source,
+            frame_id=frame_id,
+        )
+        return card_name
+
+    def top_card_name(self, pile_id: PileId) -> str | None:
+        return self.observe_top_card(pile_id)
 
     def top_card_image_path(self, pile_id: PileId) -> str | None:
         pile = self.snapshot.get_pile(pile_id)
