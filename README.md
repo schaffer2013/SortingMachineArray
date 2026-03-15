@@ -81,3 +81,8 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 - `generateSimulatedPiles.py` -> `src/sorter/adapters/persistence/scenario_loader.py`
 - `downloadSimulatedImages.py` -> `scripts/build_card_catalog.py`
 
+## OCR implementation guide
+
+- PaddleOCR integration planning guide:
+	- `docs/paddleocr_path_guide.md`
+
