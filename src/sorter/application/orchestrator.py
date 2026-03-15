@@ -47,7 +47,6 @@ class Orchestrator:
     ) -> dict:
         run_id = self._run_id()
         snapshot = self.world.snapshot
-        workflow = LegacyWorkflowState(snapshot)
         rank_lookup = self.world.rank_lookup()
         self.run_store.start_run(run_id, mode="sim", scenario_name=self.world.scenario_name, config_snapshot={"seed": self.world.seed})
         self.lights.set_status("running")
@@ -58,6 +57,15 @@ class Orchestrator:
             self.world.scenario_name,
             self.world.seed,
         )
+        startup_status = self._perform_startup_discovery_scan(
+            run_id,
+            snapshot,
+            should_stop=should_stop,
+            per_command_delay_s=per_command_delay_s,
+        )
+        if startup_status is not None:
+            return startup_status
+        workflow = LegacyWorkflowState(snapshot)
 
         while True:
             if should_stop and should_stop():
@@ -67,13 +75,15 @@ class Orchestrator:
                 return {"run_id": run_id, "status": "STOPPED", "seq": seq}
 
             next_move = workflow.plan_next(rank_lookup)
-            if next_move is None:
+            while next_move is None:
+                previous_step = workflow.step
                 workflow.update_step()
                 if workflow.step.name == "FINISH":
                     logger.debug("workflow reached FINISH step: run_id=%s seq=%s", run_id, seq)
+                    next_move = None
                     break
                 next_move = workflow.plan_next(rank_lookup)
-                if next_move is None:
+                if next_move is None and workflow.step == previous_step:
                     logger.debug(
                         "no move available after step update: run_id=%s step=%s seq=%s",
                         run_id,
@@ -89,6 +99,8 @@ class Orchestrator:
                         workflow.step.name,
                     )
                     return {"run_id": run_id, "status": "FAULTED", "seq": seq}
+            if workflow.step.name == "FINISH":
+                break
 
             seq += 1
             logger.debug(
@@ -148,6 +160,78 @@ class Orchestrator:
         self.run_store.finish_run(run_id, "COMPLETED")
         logger.info("run completed: run_id=%s seq=%s", run_id, seq)
         return {"run_id": run_id, "status": "COMPLETED", "seq": seq}
+
+    def _perform_startup_discovery_scan(
+        self,
+        run_id: str,
+        snapshot: MachineSnapshot,
+        should_stop: Callable[[], bool] | None = None,
+        per_command_delay_s: float = 0.0,
+    ) -> dict | None:
+        logger.info("startup discovery scan started: run_id=%s piles=%s", run_id, len(snapshot.piles))
+        for pile in snapshot.piles.values():
+            if should_stop and should_stop():
+                self.lights.set_status("idle")
+                self.run_store.finish_run(run_id, "STOPPED")
+                logger.info("run stopped during startup scan: run_id=%s pile=%s", run_id, pile.pile_id.as_key())
+                return {"run_id": run_id, "status": "STOPPED", "seq": 0}
+
+            self.run_store.append_event(
+                run_id,
+                0,
+                DomainEvent.now("command", {"name": "MoveToDiscoveryXY", "payload": {"pile": pile.pile_id.as_key()}}),
+            )
+            logger.debug(
+                "startup discovery move: run_id=%s pile=%s",
+                run_id,
+                pile.pile_id.as_key(),
+            )
+            self.world.move_to_pile(pile.pile_id)
+            pose = self.motion.get_pose()
+            self.motion.move_xy(pose.x_mm, pose.y_mm)
+            if per_command_delay_s > 0:
+                time.sleep(per_command_delay_s)
+
+            self.run_store.append_event(
+                run_id,
+                0,
+                DomainEvent.now("command", {"name": "CaptureDiscovery", "payload": {"pile": pile.pile_id.as_key()}}),
+            )
+            frame = self.camera.capture_top_card(pile.pile_id)
+            result = self.recognizer.recognize_top_card(frame)
+            self.run_store.append_event(
+                run_id,
+                0,
+                DomainEvent.now(
+                    "startup_scan",
+                    {
+                        "pile": pile.pile_id.as_key(),
+                        "card_name": result.card_name,
+                        "confidence": result.confidence,
+                        "empty_confirmed": result.card_name is None,
+                    },
+                ),
+            )
+            logger.debug(
+                "startup discovery result: run_id=%s pile=%s card=%s confidence=%.3f",
+                run_id,
+                pile.pile_id.as_key(),
+                result.card_name,
+                result.confidence,
+            )
+            self.run_store.save_frame(
+                run_id,
+                0,
+                frame.frame_id,
+                frame.path,
+                pile.pile_id.as_key(),
+                result.card_name,
+                result.confidence,
+            )
+            self.run_store.save_snapshot(run_id, 0, snapshot)
+
+        logger.info("startup discovery scan completed: run_id=%s", run_id)
+        return None
 
     def _execute_atomic_move(
         self,

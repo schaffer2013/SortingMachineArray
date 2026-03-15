@@ -5,6 +5,7 @@
 Drafted on 2026-03-14.
 Slice 1 status: complete on 2026-03-14.
 Slice 2 status: complete on 2026-03-14.
+Slice 3 status: complete on 2026-03-14.
 
 This document turns the Phase 2 roadmap into an execution plan for making the simulator obey the same observation limits the real machine will have.
 
@@ -179,9 +180,9 @@ Target outcomes:
 
 ### Slice 3. Sim world truth split
 
-- keep hidden stack truth in sim internals
-- expose only observed state to orchestrator-facing paths
-- prevent accidental planner reads of full stack contents
+- [x] keep hidden stack truth in sim internals
+- [x] expose only observed state to orchestrator-facing paths
+- [x] prevent accidental planner reads of live full-stack sim state
 
 ### Slice 4. Discovery-driven orchestrator flow
 

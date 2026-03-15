@@ -74,6 +74,7 @@ class PileState:
     y_mm: float = 0.0
     card_stack: list[str] = field(default_factory=list)
     discovered: bool = False
+    stack_count_known: bool = False
     observation: PileObservation = field(default_factory=PileObservation)
 
     def __post_init__(self) -> None:
@@ -81,6 +82,7 @@ class PileState:
             self.discovered = True
             return
         if self.discovered:
+            self.stack_count_known = True
             if self.is_empty():
                 self.mark_empty_confirmed(source="legacy_discovered")
             else:
@@ -113,11 +115,16 @@ class PileState:
     def has_observed_top_card(self) -> bool:
         return self.observation.has_top_card()
 
+    def has_known_count(self) -> bool:
+        return self.stack_count_known
+
     def is_empty_confirmed(self) -> bool:
         return self.observation.is_empty_confirmed()
 
     def mark_unknown(self) -> None:
         self.discovered = False
+        self.stack_count_known = False
+        self.card_stack.clear()
         self.observation = PileObservation()
 
     def mark_top_card_seen(
@@ -126,8 +133,11 @@ class PileState:
         confidence: float = 1.0,
         source: str | None = None,
         frame_id: str | None = None,
+        count_known: bool | None = None,
     ) -> None:
         self.discovered = True
+        if count_known is not None:
+            self.stack_count_known = count_known
         self.observation = PileObservation(
             state=PileObservationState.TOP_CARD_SEEN,
             top_card_name=card_name,
@@ -143,6 +153,7 @@ class PileState:
         frame_id: str | None = None,
     ) -> None:
         self.discovered = True
+        self.stack_count_known = True
         self.observation = PileObservation(
             state=PileObservationState.EMPTY_CONFIRMED,
             top_card_name=None,
