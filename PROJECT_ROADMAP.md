@@ -64,6 +64,7 @@
 - [ ] `docs/acceptance_gates.md`: measurable test gates that define completion.
 - [ ] `config/vision/roi_profiles.json`: shared ROI definitions for sim and hardware captures.
 - [ ] `config/vision/recognition_thresholds.json`: thresholds for empty detection, OCR confidence, retries, and manual review.
+- [x] `third_party/fuzzy-enigma-card-recognition/`: git submodule for the external recognition engine, evaluation tools, catalog maintenance, and debug UI.
 - [ ] `data/vision/raw/`: immutable raw captures from sim and hardware.
 - [ ] `data/vision/normalized/`: normalized and cropped derivatives for repeatable experiments.
 - [ ] `data/vision/labels/`: labels for empty detection, visible card identity, and ROI annotations.
@@ -82,6 +83,14 @@
 - Hidden world truth should remain inside sim and hardware adapters only. The application layer should consume observed state plus recognition results.
 - Every capture worth acting on should be persistable so a run can be replayed later without needing the original live hardware session.
 - ROI configs should use a stable coordinate convention such as normalized image coordinates so the same logical regions can be reused across resolutions.
+
+## Recognition Submodule Placement
+
+- The external recognizer should live at `third_party/fuzzy-enigma-card-recognition/` so recognition internals stay versioned with the parent repo without being folded into the sorter codebase.
+- This repo should continue to own camera capture, sorter orchestration, hardware control, supervised-review flow, replay datasets, and integration-specific config wiring.
+- The submodule should own card detection, normalization, OCR, candidate ranking, catalog maintenance, evaluation tooling, and recognition-specific debugging UI.
+- The parent integration point should remain a thin adapter, likely `src/sorter/adapters/recognition/fuzzy_enigma_recognizer.py`, implementing `RecognizerPort` and translating local `Frame` objects into the submodule's `SortingMachineRecognizer` or `recognize_card(...)` API.
+- Saved frames in `data/vision/raw/` and normalized derivatives in `data/vision/normalized/` should be reusable by both the parent replay scripts and the submodule's evaluation or debug tools so recognition work is benchmarked on the same captures the sorter actually sees.
 
 ## Phase 1: Lock The Target
 
@@ -204,6 +213,7 @@
 - [ ] Build preprocessing steps that work in both sim and hardware captures: crop, perspective correction, brightness normalization, denoise, sharpen, threshold, and glare handling.
 - [ ] Implement empty-vs-card-present detection before card identity recognition.
 - [ ] Implement OCR on stable ROIs and combine it with image matching or embedding-based matching for final card identity scoring.
+- [ ] Add `src/sorter/adapters/recognition/fuzzy_enigma_recognizer.py` to wrap the submodule and keep the rest of the application talking only to `RecognizerPort`.
 - [ ] Add confidence fusion and fallback behavior: re-scan, reposition, alternate recognizer, or manual review.
 - [ ] Save intermediate outputs that matter during development, such as normalized crops and OCR text snippets, so tuning is inspectable.
 - [ ] Build a replay harness that runs the same recognizer pipeline against saved sim frames and real-world captures.
@@ -214,6 +224,7 @@
 - ROI definitions should be data-driven so the same logical crop can be tuned without changing code.
 - Recognition should return structured evidence, not just a final label. Future debugging will depend on seeing why a label was chosen.
 - The first viable recognizer does not need to be perfect, but it must expose enough internal detail to improve safely.
+- Prefer extending the submodule behind the adapter boundary over copying OCR or ranking internals into `src/sorter`.
 
 **Exit criteria**
 
@@ -240,6 +251,7 @@
 - Preserve raw captures. Derived crops and normalized images can be regenerated later, but source material should remain immutable.
 - Keep label formats simple and versioned so tooling can evolve without corrupting old data.
 - Favor benchmark repeatability over clever one-off scripts. A slower but reproducible benchmark is more valuable than a fast opaque one.
+- Reuse the submodule's debug UI and evaluation tooling against the parent repo's saved captures rather than building duplicate one-off recognition analysis scripts unless the parent needs sorter-specific behavior.
 
 **Exit criteria**
 
