@@ -22,6 +22,7 @@ def test_sim_camera_capture_updates_pile_observation_state():
     assert pile.observation.state == PileObservationState.TOP_CARD_SEEN
     assert pile.observation.frame_id == frame.frame_id
     assert pile.observation.top_card_name is not None
+    assert frame.path == world.top_card_image_path(pile_id)
 
 
 def test_all_piles_start_undiscovered_before_startup_scan():

@@ -91,6 +91,9 @@
 - The submodule should own card detection, normalization, OCR, candidate ranking, catalog maintenance, evaluation tooling, and recognition-specific debugging UI.
 - The parent integration point should remain a thin adapter, likely `src/sorter/adapters/recognition/fuzzy_enigma_recognizer.py`, implementing `RecognizerPort` and translating local `Frame` objects into the submodule's `SortingMachineRecognizer` or `recognize_card(...)` API.
 - Saved frames in `data/vision/raw/` and normalized derivatives in `data/vision/normalized/` should be reusable by both the parent replay scripts and the submodule's evaluation or debug tools so recognition work is benchmarked on the same captures the sorter actually sees.
+- The first parent-side integration step should keep the existing sim-truth recognizer available as a toggleable backend while adding a real `fuzzy_enigma` backend for the same sim runs.
+- Sim camera frames should carry the rendered card image path so the real recognizer can be exercised in simulation before hardware capture is ready.
+- Parent-owned settings should select recognizer backend, card-engine config path, and initial card-engine mode without leaking card-engine internals into application logic.
 
 ## Phase 1: Lock The Target
 
@@ -213,7 +216,9 @@
 - [ ] Build preprocessing steps that work in both sim and hardware captures: crop, perspective correction, brightness normalization, denoise, sharpen, threshold, and glare handling.
 - [ ] Implement empty-vs-card-present detection before card identity recognition.
 - [ ] Implement OCR on stable ROIs and combine it with image matching or embedding-based matching for final card identity scoring.
-- [ ] Add `src/sorter/adapters/recognition/fuzzy_enigma_recognizer.py` to wrap the submodule and keep the rest of the application talking only to `RecognizerPort`.
+- [x] Add `src/sorter/adapters/recognition/fuzzy_enigma_recognizer.py` to wrap the submodule and keep the rest of the application talking only to `RecognizerPort`.
+- [x] Add a toggleable sim recognizer backend so `sim_truth` remains available while `fuzzy_enigma` can be enabled for parent-side integration work.
+- [x] Pass rendered sim image paths through `Frame.path` so the real recognizer can run against simulation captures.
 - [ ] Add confidence fusion and fallback behavior: re-scan, reposition, alternate recognizer, or manual review.
 - [ ] Save intermediate outputs that matter during development, such as normalized crops and OCR text snippets, so tuning is inspectable.
 - [ ] Build a replay harness that runs the same recognizer pipeline against saved sim frames and real-world captures.
@@ -252,6 +257,7 @@
 - Keep label formats simple and versioned so tooling can evolve without corrupting old data.
 - Favor benchmark repeatability over clever one-off scripts. A slower but reproducible benchmark is more valuable than a fast opaque one.
 - Reuse the submodule's debug UI and evaluation tooling against the parent repo's saved captures rather than building duplicate one-off recognition analysis scripts unless the parent needs sorter-specific behavior.
+- The next parent-project data milestone after basic integration should be a replay or benchmark script that runs the submodule over the same simulated captures the sorter uses during normal runs.
 
 **Exit criteria**
 

@@ -29,11 +29,21 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 1. Create/activate a Python 3.11+ environment.
 2. Install dependencies:
 	 - `pip install -e .[dev]`
+	 - if you want the real vendored recognizer, also install `pip install -e ./third_party/fuzzy-enigma-card-recognition[ocr]`
 3. Optional env file:
 	 - Copy `.env.example` values into your environment.
 4. Run:
 	 - `python -m sorter.interfaces.cli --mode sim`
 	 - or `python scripts/run_simulation.py`
+
+## Recognition backend toggle
+
+- Default sim backend: `SORTER_RECOGNIZER_BACKEND=sim_truth`
+- Vendored submodule backend: `SORTER_RECOGNIZER_BACKEND=fuzzy_enigma`
+- Optional card-engine config path: `SORTER_CARD_ENGINE_CONFIG=config/card_engine/engine.json`
+- Optional card-engine mode: `SORTER_CARD_ENGINE_MODE=greenfield`
+
+When `fuzzy_enigma` is enabled, the sim camera now passes the rendered top-card image path through the parent `Frame` so the real recognizer can operate on the same simulated images the sorter sees.
 
 ## Hardware mode notes
 

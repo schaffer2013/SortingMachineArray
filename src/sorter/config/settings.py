@@ -20,6 +20,11 @@ class AppSettings:
     slow_ms: int = 0
     auto_image_sync: bool = True
     project_root: Path | None = None
+    recognizer_backend: str = "sim_truth"
+    card_engine_config_path: Path | None = None
+    card_engine_mode: str = "greenfield"
+    card_engine_auto_track_results: bool = False
+    card_engine_prefer_visual_small_pool: bool = False
 
     @staticmethod
     def from_env(project_root: Path | None = None) -> "AppSettings":
@@ -44,6 +49,19 @@ class AppSettings:
         runtime_fixture_path = root / _setting("SORTER_RUNTIME_FIXTURE", "data/generated/runtime_fixture.json")
         slow_ms = int(_setting("SORTER_SLOW_MS", "0"))
         auto_image_sync = _setting("SORTER_AUTO_IMAGE_SYNC", "1") not in {"0", "false", "False"}
+        recognizer_backend = _setting("SORTER_RECOGNIZER_BACKEND", "sim_truth").strip().lower()
+        card_engine_config_raw = _setting("SORTER_CARD_ENGINE_CONFIG", "")
+        card_engine_config_path = (
+            None
+            if card_engine_config_raw.lower() in {"", "none", "null"}
+            else (root / card_engine_config_raw)
+        )
+        card_engine_mode = _setting("SORTER_CARD_ENGINE_MODE", "greenfield").strip().lower()
+        card_engine_auto_track_results = _setting("SORTER_CARD_ENGINE_AUTO_TRACK_RESULTS", "0") in {"1", "true", "True"}
+        card_engine_prefer_visual_small_pool = _setting(
+            "SORTER_CARD_ENGINE_PREFER_VISUAL_SMALL_POOL",
+            "0",
+        ) in {"1", "true", "True"}
         return AppSettings(
             mode=mode,
             random_seed=seed,
@@ -57,6 +75,11 @@ class AppSettings:
             slow_ms=slow_ms,
             auto_image_sync=auto_image_sync,
             project_root=root,
+            recognizer_backend=recognizer_backend,
+            card_engine_config_path=card_engine_config_path,
+            card_engine_mode=card_engine_mode,
+            card_engine_auto_track_results=card_engine_auto_track_results,
+            card_engine_prefer_visual_small_pool=card_engine_prefer_visual_small_pool,
         )
 
 

@@ -7,6 +7,7 @@ from sorter.adapters.sim.sim_camera import SimCameraAdapter
 from sorter.adapters.sim.sim_vacuum import SimVacuumAdapter
 from sorter.adapters.sim.sim_lights import SimLightsAdapter
 from sorter.adapters.sim.sim_recognizer import SimRecognizerAdapter
+from sorter.adapters.recognition.fuzzy_enigma_recognizer import FuzzyEnigmaRecognizerAdapter
 from sorter.adapters.persistence.file_card_catalog import FileCardCatalog
 from sorter.adapters.persistence.sim_card_list_loader import expand_and_shuffle_instances, load_sim_card_list
 from sorter.adapters.persistence.sim_fixture_builder import build_runtime_fixture
@@ -59,11 +60,27 @@ def build_sim_orchestrator(settings: AppSettings) -> Orchestrator:
         camera=SimCameraAdapter(world),
         vacuum=SimVacuumAdapter(world),
         lights=SimLightsAdapter(world),
-        recognizer=SimRecognizerAdapter(world, catalog),
+        recognizer=_build_recognizer(settings, world, catalog),
         catalog=catalog,
         run_store=run_store,
         world=world,
     )
+
+
+def _build_recognizer(settings: AppSettings, world: SimWorld, catalog: FileCardCatalog):
+    backend = settings.recognizer_backend.strip().lower()
+    if backend == "sim_truth":
+        return SimRecognizerAdapter(world, catalog)
+    if backend == "fuzzy_enigma":
+        root = settings.project_root or settings.scenario_fixture.parents[2]
+        return FuzzyEnigmaRecognizerAdapter(
+            project_root=root,
+            config_path=settings.card_engine_config_path,
+            mode=settings.card_engine_mode,
+            auto_track_results=settings.card_engine_auto_track_results,
+            prefer_visual_small_pool=settings.card_engine_prefer_visual_small_pool,
+        )
+    raise ValueError(f"Unsupported recognizer backend: {settings.recognizer_backend}")
 
 
 def _resolve_runtime_fixture(settings: AppSettings, catalog: FileCardCatalog):

@@ -17,9 +17,10 @@ class SimCameraAdapter:
     def capture_top_card(self, pile_id: PileId) -> Frame:
         frame_id = f"frame-{uuid4().hex[:8]}"
         card_name = self.world.observe_top_card(pile_id, frame_id=frame_id)
+        image_path = self.world.top_card_image_path(pile_id)
         return Frame(
             frame_id=frame_id,
-            path=None,
+            path=image_path,
             pile_id=pile_id,
-            metadata={"card_name": card_name, "mode": "sim"},
+            metadata={"card_name": card_name, "mode": "sim", "image_path": image_path},
         )
