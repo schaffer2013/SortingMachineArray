@@ -94,3 +94,36 @@ Make the sorter more observation-driven and recovery-aware by reducing hidden si
   - explicit retry and review behavior
   - noisy-sim regression coverage
   - richer run metrics and clearer operational status
+
+---
+
+## 2026-03-27T22:29:22-07:00
+
+**Status**
+
+- Sprint 2 branch `sprint-2-observation-recovery` was merged into `phase-2`.
+- `phase-2` was pushed to `origin`.
+- Merge commit: `ca4e9c8`
+
+**Final Outcome**
+
+- The parent project now treats recognition as an observation workflow instead of a hidden-truth side effect.
+- Low-confidence or missing recognitions now have retry budgets and a clean `REVIEW_REQUIRED` escalation path.
+- The sim harness can inject basic recognition faults for regression coverage.
+- Run completion records now persist richer metrics for later analysis.
+
+**Final Verification Snapshot**
+
+- `.\.venv\Scripts\python.exe -m pytest tests`
+  - `64 passed`
+- `.\.venv\Scripts\python.exe scripts\benchmark_recognizer.py --backend fuzzy_enigma`
+  - `name_accuracy=0.833`
+  - `average_confidence=0.794`
+  - `review_count=1`
+- `.\.venv\Scripts\python.exe scripts\compare_recognition_summaries.py --baseline data\recognition_reports\sim_truth_summary.json --candidate data\recognition_reports\fuzzy_enigma_summary.json --json-out data\recognition_reports\sim_vs_fuzzy_compare.json`
+  - `changed_prediction_count=1`
+  - `candidate_review_reduction=0`
+
+**Follow-On Read**
+
+- The next strongest lever is still improving candidate-quality and confidence calibration for the remaining review-heavy cases rather than expanding more simulation complexity first.
