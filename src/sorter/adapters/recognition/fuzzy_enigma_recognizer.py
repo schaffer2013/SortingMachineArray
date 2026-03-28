@@ -16,6 +16,7 @@ from sorter.ports.recognizer import RecognitionResult
 class CardEngineModules:
     config: ModuleType
     sortingmachine: ModuleType
+    operational_modes: ModuleType
 
 
 def _load_card_engine_modules(project_root: Path) -> CardEngineModules:
@@ -23,6 +24,7 @@ def _load_card_engine_modules(project_root: Path) -> CardEngineModules:
         return CardEngineModules(
             config=importlib.import_module("card_engine.config"),
             sortingmachine=importlib.import_module("card_engine.adapters.sortingmachine"),
+            operational_modes=importlib.import_module("card_engine.operational_modes"),
         )
     except ModuleNotFoundError as exc:
         if exc.name and not exc.name.startswith("card_engine"):
@@ -44,6 +46,7 @@ def _load_card_engine_modules(project_root: Path) -> CardEngineModules:
         return CardEngineModules(
             config=importlib.import_module("card_engine.config"),
             sortingmachine=importlib.import_module("card_engine.adapters.sortingmachine"),
+            operational_modes=importlib.import_module("card_engine.operational_modes"),
         )
     except ModuleNotFoundError as exc:
         if exc.name and not exc.name.startswith("card_engine"):
@@ -100,6 +103,7 @@ class FuzzyEnigmaRecognizerAdapter:
             config = modules.config.load_engine_config()
         self._mode = mode
         self._prefer_visual_small_pool = prefer_visual_small_pool
+        self._expected_card_from_values = modules.operational_modes.expected_card_from_values
         self._recognizer = modules.sortingmachine.SortingMachineRecognizer(
             config=config,
             auto_track_results=auto_track_results,
@@ -120,32 +124,53 @@ class FuzzyEnigmaRecognizerAdapter:
                 "Ensure the camera adapter persists or exposes the captured image."
             )
 
+        request = frame.metadata.get("recognition_request")
+        if not isinstance(request, dict):
+            request = {}
+        requested_mode = str(request.get("mode") or self._mode)
+        prefer_visual_small_pool = bool(request.get("prefer_visual_small_pool", self._prefer_visual_small_pool))
+        use_tracked_pool = request.get("use_tracked_pool")
+        track_result = request.get("track_result")
+        expected_card_payload = request.get("expected_card")
+        expected_card = None
+        if isinstance(expected_card_payload, dict):
+            expected_card = self._expected_card_from_values(
+                name=expected_card_payload.get("name"),
+                set_code=expected_card_payload.get("set_code"),
+                collector_number=expected_card_payload.get("collector_number"),
+            )
+
         try:
             output = self._recognizer.recognize_top_card(
                 frame.path,
-                mode=self._mode,
+                mode=requested_mode,
+                expected_card=expected_card,
+                use_tracked_pool=use_tracked_pool,
+                track_result=track_result,
                 detailed=True,
-                prefer_visual_small_pool=self._prefer_visual_small_pool,
+                prefer_visual_small_pool=prefer_visual_small_pool,
             )
         except ValueError as exc:
-            if "No tracked pool is available for constrained recognition." not in str(exc):
+            error_message = str(exc)
+            error_code = _engine_error_code(error_message)
+            if error_code is None:
                 raise
             return RecognitionResult(
                 card_name=None,
                 confidence=0.0,
                 backend="fuzzy_enigma",
-                requested_mode=self._mode,
-                effective_mode=self._mode,
+                requested_mode=requested_mode,
+                effective_mode=requested_mode,
                 needs_review=True,
-                mode_features=_mode_features({}, prefer_visual_small_pool=self._prefer_visual_small_pool),
+                mode_features=_mode_features({}, prefer_visual_small_pool=prefer_visual_small_pool),
                 debug={
-                    "engine_error_code": "missing_tracked_pool",
-                    "engine_error": str(exc),
+                    "engine_error_code": error_code,
+                    "engine_error": error_message,
                 },
             )
         raw_debug = dict(output.debug)
         raw_mode = raw_debug.get("mode") if isinstance(raw_debug.get("mode"), dict) else {}
-        requested_mode = raw_mode.get("requested", self._mode)
+        requested_mode = raw_mode.get("requested", requested_mode)
         effective_mode = raw_mode.get("effective", requested_mode)
         alternatives = tuple(
             {
@@ -166,7 +191,7 @@ class FuzzyEnigmaRecognizerAdapter:
             oracle_id=output.oracle_id,
             requested_mode=str(requested_mode) if requested_mode is not None else self._mode,
             effective_mode=str(effective_mode) if effective_mode is not None else self._mode,
-            mode_features=_mode_features(raw_debug, prefer_visual_small_pool=self._prefer_visual_small_pool),
+            mode_features=_mode_features(raw_debug, prefer_visual_small_pool=prefer_visual_small_pool),
             alternatives=alternatives,
             debug={
                 "active_roi": output.active_roi,
@@ -176,3 +201,13 @@ class FuzzyEnigmaRecognizerAdapter:
                 "raw": raw_debug,
             },
         )
+
+
+def _engine_error_code(message: str) -> str | None:
+    if "No tracked pool is available for constrained recognition." in message:
+        return "missing_tracked_pool"
+    if "requires an expected_card." in message:
+        return "missing_expected_card"
+    if "No catalog records found for expected card:" in message:
+        return "expected_card_not_in_catalog"
+    return None

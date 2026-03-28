@@ -31,6 +31,8 @@ Why this matters:
 
 - the parent now saves portable success and failure reports
 - mode-aware comparisons are harder when the parent must scrape raw debug blobs
+- the parent is now running explicit mode experiments from replay, benchmark, and
+  fixed golden-frame manifests, so this metadata is no longer "nice to have"
 
 ### 2. Constrained-mode precondition failures should return structured results, not exceptions
 
@@ -58,12 +60,15 @@ Why this matters:
 
 ### 3. Parent-facing adapter should eventually accept expected-card and candidate-pool inputs directly
 
-The parent repo wants to use more than just open-ended `greenfield`
-recognition.
+The parent repo is now driving:
+
+- `small_pool` with expected-label requests
+- `reevaluation` with expected-label requests
+- `confirmation` with expected-label requests
 
 Requested upstream improvement:
 
-- expose adapter-level support for:
+- keep the adapter support explicit and stable for:
   - expected card by identifiers
   - candidate pool by identifiers
   - explicit tracked-pool usage controls
@@ -94,7 +99,28 @@ Why this matters:
 - structured reasons would make logs, portable reports, and operator recovery
   simpler
 
-### 5. First-class artifact export would be valuable
+### 5. Parent repos would benefit from a structured offline catalog query API
+
+The parent currently removed several network-heavy fallbacks in favor of local
+catalog-backed sim data and explicit recognizer use. A richer query surface from
+the submodule would let the parent keep moving in that direction.
+
+Requested upstream improvement:
+
+- expose a stable Python-level query API for the offline catalog, not just CLI
+  helpers
+- make it easy for a parent repo to ask for:
+  - card identity by name or IDs
+  - exact printing candidates by name
+  - set-code or collector-number refinement when available
+
+Why this matters:
+
+- the parent wants to avoid external card-info lookups
+- sorter-side planning and confirmation flows should become more ID-driven over
+  time
+
+### 6. First-class artifact export would be valuable
 
 The parent now exports its own portable evidence bundles, but it still has to
 reconstruct them from adapter output.
@@ -137,9 +163,29 @@ Recent concrete result:
 - behavior is now safely reportable from the parent side, but it would be
   better if the engine surfaced that condition directly
 
+Recent mode comparison results from the parent repo:
+
+- `greenfield` on the current six-card sim slice:
+  - `name_accuracy=0.667`
+  - `review_count=2`
+- `small_pool` with explicit expected-label requests:
+  - `name_accuracy=0.833`
+  - `review_count=2`
+  - `effective_mode_counts={"small_pool": 6}`
+- `reevaluation` with explicit expected-label requests:
+  - `name_accuracy=0.500`
+  - `review_count=3`
+- `confirmation` with explicit expected-label requests:
+  - `name_accuracy=0.667`
+  - `review_count=3`
+- fixed golden-frame manifest with `small_pool` plus expected-label requests:
+  - `name_accuracy=0.833`
+  - `review_count=0`
+
 ## Current Ask Priority
 
 1. structured failure codes
 2. first-class requested and effective mode fields
-3. adapter support for expected-card and candidate-pool inputs
-4. optional artifact export
+3. stable parent-facing expected-card and candidate-pool controls
+4. offline catalog query API
+5. optional artifact export

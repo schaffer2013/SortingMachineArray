@@ -22,6 +22,8 @@ class AppSettings:
     generated_runtime_fixture_path: Path | None = None
     slow_ms: int = 0
     auto_image_sync: bool = True
+    sim_image_auto_fetch: bool = False
+    allow_external_card_enrichment: bool = False
     project_root: Path | None = None
     recognizer_backend: str = "sim_truth"
     card_engine_config_path: Path | None = None
@@ -57,6 +59,7 @@ class AppSettings:
         runtime_fixture_path = root / _setting("SORTER_RUNTIME_FIXTURE", "data/generated/runtime_fixture.json")
         slow_ms = int(_setting("SORTER_SLOW_MS", "0"))
         auto_image_sync = _setting("SORTER_AUTO_IMAGE_SYNC", "1") not in {"0", "false", "False"}
+        sim_image_auto_fetch = _setting("SORTER_SIM_IMAGE_AUTO_FETCH", "0") in {"1", "true", "True"}
         recognition_thresholds_path = root / _setting(
             "SORTER_RECOGNITION_THRESHOLDS",
             "config/vision/recognition_thresholds.json",
@@ -82,6 +85,10 @@ class AppSettings:
             "SORTER_FUZZY_ENIGMA_SIM_TRUTH_FALLBACK",
             "1" if recognition_policy.allow_sim_truth_fallback else "0",
         ) in {"1", "true", "True"}
+        allow_external_card_enrichment = _setting(
+            "SORTER_ALLOW_EXTERNAL_CARD_ENRICHMENT",
+            "0",
+        ) in {"1", "true", "True"}
         startup_scan_max_retries = int(
             _setting("SORTER_STARTUP_SCAN_MAX_RETRIES", str(recognition_policy.startup_scan_max_retries))
         )
@@ -100,6 +107,8 @@ class AppSettings:
             generated_runtime_fixture_path=runtime_fixture_path,
             slow_ms=slow_ms,
             auto_image_sync=auto_image_sync,
+            sim_image_auto_fetch=sim_image_auto_fetch,
+            allow_external_card_enrichment=allow_external_card_enrichment,
             project_root=root,
             recognizer_backend=recognizer_backend,
             card_engine_config_path=card_engine_config_path,

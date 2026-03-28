@@ -25,6 +25,7 @@ class SimWorld:
     snapshot: MachineSnapshot
     hidden_piles: dict[str, list[str]]
     card_by_id: dict[str, CardMeta]
+    set_by_card_id: dict[str, str]
     image_by_card_id: dict[str, str | None]
     coords: dict[str, tuple[float, float]]
     compiled_ranking: CompiledRanking | None = None
@@ -41,6 +42,7 @@ class SimWorld:
         hidden_piles: dict[str, list[str]] = {}
         card_by_id: dict[str, CardMeta] = {}
         image_by_card_id: dict[str, str | None] = {}
+        set_by_card_id: dict[str, str] = {}
         coords: dict[str, tuple[float, float]] = {}
         project_root = path.parents[2]
         card_set_by_instance_id_raw = data.get("card_set_by_instance_id", {})
@@ -71,10 +73,13 @@ class SimWorld:
                 hidden_stack.append(card_id)
                 card_name = base if "#" in raw_card else raw_card
                 card_by_id[card_id] = CardMeta(name=card_name)
+                set_id = card_set_by_instance_id.get(card_id)
+                if set_id:
+                    set_by_card_id[card_id] = set_id
                 image_by_card_id[card_id] = _resolve_image_for_name(
                     card_name,
                     project_root,
-                    set_id=card_set_by_instance_id.get(card_id),
+                    set_id=set_id,
                 )
             hidden_piles[key] = list(hidden_stack)
             pile = PileState(
@@ -101,6 +106,7 @@ class SimWorld:
             snapshot=snapshot,
             hidden_piles=hidden_piles,
             card_by_id=card_by_id,
+            set_by_card_id=set_by_card_id,
             image_by_card_id=image_by_card_id,
             coords=coords,
             recognition_faults=recognition_faults,

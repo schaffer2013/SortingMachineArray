@@ -92,9 +92,68 @@ def test_run_sim_recognition_benchmark_summarizes_review_reasons_and_confidence_
     assert summary.review_reason_counts == {"missing_prediction_for_visible_card": 1}
     assert summary.effective_mode_counts == {"greenfield": 2}
     assert summary.requested_mode == "greenfield"
+    assert summary.mode_request_options == {"mode": "greenfield", "use_expected_label": False}
     assert summary.cases[0].requested_mode == "greenfield"
     assert summary.cases[1].effective_mode == "greenfield"
     assert summary.cases[1].review_reason == "missing_prediction_for_visible_card"
+    assert summary.cases[0].mode_request == {"mode": "greenfield"}
+
+
+def test_run_sim_recognition_benchmark_can_attach_expected_card_requests(monkeypatch, tmp_path):
+    pile = PileState(pile_id=PileId(0, 0), role=PileRole.FEEDER, capacity=10)
+    snapshot = MachineSnapshot(piles={pile.pile_id.as_key(): pile})
+    frame_path = tmp_path / "card.jpg"
+    frame_path.write_bytes(b"fake-image")
+    captured_frames: list[Frame] = []
+
+    def _recognize(frame: Frame) -> RecognitionResult:
+        captured_frames.append(frame)
+        return RecognitionResult(
+            card_name="Alpha",
+            confidence=0.82,
+            backend="fuzzy_enigma",
+            requested_mode="small_pool",
+            effective_mode="small_pool",
+        )
+
+    context = SimpleNamespace(
+        world=SimpleNamespace(snapshot=snapshot, scenario_name="demo"),
+        camera=SimpleNamespace(
+            capture_top_card=lambda pile_id: Frame(
+                frame_id="frame-a",
+                path=str(frame_path),
+                pile_id=pile_id,
+                metadata={"card_name": "Alpha", "set_code": "lea"},
+            )
+        ),
+        recognizer=SimpleNamespace(recognize_top_card=_recognize),
+    )
+    monkeypatch.setattr(
+        "sorter.application.recognition_benchmark.build_sim_runtime_context",
+        lambda settings: context,
+    )
+
+    summary = run_sim_recognition_benchmark(
+        SimpleNamespace(recognizer_backend="fuzzy_enigma", card_engine_mode="small_pool"),
+        use_expected_label=True,
+    )
+
+    assert summary.mode_request_options == {
+        "mode": "small_pool",
+        "use_expected_label": True,
+        "use_tracked_pool": False,
+    }
+    assert captured_frames
+    assert captured_frames[0].metadata["recognition_request"] == {
+        "mode": "small_pool",
+        "expected_card": {"name": "Alpha", "set_code": "lea"},
+        "use_tracked_pool": False,
+    }
+    assert summary.cases[0].mode_request == {
+        "mode": "small_pool",
+        "expected_card": {"name": "Alpha", "set_code": "lea"},
+        "use_tracked_pool": False,
+    }
 
 
 def test_write_benchmark_artifacts_exports_case_debug_files(tmp_path):
@@ -107,6 +166,7 @@ def test_write_benchmark_artifacts_exports_case_debug_files(tmp_path):
         backend="fuzzy_enigma",
         scenario_name="demo",
         requested_mode="greenfield",
+        mode_request_options={"mode": "greenfield", "use_expected_label": False},
         total_cases=1,
         scored_cases=1,
         exact_name_matches=1,
@@ -142,6 +202,7 @@ def test_write_benchmark_artifacts_exports_case_debug_files(tmp_path):
                 matched_name=True,
                 image_available=True,
                 alternatives=({"name": "Opt", "score": 0.88},),
+                mode_request={"mode": "greenfield"},
                 debug={"ocr_lines": ["Opt"], "bbox": [1, 2, 3, 4], "active_roi": "title"},
             ),
         ),
@@ -167,6 +228,7 @@ def test_write_portable_report_splits_success_and_failure_cases(tmp_path):
         backend="fuzzy_enigma",
         scenario_name="demo",
         requested_mode="small_pool",
+        mode_request_options={"mode": "small_pool", "use_expected_label": True, "use_tracked_pool": False},
         total_cases=2,
         scored_cases=2,
         exact_name_matches=1,
@@ -202,6 +264,7 @@ def test_write_portable_report_splits_success_and_failure_cases(tmp_path):
                 matched_name=True,
                 image_available=True,
                 alternatives=(),
+                mode_request={"mode": "small_pool"},
                 debug={},
             ),
             RecognitionBenchmarkCase(
@@ -225,6 +288,7 @@ def test_write_portable_report_splits_success_and_failure_cases(tmp_path):
                 matched_name=False,
                 image_available=True,
                 alternatives=(),
+                mode_request={"mode": "small_pool"},
                 debug={},
             ),
         ),
@@ -240,9 +304,11 @@ def test_write_portable_report_splits_success_and_failure_cases(tmp_path):
     payload = json.loads(output_path.read_text(encoding="utf-8"))
 
     assert payload["requested_mode"] == "small_pool"
+    assert payload["mode_request_options"] == {"mode": "small_pool", "use_expected_label": True, "use_tracked_pool": False}
     assert payload["summary"]["review_count"] == 1
     assert payload["summary"]["effective_mode_counts"] == {"greenfield": 2}
     assert len(payload["success_cases"]) == 1
     assert len(payload["failure_cases"]) == 1
     assert payload["failure_cases"][0]["review_reason"] == "confidence_below_threshold"
     assert payload["failure_cases"][0]["requested_mode"] == "small_pool"
+    assert payload["failure_cases"][0]["mode_request"] == {"mode": "small_pool"}

@@ -67,7 +67,7 @@ def build_sim_runtime_context(settings: AppSettings) -> SimRuntimeContext:
             pile_manager_path=root / "pile_manager.py",
             image_piles_path=root / "image_piles.json",
             sim_card_list_path=settings.sim_card_list_path,
-            auto_fetch=True,
+            auto_fetch=settings.sim_image_auto_fetch,
         )
         if summary.missing_after > 0:
             logger.warning(
@@ -83,7 +83,10 @@ def build_sim_runtime_context(settings: AppSettings) -> SimRuntimeContext:
             world.card_by_id[card_id] = catalog_meta
 
     policy_config = load_sort_policy_file(settings.sort_policy_path)
-    compiled_ranking = RankingService(policy_config).compile(world.card_by_id)
+    compiled_ranking = RankingService(
+        policy_config,
+        allow_external_enrichment=settings.allow_external_card_enrichment,
+    ).compile(world.card_by_id)
     world.set_compiled_ranking(compiled_ranking)
 
     motion = SimMotionAdapter(world)

@@ -45,11 +45,15 @@ class CompiledRanking:
 
 
 class RankingService:
-    def __init__(self, policy_config: SortPolicyConfig):
+    def __init__(self, policy_config: SortPolicyConfig, *, allow_external_enrichment: bool = False):
         self.policy_config = policy_config
+        self.allow_external_enrichment = allow_external_enrichment
 
     def compile(self, card_by_id: dict[str, CardMeta]) -> CompiledRanking:
-        effective_card_by_id = _enrich_missing_metadata_with_scrython(card_by_id)
+        effective_card_by_id = _maybe_enrich_missing_metadata(
+            card_by_id,
+            allow_external_enrichment=self.allow_external_enrichment,
+        )
         card_id_to_sort_key = {
             card_id: build_sort_key(card_meta, self.policy_config)
             for card_id, card_meta in effective_card_by_id.items()
@@ -117,6 +121,16 @@ def _factual_fields(card_meta: CardMeta) -> dict[str, object]:
         "mana_value": card_meta.mana_value,
         "market_price_usd": card_meta.market_price_usd,
     }
+
+
+def _maybe_enrich_missing_metadata(
+    card_by_id: dict[str, CardMeta],
+    *,
+    allow_external_enrichment: bool,
+) -> dict[str, CardMeta]:
+    if not allow_external_enrichment:
+        return card_by_id
+    return _enrich_missing_metadata_with_scrython(card_by_id)
 
 
 def _enrich_missing_metadata_with_scrython(card_by_id: dict[str, CardMeta]) -> dict[str, CardMeta]:

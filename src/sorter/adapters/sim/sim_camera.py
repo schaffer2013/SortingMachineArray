@@ -40,6 +40,7 @@ class SimCameraAdapter:
                 "card_id": top_id,
                 "scryfall_id": card_meta.scryfall_id if card_meta is not None else None,
                 "oracle_id": card_meta.oracle_id if card_meta is not None else None,
+                "set_code": self.world.set_by_card_id.get(top_id) if top_id is not None else None,
             },
             captured_at_utc=datetime.now(UTC).isoformat(),
             camera_id="sim_topdown",

@@ -30,6 +30,10 @@ def main() -> int:
     parser.add_argument("--pile", action="append", dest="piles", help="Limit benchmarking to one or more pile keys like 0,0")
     parser.add_argument("--card-engine-config", default=None, help="Optional parent-owned card-engine config path.")
     parser.add_argument("--card-engine-mode", choices=["greenfield", "small_pool", "reevaluation", "confirmation"], default=None)
+    parser.add_argument("--use-expected-label", action="store_true", help="Pass the simulated expected top-card label into the recognition request.")
+    parser.add_argument("--use-tracked-pool", action="store_true", help="Force constrained modes to use the recognizer tracked pool.")
+    parser.add_argument("--track-result", action="store_true", help="Force the recognizer to track successful results during the run.")
+    parser.add_argument("--prefer-visual-small-pool", action="store_true", help="Ask the recognizer to prefer visual narrowing for small-pool requests.")
     parser.add_argument("--json-out", default=None)
     parser.add_argument("--artifact-root", default=None, help="Optional directory for per-case debug artifacts.")
     parser.add_argument("--portable-out", default=None, help="Optional portable success/failure report JSON path.")
@@ -56,6 +60,10 @@ def main() -> int:
         pile_keys=args.piles,
         include_empty=args.include_empty,
         report_type="benchmark",
+        use_expected_label=args.use_expected_label,
+        use_tracked_pool=True if args.use_tracked_pool else None,
+        track_result=True if args.track_result else None,
+        prefer_visual_small_pool=True if args.prefer_visual_small_pool else None,
     )
     output_path = Path(args.json_out) if args.json_out else default_json_path(PROJECT_ROOT, summary.backend)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -78,6 +86,7 @@ def main() -> int:
 
     print(f"backend={summary.backend}")
     print(f"requested_mode={summary.requested_mode}")
+    print(f"mode_request_options={json.dumps(summary.mode_request_options, sort_keys=True)}")
     print(f"scenario={summary.scenario_name}")
     print(f"cases={summary.scored_cases}")
     print(f"name_accuracy={summary.name_accuracy:.3f}")

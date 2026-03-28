@@ -26,6 +26,7 @@ def test_sim_camera_capture_does_not_mutate_pile_observation_state_before_recogn
     assert frame.captured_at_utc is not None
     assert frame.camera_id == "sim_topdown"
     assert frame.source_mode == "sim"
+    assert "set_code" in frame.metadata
     assert frame.metadata["scryfall_id"] is not None or frame.metadata["oracle_id"] is not None or frame.metadata["card_name"] is not None
 
 

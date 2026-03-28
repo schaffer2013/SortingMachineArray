@@ -44,6 +44,9 @@ def test_fuzzy_enigma_recognizer_uses_frame_path_and_translates_result(monkeypat
     fake_modules = SimpleNamespace(
         config=SimpleNamespace(load_engine_config=lambda path=None: {"path": path}),
         sortingmachine=SimpleNamespace(SortingMachineRecognizer=FakeRecognizer),
+        operational_modes=SimpleNamespace(
+            expected_card_from_values=lambda **kwargs: dict(kwargs),
+        ),
     )
     monkeypatch.setattr(
         "sorter.adapters.recognition.fuzzy_enigma_recognizer._load_card_engine_modules",
@@ -91,6 +94,9 @@ def test_fuzzy_enigma_recognizer_returns_empty_result_when_frame_has_no_image_or
         sortingmachine=SimpleNamespace(
             SortingMachineRecognizer=lambda **kwargs: SimpleNamespace(recognize_top_card=lambda *args, **kwargs: None)
         ),
+        operational_modes=SimpleNamespace(
+            expected_card_from_values=lambda **kwargs: dict(kwargs),
+        ),
     )
     monkeypatch.setattr(
         "sorter.adapters.recognition.fuzzy_enigma_recognizer._load_card_engine_modules",
@@ -114,6 +120,9 @@ def test_fuzzy_enigma_recognizer_requires_image_path_for_non_empty_card(monkeypa
         config=SimpleNamespace(load_engine_config=lambda path=None: {"path": path}),
         sortingmachine=SimpleNamespace(
             SortingMachineRecognizer=lambda **kwargs: SimpleNamespace(recognize_top_card=lambda *args, **kwargs: None)
+        ),
+        operational_modes=SimpleNamespace(
+            expected_card_from_values=lambda **kwargs: dict(kwargs),
         ),
     )
     monkeypatch.setattr(
@@ -160,6 +169,9 @@ def test_fuzzy_enigma_recognizer_returns_review_result_when_small_pool_has_no_tr
     fake_modules = SimpleNamespace(
         config=SimpleNamespace(load_engine_config=lambda path=None: {"path": path}),
         sortingmachine=SimpleNamespace(SortingMachineRecognizer=FakeRecognizer),
+        operational_modes=SimpleNamespace(
+            expected_card_from_values=lambda **kwargs: dict(kwargs),
+        ),
     )
     monkeypatch.setattr(
         "sorter.adapters.recognition.fuzzy_enigma_recognizer._load_card_engine_modules",
@@ -181,3 +193,79 @@ def test_fuzzy_enigma_recognizer_returns_review_result_when_small_pool_has_no_tr
     assert result.needs_review is True
     assert result.requested_mode == "small_pool"
     assert result.debug["engine_error_code"] == "missing_tracked_pool"
+
+
+def test_fuzzy_enigma_recognizer_uses_frame_level_recognition_request(monkeypatch, tmp_path):
+    seen: dict[str, object] = {}
+
+    class FakeRecognizer:
+        def __init__(self, **kwargs):
+            pass
+
+        def recognize_top_card(self, image, **kwargs):
+            seen["image"] = image
+            seen["kwargs"] = kwargs
+            return SimpleNamespace(
+                card_name="Alpha",
+                confidence=0.73,
+                scryfall_id="alpha-id",
+                oracle_id="alpha-oracle",
+                bbox=None,
+                ocr_lines=[],
+                top_k_candidates=[],
+                active_roi=None,
+                tried_rois=[],
+                debug={"mode": {"requested": "confirmation", "effective": "confirmation", "has_expected_card": True}},
+            )
+
+    fake_modules = SimpleNamespace(
+        config=SimpleNamespace(load_engine_config=lambda path=None: {"path": path}),
+        sortingmachine=SimpleNamespace(SortingMachineRecognizer=FakeRecognizer),
+        operational_modes=SimpleNamespace(
+            expected_card_from_values=lambda **kwargs: {"expected": kwargs},
+        ),
+    )
+    monkeypatch.setattr(
+        "sorter.adapters.recognition.fuzzy_enigma_recognizer._load_card_engine_modules",
+        lambda project_root: fake_modules,
+    )
+    monkeypatch.setattr("sorter.adapters.recognition.fuzzy_enigma_recognizer._card_engine_ocr_available", lambda: True)
+
+    adapter = FuzzyEnigmaRecognizerAdapter(project_root=tmp_path, mode="greenfield")
+    frame = Frame(
+        frame_id="frame-5",
+        path=str(tmp_path / "card.jpg"),
+        pile_id=PileId(x_index=0, y_index=0),
+        metadata={
+            "card_name": "Alpha",
+            "recognition_request": {
+                "mode": "confirmation",
+                "expected_card": {
+                    "name": "Alpha",
+                    "set_code": "lea",
+                    "collector_number": "1",
+                },
+                "use_tracked_pool": False,
+                "track_result": True,
+                "prefer_visual_small_pool": True,
+            },
+        },
+    )
+
+    result = adapter.recognize_top_card(frame)
+
+    assert seen["image"] == str(tmp_path / "card.jpg")
+    assert seen["kwargs"]["mode"] == "confirmation"
+    assert seen["kwargs"]["expected_card"] == {
+        "expected": {
+            "name": "Alpha",
+            "set_code": "lea",
+            "collector_number": "1",
+        }
+    }
+    assert seen["kwargs"]["use_tracked_pool"] is False
+    assert seen["kwargs"]["track_result"] is True
+    assert seen["kwargs"]["prefer_visual_small_pool"] is True
+    assert result.requested_mode == "confirmation"
+    assert result.effective_mode == "confirmation"
+    assert "has_expected_card" in result.mode_features
