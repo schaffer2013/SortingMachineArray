@@ -7,6 +7,10 @@ import re
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
+from sorter.adapters.persistence.card_engine_catalog_sync import (
+    CardEngineCatalogSyncRequest,
+    load_offline_catalog_query,
+)
 from sorter.adapters.persistence.sim_card_list_loader import load_sim_card_list
 
 
@@ -123,28 +127,43 @@ def _safe_filename(card_name: str) -> str:
     return cleaned
 
 
-def _download_missing_cards(card_refs: list[CardImageRef], image_dir: Path) -> tuple[int, int]:
-    try:
-        import scrython
-    except Exception as exc:
-        raise RuntimeError(
-            "Auto-fetching simulated card images requires 'scrython'. "
-            "Install it or disable auto image sync/fetch."
-        ) from exc
-
+def _download_missing_cards(
+    card_refs: list[CardImageRef],
+    image_dir: Path,
+    *,
+    project_root: Path,
+) -> tuple[int, int]:
+    query = load_offline_catalog_query(project_root)
     image_dir.mkdir(parents=True, exist_ok=True)
     downloaded = 0
     failed = 0
 
     for card_ref in card_refs:
         card_name = card_ref.name
-        set_id = (card_ref.set_id or "default").lower()
         try:
-            if card_ref.set_id:
-                card_data = scrython.cards.Named(fuzzy=card_name, set=card_ref.set_id)
-            else:
-                card_data = scrython.cards.Named(fuzzy=card_name)
-            image_url = _extract_image_url(card_data)
+            request = CardEngineCatalogSyncRequest(
+                name=card_name,
+                set_code=card_ref.set_id,
+            )
+            identity = query.resolve_card_identity(
+                name_query=request.name,
+                oracle_id=request.oracle_id,
+                scryfall_id=request.scryfall_id,
+                set_code=request.set_code,
+                collector_number=request.collector_number,
+            )
+            if identity is None:
+                failed += 1
+                continue
+            printing = identity.get("printing")
+            if printing is None:
+                printings = identity.get("printings")
+                if isinstance(printings, list) and printings:
+                    printing = printings[0]
+            if printing is None:
+                failed += 1
+                continue
+            image_url = _extract_image_url(printing)
             if image_url is None:
                 failed += 1
                 continue
@@ -152,7 +171,11 @@ def _download_missing_cards(card_refs: list[CardImageRef], image_dir: Path) -> t
             with urlopen(image_url, timeout=30) as response:
                 content = response.read()
 
-            target_dir = image_dir / card_data.set
+            set_id = (
+                str(getattr(printing, "set_code", "")).strip().lower()
+                or (card_ref.set_id or "default").lower()
+            )
+            target_dir = image_dir / set_id
             target_dir.mkdir(parents=True, exist_ok=True)
             file_path = target_dir / f"{_safe_filename(card_name)}.jpg"
             file_path.write_bytes(content)
@@ -166,6 +189,11 @@ def _download_missing_cards(card_refs: list[CardImageRef], image_dir: Path) -> t
 
 
 def _extract_image_url(card_data: object) -> str | None:
+    for attr in ("image_uri", "image_url", "scryfall_image_url"):
+        value = getattr(card_data, attr, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
     get_image_url = getattr(card_data, "get_image_url", None)
     if callable(get_image_url):
         try:
@@ -175,7 +203,7 @@ def _extract_image_url(card_data: object) -> str | None:
         except Exception:
             pass
 
-    # Scryfall data can be exposed as properties (newer scrython) or callables (older scrython).
+    # Image URIs can be exposed as properties or callables depending on upstream adapter versions.
     image_uris_attr = getattr(card_data, "image_uris", None)
     if callable(image_uris_attr):
         try:
@@ -188,7 +216,7 @@ def _extract_image_url(card_data: object) -> str | None:
         if image_url:
             return str(image_url)
 
-    # Try common raw payload attribute names used by different scrython versions.
+    # Try common raw payload attribute names used by different adapter versions.
     raw_payload = (
         getattr(card_data, "_scryfall_data", None)
         or getattr(card_data, "scryfallJson", None)
@@ -293,7 +321,11 @@ def sync_simulated_images(
     downloaded = 0
     failed = 0
     if auto_fetch and missing_before:
-        downloaded, failed = _download_missing_cards(missing_before, image_dir)
+        downloaded, failed = _download_missing_cards(
+            missing_before,
+            image_dir,
+            project_root=project_root,
+        )
 
     refreshed = _existing_image_index(image_dir)
     missing_after = [card for card in cards if not _has_image_for_ref(refreshed, card)]

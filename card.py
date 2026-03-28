@@ -4,8 +4,8 @@ from io import BytesIO
 from PIL import Image
 import copy
 import requests
+from pathlib import Path
 from sortedcontainers import SortedSet
-import scrython
 
 class Card:
     RARITY_ORDER = {
@@ -106,21 +106,38 @@ class Card:
 
     def fetch_card_data(self):
         try:
-            card_data = scrython.cards.Named(fuzzy=self.name.replace('_', ' '))
+            from sorter.adapters.persistence.card_engine_catalog_sync import (
+                load_offline_catalog_query,
+            )
+
+            project_root = Path(__file__).resolve().parent
+            query = load_offline_catalog_query(project_root)
+            identity = query.resolve_card_identity(name_query=self.name.replace('_', ' '))
+            if identity is None:
+                raise LookupError(f"No catalog identity found for {self.name}")
+            card_data = identity.get("printing")
+            if card_data is None:
+                printings = identity.get("printings")
+                if isinstance(printings, list) and printings:
+                    card_data = printings[0]
+            if card_data is None:
+                raise LookupError(f"No printed card found for {self.name}")
 
             # Set card attributes from Scryfall API response
-            self.rarity = card_data.rarity().upper()
+            rarity = getattr(card_data, "rarity", None)
+            self.rarity = str(rarity).upper() if isinstance(rarity, str) else "OTHER"
             try:
                 dummy = self.RARITY_ORDER[self.rarity]
             except:
                 self.rarity = "OTHER"
             try:
-                self.card_type = card_data.type_line().split(" — ")[0].lower()  # Basic type
+                type_line = str(getattr(card_data, "type_line", ""))
+                self.card_type = type_line.split(" — ")[0].lower()  # Basic type
                 if 'creature' in self.card_type:
                     self.card_type = 'creature'
                 dummy = self.TYPE_ORDER[self.card_type]
             except:
-                self.card_type = card_data.type_line().split(" — ")[0].lower().split(" ")[-1]
+                self.card_type = str(getattr(card_data, "type_line", "")).split(" — ")[0].lower().split(" ")[-1]
             try:
                 if self.card_type == 'land':
                     self.card_type = 'non-basic land'
@@ -130,12 +147,12 @@ class Card:
 
             # Handle color for lands differently
             if 'land' in self.card_type:
-                color_identity = card_data.color_identity()
+                color_identity = list(getattr(card_data, "color_identity", []) or [])
                 self.color = 'colorless' if not color_identity else ','.join(
                     [self.COLOR_TRANSLATION[color.lower()] for color in color_identity]
                 ).lower()
             else:
-                colors = card_data.colors()
+                colors = list(getattr(card_data, "colors", []) or [])
                 self.color = 'colorless' if not colors else ','.join(
                     [self.COLOR_TRANSLATION[color.lower()] for color in colors]
                 ).lower()
@@ -143,11 +160,17 @@ class Card:
                 self.color = 'multi'
 
             # Download and assign image
-            image_urls = card_data.image_uris()
-            if 'normal' in image_urls:
-                url = image_urls['normal'].rsplit('?', 1)[0]
-            else: 
-                url = image_urls[0].rsplit('?', 1)[0]
+            image_urls = getattr(card_data, "image_uris", None)
+            if isinstance(image_urls, dict) and 'normal' in image_urls:
+                url = str(image_urls['normal']).rsplit('?', 1)[0]
+            elif isinstance(image_urls, dict) and image_urls:
+                first = next(iter(image_urls.values()))
+                url = str(first).rsplit('?', 1)[0]
+            else:
+                image_url = getattr(card_data, "image_url", None) or getattr(card_data, "image_uri", None)
+                if not isinstance(image_url, str) or not image_url:
+                    raise LookupError(f"No image URL found for {self.name}")
+                url = image_url.rsplit('?', 1)[0]
             response = requests.get(url)
             self.image = Image.open(BytesIO(response.content))
 
