@@ -64,7 +64,8 @@ The sim camera no longer mutates pile observation state on capture by itself; ob
 	- `python scripts/compare_recognition_summaries.py --baseline data/recognition_reports/sim_truth_summary.json --candidate data/recognition_reports/fuzzy_enigma_summary.json`
 - The summary JSON is written under `data/recognition_reports/`.
 - For `fuzzy_enigma`, replay and benchmark commands automatically prefer the parent-owned benchmark config unless you override `--card-engine-config`.
-- The summary JSON now includes alternatives and debug payloads, not just the final score line.
+- The summary JSON now includes alternatives, review reasons, confidence-band counts, and debug payloads, not just the final score line.
+- `fuzzy_enigma` replay and benchmark runs also export inspectable per-case artifacts under `data/recognition_reports/artifacts/` by default, including copied source frames, `ocr_lines.txt`, `debug.json`, and `bbox.json` when available.
 - Sim runs can now return `REVIEW_REQUIRED` when startup scan or post-move verification exhausts the configured retry budget.
 
 ## Vision dataset ingest

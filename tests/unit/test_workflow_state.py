@@ -113,6 +113,17 @@ def test_move_from_feed_selects_expected_piles():
     assert move.to_pile == sorting.pile_id
 
 
+def test_move_from_feed_waits_when_only_destination_is_unknown():
+    feeder = PileState(pile_id=PileId(0, 0), role=PileRole.FEEDER, capacity=10, card_stack=["a#1"], discovered=False)
+    sorting = PileState(pile_id=PileId(1, 0), role=PileRole.SORTING, capacity=10, card_stack=[], discovered=False)
+    snapshot = MachineSnapshot(piles={feeder.pile_id.as_key(): feeder, sorting.pile_id.as_key(): sorting})
+    workflow = LegacyWorkflowState(snapshot)
+
+    move = workflow.plan_next(rank_lookup={"a#1": 1})
+
+    assert move is None
+
+
 def test_step_transitions_to_initial_collection_when_feeders_discovered():
     feeder = PileState(pile_id=PileId(0, 0), role=PileRole.FEEDER, capacity=10, card_stack=["a#1"], discovered=True)
     sorting = PileState(pile_id=PileId(1, 0), role=PileRole.SORTING, capacity=10, card_stack=[], discovered=True)
@@ -122,6 +133,25 @@ def test_step_transitions_to_initial_collection_when_feeders_discovered():
     feeder.mark_empty_confirmed(source="test")
     workflow.update_step()
     assert workflow.step == LegacyStep.INITIAL_COLLECTION
+
+
+def test_step_does_not_transition_to_initial_collection_while_any_feeder_is_unknown():
+    feeder_known_empty = PileState(pile_id=PileId(0, 0), role=PileRole.FEEDER, capacity=10, discovered=True)
+    feeder_unknown = PileState(pile_id=PileId(1, 0), role=PileRole.FEEDER, capacity=10, discovered=False)
+    sorting = PileState(pile_id=PileId(2, 0), role=PileRole.SORTING, capacity=10, card_stack=[], discovered=True)
+    snapshot = MachineSnapshot(
+        piles={
+            feeder_known_empty.pile_id.as_key(): feeder_known_empty,
+            feeder_unknown.pile_id.as_key(): feeder_unknown,
+            sorting.pile_id.as_key(): sorting,
+        }
+    )
+    workflow = LegacyWorkflowState(snapshot)
+
+    feeder_known_empty.mark_empty_confirmed(source="test")
+    workflow.update_step()
+
+    assert workflow.step == LegacyStep.MOVE_FROM_FEED
 
 
 def test_initial_collection_allows_returning_multiple_cards_to_known_feeder():

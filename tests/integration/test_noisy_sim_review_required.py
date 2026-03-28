@@ -27,3 +27,5 @@ def test_noisy_sim_fixture_escalates_to_review_required(tmp_path):
     assert result["status"] == "REVIEW_REQUIRED"
     assert result["metrics"]["retry_count"] >= 1
     assert result["metrics"]["review_required_count"] == 1
+    assert result["metrics"]["review_reason_counts"]
+    assert sum(result["metrics"]["confidence_band_counts"].values()) >= result["metrics"]["scan_count"]

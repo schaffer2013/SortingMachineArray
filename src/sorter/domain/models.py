@@ -208,6 +208,8 @@ class RunMetrics:
     review_required_count: int = 0
     fallback_count: int = 0
     low_confidence_count: int = 0
+    confidence_band_counts: dict[str, int] = field(default_factory=dict)
+    review_reason_counts: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
