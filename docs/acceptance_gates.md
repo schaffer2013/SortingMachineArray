@@ -67,9 +67,12 @@ Run these from the repo root with the shared `.venv`.
   - predicted card
   - confidence
   - review flag
+  - review reason when applicable
   - fallback flag
   - alternatives
   - debug payload
+  - confidence-band counts at the summary level
+- `fuzzy_enigma` replay and benchmark runs must also emit inspectable per-case artifacts for development-time review
 
 ### Gate 3: benchmark truthfulness
 
@@ -127,3 +130,9 @@ The next acceptance expansion after Sprint 1 should add:
 - startup scan and move verification now retry before escalating
 - review-worthy runs should return `REVIEW_REQUIRED` instead of silently passing or collapsing into an ambiguous generic failure
 - noisy-sim fixtures now exist to exercise that escalation path
+
+## Sprint 3 Additions
+
+- replay and benchmark outputs now classify review reasons instead of leaving all review cases lumped together
+- replay and benchmark outputs now export inspectable OCR and bbox artifacts for `fuzzy_enigma`
+- planner coverage now includes partial-knowledge cases where unknown piles should block premature transitions or moves

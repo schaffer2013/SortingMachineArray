@@ -187,7 +187,7 @@
 - [ ] Define discovery-driven ranking behavior so newly identified cards can enter a provisional rank set before the final rank set is locked.
 - [x] Model observation staleness so the system can distinguish "recently seen" from "assumed unchanged."
 - [ ] Add simulated perception faults such as blur, glare, skew, occlusion, bad crop, false empty, missed pick, double feed, and dropped card.
-- [ ] Add tests that prove the planner still behaves correctly when pile contents are partially known or temporarily unknown.
+- [x] Add tests that prove the planner still behaves correctly when pile contents are partially known or temporarily unknown.
 
 **Implementation notes**
 
@@ -221,7 +221,7 @@
 - [x] Pass rendered sim image paths through `Frame.path` so the real recognizer can run against simulation captures.
 - [x] Add an initial parent-side confidence and fallback policy so low-confidence `fuzzy_enigma` results can be marked for review and optionally fall back to `sim_truth` in sim-only workflows.
 - [x] Add parent-owned card-engine config files so live sorter runs and benchmark runs can use different recognition budgets without hard-coding submodule defaults in parent logic.
-- [ ] Save intermediate outputs that matter during development, such as normalized crops and OCR text snippets, so tuning is inspectable.
+- [x] Save intermediate outputs that matter during development, such as normalized crops and OCR text snippets, so tuning is inspectable.
 - [x] Build an initial replay and benchmark harness that runs the same recognizer pipeline against simulated top-card captures.
 
 **Implementation notes**

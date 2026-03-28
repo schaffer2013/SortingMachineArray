@@ -7,6 +7,11 @@ import uuid
 from typing import Any, Callable
 import time
 
+from sorter.application.recognition_reporting import (
+    classify_review_reason,
+    confidence_band_for,
+    increment_counter,
+)
 from sorter.application.use_cases.execute_move import build_pick_place_sequence
 from sorter.domain.events import DomainEvent
 from sorter.domain.machine_state import LegacyWorkflowState, NextMove
@@ -81,6 +86,13 @@ class Orchestrator:
             frame = self.camera.capture_top_card(pile_id)
             result = self.recognizer.recognize_top_card(frame)
             self.world.snapshot.run_state.metrics.scan_count += 1
+            increment_counter(
+                self.world.snapshot.run_state.metrics.confidence_band_counts,
+                confidence_band_for(result.confidence),
+            )
+            review_reason = classify_review_reason(frame, result)
+            if review_reason is not None:
+                increment_counter(self.world.snapshot.run_state.metrics.review_reason_counts, review_reason)
             accepted, reason = self._recognition_decision(frame, result)
             if not accepted:
                 self.world.snapshot.run_state.metrics.low_confidence_count += 1
@@ -109,6 +121,7 @@ class Orchestrator:
                         "backend": result.backend,
                         "needs_review": result.needs_review,
                         "fallback_used": result.fallback_used,
+                        "review_reason": review_reason,
                     },
                 ),
             )
