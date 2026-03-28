@@ -130,14 +130,14 @@ By the end of this sprint, the parent project should have:
 
 ## Block 5: Broader Noisy-Sim Fault Modeling
 
-- [ ] Expand noisy-sim recognition faults beyond the current low-confidence or missing-prediction cases.
+- [x] Expand noisy-sim recognition faults beyond the current low-confidence or missing-prediction cases.
 - [ ] Add deterministic cases for high-value failure classes such as:
   - false empty
   - ambiguous candidate set
   - stale observation pressure
   - contradiction during confirmation
   - mode-mismatch cases where a constrained mode should fail safely
-- [ ] Add tests that prove the parent behavior remains safe and inspectable.
+- [x] Add tests that prove the parent behavior remains safe and inspectable.
 
 ## Block 6: Planner And Ranking Pressure
 
