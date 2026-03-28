@@ -173,3 +173,31 @@ Make the real `fuzzy_enigma` recognizer operational, measurable, replayable, and
 - Next productive slice after commit would be either:
   - benchmark-slice expansion and low-confidence review analysis
   - or the Sprint 2-style planner work around observation-driven recovery
+
+---
+
+## 2026-03-27T21:35:08-07:00
+
+**Status**
+
+- Sprint 1 checkpoint commit created on `sprint-1-recognition-ops`:
+  - `e483c70` `Stand up Sprint 1 recognition ops workflow`
+- Branch pushed to remote:
+  - `origin/sprint-1-recognition-ops`
+- Branch merged back into `phase-2`:
+  - merge commit `087811a`
+- `origin/phase-2` now points at the merge commit as well.
+
+**Why This Checkpoint Matters**
+
+- The branch now contains both:
+  - implementation changes
+  - a reviewable execution trail through the sprint plan and sprint log
+
+**Recommended Next Slice**
+
+- Expand the stable benchmark set beyond the current six top cards.
+- Analyze the two remaining review cases and decide whether the next best improvement is:
+  - ROI tuning
+  - OCR backend comparison
+  - or policy adjustment for borderline-but-correct low-confidence matches.
