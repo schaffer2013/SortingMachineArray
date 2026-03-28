@@ -121,3 +121,9 @@ The next acceptance expansion after Sprint 1 should add:
 - noisy-sim recovery scenarios
 - planner behavior under low-confidence reads
 - hardware-facing replay and capture ingestion
+
+## Sprint 2 Additions
+
+- startup scan and move verification now retry before escalating
+- review-worthy runs should return `REVIEW_REQUIRED` instead of silently passing or collapsing into an ambiguous generic failure
+- noisy-sim fixtures now exist to exercise that escalation path

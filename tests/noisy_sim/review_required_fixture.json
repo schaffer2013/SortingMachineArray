@@ -1,0 +1,36 @@
+{
+  "name": "review_required_fixture",
+  "seed": 42,
+  "grid": {"cols": 2, "rows": 1},
+  "piles": [
+    {
+      "pile_id": {"x_index": 0, "y_index": 0},
+      "role": "FEEDER",
+      "cards": ["Elspeth, Storm Slayer#elspethstormslayer"],
+      "capacity": 85,
+      "discovered": false,
+      "x_mm": 100,
+      "y_mm": 100
+    },
+    {
+      "pile_id": {"x_index": 1, "y_index": 0},
+      "role": "COLLECTION",
+      "cards": [],
+      "capacity": 85,
+      "discovered": true,
+      "x_mm": 200,
+      "y_mm": 100
+    }
+  ],
+  "card_set_by_instance_id": {
+    "Elspeth, Storm Slayer#elspethstormslayer": "tdm"
+  },
+  "faults": [
+    {
+      "type": "recognition_low_confidence",
+      "pile": "0,0",
+      "confidence": 0.15,
+      "times": 2
+    }
+  ]
+}

@@ -44,9 +44,12 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 - Optional card-engine mode: `SORTER_CARD_ENGINE_MODE=greenfield`
 - Recognition policy file: `SORTER_RECOGNITION_THRESHOLDS=config/vision/recognition_thresholds.json`
 - Optional low-confidence fallback: `SORTER_FUZZY_ENIGMA_SIM_TRUTH_FALLBACK=1`
+- Startup scan retry budget: `SORTER_STARTUP_SCAN_MAX_RETRIES=1`
+- Verification retry budget: `SORTER_VERIFICATION_MAX_RETRIES=2`
 
 When `fuzzy_enigma` is enabled, the sim camera now passes the rendered top-card image path through the parent `Frame` so the real recognizer can operate on the same simulated images the sorter sees.
 The parent repo now also owns a benchmark-specific card-engine config at `config/card_engine/benchmark.engine.json` so replay and benchmark runs can use a more realistic measurement budget without changing the live sorter config.
+The sim camera no longer mutates pile observation state on capture by itself; observation now advances when the application processes recognizer results, which makes retries and `REVIEW_REQUIRED` escalation more honest.
 
 ## Recognition replay and benchmark
 
@@ -62,6 +65,7 @@ The parent repo now also owns a benchmark-specific card-engine config at `config
 - The summary JSON is written under `data/recognition_reports/`.
 - For `fuzzy_enigma`, replay and benchmark commands automatically prefer the parent-owned benchmark config unless you override `--card-engine-config`.
 - The summary JSON now includes alternatives and debug payloads, not just the final score line.
+- Sim runs can now return `REVIEW_REQUIRED` when startup scan or post-move verification exhausts the configured retry budget.
 
 ## Vision dataset ingest
 
@@ -88,6 +92,8 @@ If you want to run the real vendored recognizer, make sure the submodule OCR ext
 
 - Run all tests:
 	- `pytest -q`
+- Noisy-sim review escalation coverage:
+	- `pytest tests/integration/test_noisy_sim_review_required.py -q`
 
 ## Sim image sync
 

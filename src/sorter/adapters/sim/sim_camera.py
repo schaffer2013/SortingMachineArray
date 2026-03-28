@@ -25,10 +25,9 @@ class SimCameraAdapter:
 
     def capture_top_card(self, pile_id: PileId) -> Frame:
         frame_id = f"frame-{uuid4().hex[:8]}"
-        card_name = self.world.observe_top_card(pile_id, frame_id=frame_id)
+        card_name = self.world.peek_top_card_name(pile_id)
         image_path = self.world.top_card_image_path(pile_id)
-        pile = self.world.snapshot.get_pile(pile_id)
-        top_id = pile.top_card_id() if pile is not None else None
+        top_id = self.world.peek_top_card_id(pile_id)
         card_meta = self.world.card_by_id.get(top_id) if top_id is not None else None
         return Frame(
             frame_id=frame_id,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 import math
 from typing import Literal
 
@@ -54,6 +55,7 @@ class PileObservation:
     confidence: float = 0.0
     source: str | None = None
     frame_id: str | None = None
+    observed_at_utc: str | None = None
 
     def is_known(self) -> bool:
         return self.state != PileObservationState.UNKNOWN
@@ -121,11 +123,27 @@ class PileState:
     def is_empty_confirmed(self) -> bool:
         return self.observation.is_empty_confirmed()
 
-    def mark_unknown(self) -> None:
+    def observation_is_stale(self, reference_utc: str, *, max_age_seconds: float) -> bool:
+        if self.observation.observed_at_utc is None:
+            return True
+        observed_at = datetime.fromisoformat(self.observation.observed_at_utc)
+        reference_at = datetime.fromisoformat(reference_utc)
+        return (reference_at - observed_at).total_seconds() > max_age_seconds
+
+    def mark_unknown(
+        self,
+        source: str | None = None,
+        frame_id: str | None = None,
+        observed_at_utc: str | None = None,
+    ) -> None:
         self.discovered = False
         self.stack_count_known = False
         self.card_stack.clear()
-        self.observation = PileObservation()
+        self.observation = PileObservation(
+            source=source,
+            frame_id=frame_id,
+            observed_at_utc=observed_at_utc,
+        )
 
     def mark_top_card_seen(
         self,
@@ -133,6 +151,7 @@ class PileState:
         confidence: float = 1.0,
         source: str | None = None,
         frame_id: str | None = None,
+        observed_at_utc: str | None = None,
         count_known: bool | None = None,
     ) -> None:
         self.discovered = True
@@ -144,6 +163,7 @@ class PileState:
             confidence=confidence,
             source=source,
             frame_id=frame_id,
+            observed_at_utc=observed_at_utc,
         )
 
     def mark_empty_confirmed(
@@ -151,6 +171,7 @@ class PileState:
         confidence: float = 1.0,
         source: str | None = None,
         frame_id: str | None = None,
+        observed_at_utc: str | None = None,
     ) -> None:
         self.discovered = True
         self.stack_count_known = True
@@ -160,6 +181,7 @@ class PileState:
             confidence=confidence,
             source=source,
             frame_id=frame_id,
+            observed_at_utc=observed_at_utc,
         )
 
     def distance_from(self, other: "PileState") -> float:
@@ -181,6 +203,11 @@ class RunMetrics:
     move_count: int = 0
     distance_mm: float = 0.0
     failures: int = 0
+    scan_count: int = 0
+    retry_count: int = 0
+    review_required_count: int = 0
+    fallback_count: int = 0
+    low_confidence_count: int = 0
 
 
 @dataclass

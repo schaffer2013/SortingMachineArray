@@ -13,6 +13,8 @@ def test_app_settings_from_env_reads_recognizer_backend_controls(monkeypatch, tm
     monkeypatch.setenv("SORTER_CARD_ENGINE_PREFER_VISUAL_SMALL_POOL", "true")
     monkeypatch.setenv("SORTER_RECOGNITION_MIN_CONFIDENCE", "0.72")
     monkeypatch.setenv("SORTER_FUZZY_ENIGMA_SIM_TRUTH_FALLBACK", "1")
+    monkeypatch.setenv("SORTER_STARTUP_SCAN_MAX_RETRIES", "3")
+    monkeypatch.setenv("SORTER_VERIFICATION_MAX_RETRIES", "4")
 
     settings = AppSettings.from_env(project_root=tmp_path)
 
@@ -23,6 +25,8 @@ def test_app_settings_from_env_reads_recognizer_backend_controls(monkeypatch, tm
     assert settings.card_engine_prefer_visual_small_pool is True
     assert settings.recognition_min_confidence == 0.72
     assert settings.fuzzy_enigma_sim_truth_fallback is True
+    assert settings.startup_scan_max_retries == 3
+    assert settings.verification_max_retries == 4
 
 
 def test_app_settings_defaults_card_engine_config_to_parent_owned_file(monkeypatch, tmp_path):
@@ -56,3 +60,5 @@ def test_app_settings_reads_default_recognition_policy_from_file(monkeypatch, tm
     assert settings.recognition_thresholds_path == policy_path
     assert settings.recognition_min_confidence == 0.67
     assert settings.fuzzy_enigma_sim_truth_fallback is True
+    assert settings.startup_scan_max_retries == 1
+    assert settings.verification_max_retries == 2

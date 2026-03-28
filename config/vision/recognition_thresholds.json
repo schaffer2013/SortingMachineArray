@@ -1,4 +1,6 @@
 {
   "verification_min_confidence": 0.6,
-  "allow_sim_truth_fallback": false
+  "allow_sim_truth_fallback": false,
+  "startup_scan_max_retries": 1,
+  "verification_max_retries": 2
 }

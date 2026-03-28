@@ -20,7 +20,8 @@ DDL = [
       status TEXT NOT NULL,
       started_at TEXT NOT NULL,
       finished_at TEXT,
-      config_snapshot_json TEXT NOT NULL
+      config_snapshot_json TEXT NOT NULL,
+      result_metrics_json TEXT
     )
     """,
     """
@@ -82,8 +83,21 @@ class SQLiteRunStore:
         with self._connect() as conn:
             for statement in DDL:
                 conn.execute(statement)
+            self._ensure_run_columns(conn)
             self._ensure_frame_columns(conn)
             conn.commit()
+
+    def _ensure_run_columns(self, conn: sqlite3.Connection) -> None:
+        existing = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(runs)").fetchall()
+        }
+        migrations = {
+            "result_metrics_json": "ALTER TABLE runs ADD COLUMN result_metrics_json TEXT",
+        }
+        for column, statement in migrations.items():
+            if column not in existing:
+                conn.execute(statement)
 
     def _ensure_frame_columns(self, conn: sqlite3.Connection) -> None:
         existing = {
@@ -187,10 +201,15 @@ class SQLiteRunStore:
             )
             conn.commit()
 
-    def finish_run(self, run_id: str, status: str) -> None:
+    def finish_run(self, run_id: str, status: str, metrics: dict | None = None) -> None:
         with self._connect() as conn:
             conn.execute(
-                "UPDATE runs SET status = ?, finished_at = ? WHERE run_id = ?",
-                (status, datetime.now(UTC).isoformat(), run_id),
+                "UPDATE runs SET status = ?, finished_at = ?, result_metrics_json = ? WHERE run_id = ?",
+                (
+                    status,
+                    datetime.now(UTC).isoformat(),
+                    json.dumps(metrics) if metrics is not None else None,
+                    run_id,
+                ),
             )
             conn.commit()

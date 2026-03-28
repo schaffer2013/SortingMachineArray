@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, UTC
 import logging
 import uuid
@@ -8,7 +8,6 @@ from typing import Any, Callable
 import time
 
 from sorter.application.use_cases.execute_move import build_pick_place_sequence
-from sorter.application.use_cases.verify_move import verify_move
 from sorter.domain.events import DomainEvent
 from sorter.domain.machine_state import LegacyWorkflowState, NextMove
 from sorter.domain.models import MachineSnapshot
@@ -25,6 +24,15 @@ from sorter.ports.run_store import RunStorePort
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class ObservationCycle:
+    accepted: bool
+    frame: Any
+    result: Any
+    attempts: int
+    reason: str
+
+
 @dataclass
 class Orchestrator:
     motion: MotionPort
@@ -36,9 +44,98 @@ class Orchestrator:
     run_store: RunStorePort
     world: Any
     recognition_min_confidence: float = 0.6
+    startup_scan_max_retries: int = 1
+    verification_max_retries: int = 2
 
     def _run_id(self) -> str:
         return f"run-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:8]}"
+
+    def _metrics_payload(self, snapshot: MachineSnapshot) -> dict:
+        return asdict(snapshot.run_state.metrics)
+
+    def _recognition_decision(self, frame, result) -> tuple[bool, str]:
+        if result.needs_review:
+            return False, "needs_review"
+        if result.fallback_used:
+            self.world.snapshot.run_state.metrics.fallback_count += 1
+        if result.card_name is None:
+            if frame.path is None:
+                return True, "empty_confirmed"
+            return False, "missing_prediction_for_visible_card"
+        if result.confidence < self.recognition_min_confidence:
+            return False, "confidence_below_threshold"
+        return True, "accepted"
+
+    def _observe_pile_with_retries(
+        self,
+        run_id: str,
+        seq: int,
+        pile_id,
+        *,
+        phase: str,
+        max_retries: int,
+    ) -> ObservationCycle:
+        attempts = 0
+        while True:
+            attempts += 1
+            frame = self.camera.capture_top_card(pile_id)
+            result = self.recognizer.recognize_top_card(frame)
+            self.world.snapshot.run_state.metrics.scan_count += 1
+            accepted, reason = self._recognition_decision(frame, result)
+            if not accepted:
+                self.world.snapshot.run_state.metrics.low_confidence_count += 1
+            observed_name = result.card_name if accepted else None
+            self.world.apply_recognition_observation(
+                pile_id,
+                recognized_name=observed_name,
+                confidence=result.confidence,
+                frame_id=frame.frame_id,
+                observed_at_utc=frame.captured_at_utc,
+                source=phase,
+            )
+            self.run_store.append_event(
+                run_id,
+                seq,
+                DomainEvent.now(
+                    "recognition_attempt",
+                    {
+                        "phase": phase,
+                        "pile": pile_id.as_key(),
+                        "attempt": attempts,
+                        "accepted": accepted,
+                        "reason": reason,
+                        "card_name": result.card_name,
+                        "confidence": result.confidence,
+                        "backend": result.backend,
+                        "needs_review": result.needs_review,
+                        "fallback_used": result.fallback_used,
+                    },
+                ),
+            )
+            self.run_store.save_frame(run_id, seq, frame, result)
+            self.run_store.save_snapshot(run_id, seq, self.world.snapshot)
+            if accepted:
+                return ObservationCycle(True, frame, result, attempts, reason)
+            if attempts > max_retries:
+                self.world.snapshot.run_state.metrics.review_required_count += 1
+                return ObservationCycle(False, frame, result, attempts, reason)
+            self.world.snapshot.run_state.metrics.retry_count += 1
+            self.run_store.append_event(
+                run_id,
+                seq,
+                DomainEvent.now(
+                    "recognition_retry",
+                    {
+                        "phase": phase,
+                        "pile": pile_id.as_key(),
+                        "attempt": attempts,
+                        "reason": reason,
+                    },
+                ),
+            )
+
+    def _finish_run(self, run_id: str, status: str, snapshot: MachineSnapshot) -> None:
+        self.run_store.finish_run(run_id, status, metrics=self._metrics_payload(snapshot))
 
     def run_once(
         self,
@@ -80,9 +177,9 @@ class Orchestrator:
         while True:
             if should_stop and should_stop():
                 self.lights.set_status("idle")
-                self.run_store.finish_run(run_id, "STOPPED")
+                self._finish_run(run_id, "STOPPED", snapshot)
                 logger.info("run stopped: run_id=%s seq=%s", run_id, seq)
-                return {"run_id": run_id, "status": "STOPPED", "seq": seq}
+                return {"run_id": run_id, "status": "STOPPED", "seq": seq, "metrics": self._metrics_payload(snapshot)}
 
             next_move = workflow.plan_next(rank_lookup)
             while next_move is None:
@@ -101,14 +198,15 @@ class Orchestrator:
                         seq,
                     )
                     self.lights.set_status("fault")
-                    self.run_store.finish_run(run_id, "FAULTED")
+                    snapshot.run_state.metrics.failures += 1
+                    self._finish_run(run_id, "FAULTED", snapshot)
                     logger.warning(
                         "run faulted: run_id=%s seq=%s reason=no_move_available step=%s",
                         run_id,
                         seq,
                         workflow.step.name,
                     )
-                    return {"run_id": run_id, "status": "FAULTED", "seq": seq}
+                    return {"run_id": run_id, "status": "FAULTED", "seq": seq, "metrics": self._metrics_payload(snapshot)}
             if workflow.step.name == "FINISH":
                 break
 
@@ -129,12 +227,15 @@ class Orchestrator:
                 next_move,
                 per_command_delay_s=per_command_delay_s,
             )
-            verified, verification_result, verification_frame = verify_move(
-                next_move,
-                self.camera,
-                self.recognizer,
-                min_confidence=self.recognition_min_confidence,
+            verification = self._observe_pile_with_retries(
+                run_id,
+                seq,
+                next_move.from_pile,
+                phase="verification",
+                max_retries=self.verification_max_retries,
             )
+            verified = verification.accepted
+            verification_result = verification.result
             self.run_store.append_event(run_id, seq, DomainEvent.now("move_verified", {
                 "verified": verified,
                 "confidence": verification_result.confidence,
@@ -144,9 +245,11 @@ class Orchestrator:
                 "oracle_id": verification_result.oracle_id,
                 "needs_review": verification_result.needs_review,
                 "fallback_used": verification_result.fallback_used,
+                "attempts": verification.attempts,
+                "reason": verification.reason,
             }))
             logger.debug(
-                "move verification: run_id=%s seq=%s verified=%s confidence=%.3f card=%s backend=%s review=%s fallback=%s",
+                "move verification: run_id=%s seq=%s verified=%s confidence=%.3f card=%s backend=%s review=%s fallback=%s attempts=%s reason=%s",
                 run_id,
                 seq,
                 verified,
@@ -155,27 +258,34 @@ class Orchestrator:
                 verification_result.backend,
                 verification_result.needs_review,
                 verification_result.fallback_used,
+                verification.attempts,
+                verification.reason,
             )
-            self.run_store.save_frame(run_id, seq, verification_frame, verification_result)
-            self.run_store.save_snapshot(run_id, seq, snapshot)
             if not verified:
                 self.lights.set_status("fault")
-                self.run_store.finish_run(run_id, "FAULTED")
+                snapshot.run_state.metrics.failures += 1
+                self._finish_run(run_id, "REVIEW_REQUIRED", snapshot)
                 logger.warning(
-                    "run faulted: run_id=%s seq=%s card=%s confidence=%.3f backend=%s review=%s",
+                    "run review required: run_id=%s seq=%s card=%s confidence=%.3f backend=%s review=%s reason=%s",
                     run_id,
                     seq,
                     verification_result.card_name,
                     verification_result.confidence,
                     verification_result.backend,
                     verification_result.needs_review,
+                    verification.reason,
                 )
-                return {"run_id": run_id, "status": "FAULTED", "seq": seq}
+                return {
+                    "run_id": run_id,
+                    "status": "REVIEW_REQUIRED",
+                    "seq": seq,
+                    "metrics": self._metrics_payload(snapshot),
+                }
 
         self.lights.set_status("idle")
-        self.run_store.finish_run(run_id, "COMPLETED")
+        self._finish_run(run_id, "COMPLETED", snapshot)
         logger.info("run completed: run_id=%s seq=%s", run_id, seq)
-        return {"run_id": run_id, "status": "COMPLETED", "seq": seq}
+        return {"run_id": run_id, "status": "COMPLETED", "seq": seq, "metrics": self._metrics_payload(snapshot)}
 
     def _perform_startup_discovery_scan(
         self,
@@ -188,9 +298,9 @@ class Orchestrator:
         for pile in snapshot.piles.values():
             if should_stop and should_stop():
                 self.lights.set_status("idle")
-                self.run_store.finish_run(run_id, "STOPPED")
+                self._finish_run(run_id, "STOPPED", snapshot)
                 logger.info("run stopped during startup scan: run_id=%s pile=%s", run_id, pile.pile_id.as_key())
-                return {"run_id": run_id, "status": "STOPPED", "seq": 0}
+                return {"run_id": run_id, "status": "STOPPED", "seq": 0, "metrics": self._metrics_payload(snapshot)}
 
             self.run_store.append_event(
                 run_id,
@@ -213,8 +323,14 @@ class Orchestrator:
                 0,
                 DomainEvent.now("command", {"name": "CaptureDiscovery", "payload": {"pile": pile.pile_id.as_key()}}),
             )
-            frame = self.camera.capture_top_card(pile.pile_id)
-            result = self.recognizer.recognize_top_card(frame)
+            observation = self._observe_pile_with_retries(
+                run_id,
+                0,
+                pile.pile_id,
+                phase="startup_scan",
+                max_retries=self.startup_scan_max_retries,
+            )
+            result = observation.result
             self.run_store.append_event(
                 run_id,
                 0,
@@ -230,6 +346,8 @@ class Orchestrator:
                         "needs_review": result.needs_review,
                         "fallback_used": result.fallback_used,
                         "empty_confirmed": result.card_name is None,
+                        "attempts": observation.attempts,
+                        "reason": observation.reason,
                     },
                 ),
             )
@@ -243,8 +361,23 @@ class Orchestrator:
                 result.needs_review,
                 result.fallback_used,
             )
-            self.run_store.save_frame(run_id, 0, frame, result)
-            self.run_store.save_snapshot(run_id, 0, snapshot)
+            if not observation.accepted:
+                self.lights.set_status("fault")
+                snapshot.run_state.metrics.failures += 1
+                self._finish_run(run_id, "REVIEW_REQUIRED", snapshot)
+                logger.warning(
+                    "startup scan review required: run_id=%s pile=%s confidence=%.3f reason=%s",
+                    run_id,
+                    pile.pile_id.as_key(),
+                    result.confidence,
+                    observation.reason,
+                )
+                return {
+                    "run_id": run_id,
+                    "status": "REVIEW_REQUIRED",
+                    "seq": 0,
+                    "metrics": self._metrics_payload(snapshot),
+                }
 
         logger.info("startup discovery scan completed: run_id=%s", run_id)
         return None

@@ -73,7 +73,7 @@
 - [x] `scripts/benchmark_recognizer.py`: produce measurable recognition reports.
 - [ ] `scripts/audit_code_health.py`: summarize import-graph outliers, low-coverage modules, and likely vestigial code.
 - [x] `tests/golden_frames/`: curated perception regression set.
-- [ ] `tests/noisy_sim/`: simulated conditions that intentionally break ideal assumptions.
+- [x] `tests/noisy_sim/`: simulated conditions that intentionally break ideal assumptions.
 
 ## Suggested Design Targets
 
@@ -182,10 +182,10 @@
 - [x] Where card names are tracked in the form "Snapcaster Mage#snapcastermage", it should be "Snapcaster Mage#{card.scryfall_id}" 
 - [x] Split hidden world truth from observed machine state so the planner cannot read the live full `card_stack` in normal execution.
 - [x] Replace the binary `discovered` concept with richer pile observations such as `unknown`, `top_card_seen`, `empty_confirmed`, `confidence`, `last_seen_at`, and `frame_id`.
-- [ ] Make feeder discovery realistic: the picker only learns the next visible card after a scan and only learns a pile is empty when a scan or pick/verify sequence confirms it.
-- [ ] Ensure every move updates state through observations and verification, not direct knowledge shortcuts.
+- [x] Make feeder discovery realistic: the picker only learns the next visible card after a scan and only learns a pile is empty when a scan or pick/verify sequence confirms it.
+- [x] Ensure every move updates state through observations and verification, not direct knowledge shortcuts.
 - [ ] Define discovery-driven ranking behavior so newly identified cards can enter a provisional rank set before the final rank set is locked.
-- [ ] Model observation staleness so the system can distinguish "recently seen" from "assumed unchanged."
+- [x] Model observation staleness so the system can distinguish "recently seen" from "assumed unchanged."
 - [ ] Add simulated perception faults such as blur, glare, skew, occlusion, bad crop, false empty, missed pick, double feed, and dropped card.
 - [ ] Add tests that prove the planner still behaves correctly when pile contents are partially known or temporarily unknown.
 
@@ -276,8 +276,8 @@
 - [ ] Refactor discovery and planning so recognition updates state through explicit events rather than direct pile mutation shortcuts.
 - [ ] Update planning logic so it operates on observed top cards and confirmed empty states instead of full internal knowledge.
 - [ ] Support incremental ranking updates during discovery and an explicit "ranking finalized" transition once all active cards are discovered.
-- [ ] Add low-confidence branches for re-scan, second-look capture, different camera pose, or quarantine pile handling.
-- [ ] Strengthen move verification so source and destination observations are both checked after each move.
+- [x] Add low-confidence branches for re-scan, second-look capture, different camera pose, or quarantine pile handling.
+- [x] Strengthen move verification so source and destination observations are both checked after each move.
 - [ ] Track richer run metrics such as scan count, retries, distance traveled, confidence distribution, stale observations, and fault causes.
 - [ ] Revisit the sorting strategy after the observation model is honest so the planner can optimize for fewer scans and safer moves, not just rank order.
 - [ ] Define what counts as a recoverable fault versus a stop-the-run fault.
