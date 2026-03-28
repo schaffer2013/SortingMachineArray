@@ -29,6 +29,7 @@ class SimWorld:
     coords: dict[str, tuple[float, float]]
     compiled_ranking: CompiledRanking | None = None
     held_card_id: str | None = None
+    recognition_faults: tuple[dict, ...] = ()
 
     @staticmethod
     def from_fixture(path: Path, override_seed: int | None = None) -> "SimWorld":
@@ -89,6 +90,11 @@ class SimWorld:
             piles[key] = pile
 
         snapshot = MachineSnapshot(piles=piles, pose=MachinePose(), run_state=RunState(phase="IDLE"))
+        recognition_faults = tuple(
+            fault
+            for fault in data.get("faults", [])
+            if isinstance(fault, dict) and str(fault.get("type", "")).startswith("recognition_")
+        )
         return SimWorld(
             scenario_name=data.get("name", path.stem),
             seed=seed,
@@ -97,6 +103,7 @@ class SimWorld:
             card_by_id=card_by_id,
             image_by_card_id=image_by_card_id,
             coords=coords,
+            recognition_faults=recognition_faults,
         )
 
     def rank_lookup(self) -> dict[str, int]:
@@ -144,16 +151,7 @@ class SimWorld:
             pile.card_stack.clear()
             pile.mark_empty_confirmed(source="pick_reveal")
         else:
-            if pile.has_known_count():
-                pile.card_stack = list(hidden_stack)
-            else:
-                pile.card_stack = [next_top_id]
-            pile.mark_top_card_seen(
-                card_name=self.card_by_id[next_top_id].name,
-                confidence=1.0,
-                source="pick_reveal",
-                count_known=pile.has_known_count(),
-            )
+            pile.mark_unknown(source="pick_reveal")
         self.snapshot.pose.holding_card_id = self.held_card_id
 
     def place_to(self, pile_id: PileId) -> None:
@@ -180,37 +178,62 @@ class SimWorld:
         self.held_card_id = None
         self.snapshot.pose.holding_card_id = None
 
-    def observe_top_card(
+    def peek_top_card_id(self, pile_id: PileId) -> str | None:
+        hidden_stack = self.hidden_piles.get(pile_id.as_key(), [])
+        return hidden_stack[-1] if hidden_stack else None
+
+    def peek_top_card_name(self, pile_id: PileId) -> str | None:
+        top_id = self.peek_top_card_id(pile_id)
+        if top_id is None:
+            return None
+        card_meta = self.card_by_id.get(top_id)
+        return card_meta.name if card_meta is not None else None
+
+    def apply_recognition_observation(
         self,
         pile_id: PileId,
+        *,
+        recognized_name: str | None,
+        confidence: float,
         frame_id: str | None = None,
-        source: str = "sim_camera",
-    ) -> str | None:
+        observed_at_utc: str | None = None,
+        source: str = "recognizer",
+    ) -> None:
         pile = self.snapshot.get_pile(pile_id)
         if pile is None:
-            return None
-        hidden_stack = self.hidden_piles.get(pile_id.as_key(), [])
-        top_id = hidden_stack[-1] if hidden_stack else None
+            return
+        top_id = self.peek_top_card_id(pile_id)
         if top_id is None:
             pile.card_stack.clear()
-            pile.mark_empty_confirmed(source=source, frame_id=frame_id)
-            return None
+            pile.mark_empty_confirmed(
+                confidence=confidence,
+                source=source,
+                frame_id=frame_id,
+                observed_at_utc=observed_at_utc,
+            )
+            return
+        if recognized_name is None:
+            pile.mark_unknown(
+                source=source,
+                frame_id=frame_id,
+                observed_at_utc=observed_at_utc,
+            )
+            return
         if pile.has_known_count():
-            pile.card_stack = list(hidden_stack)
+            pile.card_stack = [top_id]
         else:
             pile.card_stack = [top_id]
-        card_name = self.card_by_id[top_id].name
         pile.mark_top_card_seen(
-            card_name=card_name,
-            confidence=1.0,
+            card_name=recognized_name,
+            confidence=confidence,
             source=source,
             frame_id=frame_id,
+            observed_at_utc=observed_at_utc,
             count_known=pile.has_known_count(),
         )
-        return card_name
 
     def top_card_name(self, pile_id: PileId) -> str | None:
-        return self.observe_top_card(pile_id)
+        return self.peek_top_card_name(pile_id)
 
     def top_card_image_path(self, pile_id: PileId) -> str | None:
         pile = self.snapshot.get_pile(pile_id)

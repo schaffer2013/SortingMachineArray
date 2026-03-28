@@ -8,7 +8,7 @@ from sorter.domain.enums import PileObservationState
 from sorter.domain.models import PileId
 
 
-def test_sim_camera_capture_updates_pile_observation_state():
+def test_sim_camera_capture_does_not_mutate_pile_observation_state_before_recognition():
     root = Path(__file__).resolve().parents[2]
     world = SimWorld.from_fixture(root / "data/generated/runtime_fixture.json")
     pile_id = PileId(x_index=1, y_index=0)
@@ -19,9 +19,9 @@ def test_sim_camera_capture_updates_pile_observation_state():
 
     assert frame.pile_id == pile_id
     assert pile is not None
-    assert pile.observation.state == PileObservationState.TOP_CARD_SEEN
-    assert pile.observation.frame_id == frame.frame_id
-    assert pile.observation.top_card_name is not None
+    assert pile.observation.state == PileObservationState.UNKNOWN
+    assert pile.observation.frame_id is None
+    assert pile.observation.top_card_name is None
     assert frame.path == world.top_card_image_path(pile_id)
     assert frame.captured_at_utc is not None
     assert frame.camera_id == "sim_topdown"
@@ -65,26 +65,28 @@ def test_capture_reveals_only_top_card_without_leaking_full_hidden_stack():
 
     assert frame.pile_id == pile_id
     assert pile is not None
-    assert len(pile.card_stack) == 1
+    assert len(pile.card_stack) == 0
     assert pile.has_known_count() is False
     assert len(world.hidden_piles[pile_id.as_key()]) == hidden_count
 
 
-def test_pick_reveals_next_source_top_card_immediately():
+def test_pick_marks_source_unknown_until_the_next_scan():
     root = Path(__file__).resolve().parents[2]
     world = SimWorld.from_fixture(root / "data/generated/runtime_fixture.json")
     pile_id = PileId(x_index=1, y_index=0)
     camera = SimCameraAdapter(world)
     hidden_before = list(world.hidden_piles[pile_id.as_key()])
 
-    camera.capture_top_card(pile_id)
     world.pick_from(pile_id)
     pile = world.snapshot.get_pile(pile_id)
 
     assert pile is not None
-    assert pile.observation.state == PileObservationState.TOP_CARD_SEEN
-    assert pile.top_card_id() == hidden_before[-2]
-    assert pile.has_known_count() is False
+    if world.hidden_piles[pile_id.as_key()]:
+        assert pile.observation.state == PileObservationState.UNKNOWN
+        assert pile.top_card_id() is None
+        assert pile.has_known_count() is False
+    else:
+        assert pile.observation.state == PileObservationState.EMPTY_CONFIRMED
 
 
 def test_pick_uses_hidden_stack_even_when_snapshot_stack_is_initially_unknown():
@@ -103,8 +105,8 @@ def test_pick_uses_hidden_stack_even_when_snapshot_stack_is_initially_unknown():
     assert len(world.hidden_piles[pile_id.as_key()]) == hidden_before - 1
     assert pile is not None
     if world.hidden_piles[pile_id.as_key()]:
-        assert len(pile.card_stack) == 1
-        assert pile.observation.state == PileObservationState.TOP_CARD_SEEN
+        assert pile.card_stack == []
+        assert pile.observation.state == PileObservationState.UNKNOWN
         assert pile.has_known_count() is False
     else:
         assert pile.card_stack == []

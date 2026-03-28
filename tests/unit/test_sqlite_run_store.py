@@ -35,6 +35,7 @@ def test_sqlite_run_store_persists_rich_frame_and_recognition_fields(tmp_path):
     store.save_frame("run-1", 1, frame, recognition)
 
     with sqlite3.connect(store.db_path) as conn:
+        store.finish_run("run-1", "COMPLETED", metrics={"scan_count": 3, "retry_count": 1})
         row = conn.execute(
             """
             SELECT
@@ -54,6 +55,9 @@ def test_sqlite_run_store_persists_rich_frame_and_recognition_fields(tmp_path):
             WHERE frame_id = 'frame-1'
             """
         ).fetchone()
+        metrics_row = conn.execute(
+            "SELECT result_metrics_json FROM runs WHERE run_id = 'run-1'"
+        ).fetchone()
 
     assert row == (
         "0,0",
@@ -69,3 +73,4 @@ def test_sqlite_run_store_persists_rich_frame_and_recognition_fields(tmp_path):
         0,
         0,
     )
+    assert metrics_row == ('{"scan_count": 3, "retry_count": 1}',)

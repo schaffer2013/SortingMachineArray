@@ -9,6 +9,7 @@ from sorter.adapters.sim.sim_camera import SimCameraAdapter
 from sorter.adapters.sim.sim_vacuum import SimVacuumAdapter
 from sorter.adapters.sim.sim_lights import SimLightsAdapter
 from sorter.adapters.sim.sim_recognizer import SimRecognizerAdapter
+from sorter.adapters.sim.sim_faulting_recognizer import SimFaultingRecognizerAdapter
 from sorter.adapters.recognition.fuzzy_enigma_recognizer import FuzzyEnigmaRecognizerAdapter
 from sorter.adapters.persistence.file_card_catalog import FileCardCatalog
 from sorter.adapters.persistence.sim_card_list_loader import expand_and_shuffle_instances, load_sim_card_list
@@ -47,6 +48,8 @@ def build_sim_orchestrator(settings: AppSettings) -> Orchestrator:
         run_store=context.run_store,
         world=context.world,
         recognition_min_confidence=settings.recognition_min_confidence,
+        startup_scan_max_retries=settings.startup_scan_max_retries,
+        verification_max_retries=settings.verification_max_retries,
     )
 
 
@@ -103,8 +106,12 @@ def build_sim_runtime_context(settings: AppSettings) -> SimRuntimeContext:
 
 def _build_recognizer(settings: AppSettings, world: SimWorld, catalog: FileCardCatalog):
     backend = settings.recognizer_backend.strip().lower()
+    recognition_faults = getattr(world, "recognition_faults", ())
     if backend == "sim_truth":
-        return SimRecognizerAdapter(world, catalog)
+        recognizer = SimRecognizerAdapter(world, catalog)
+        if recognition_faults:
+            return SimFaultingRecognizerAdapter(recognizer, recognition_faults)
+        return recognizer
     if backend == "fuzzy_enigma":
         root = settings.project_root or settings.scenario_fixture.parents[2]
         primary = FuzzyEnigmaRecognizerAdapter(
@@ -115,11 +122,14 @@ def _build_recognizer(settings: AppSettings, world: SimWorld, catalog: FileCardC
             prefer_visual_small_pool=settings.card_engine_prefer_visual_small_pool,
         )
         fallback = SimRecognizerAdapter(world, catalog) if settings.fuzzy_enigma_sim_truth_fallback else None
-        return PolicyRecognizerAdapter(
+        recognizer = PolicyRecognizerAdapter(
             primary,
             min_confidence=settings.recognition_min_confidence,
             fallback=fallback,
         )
+        if recognition_faults:
+            return SimFaultingRecognizerAdapter(recognizer, recognition_faults)
+        return recognizer
     raise ValueError(f"Unsupported recognizer backend: {settings.recognizer_backend}")
 
 

@@ -31,6 +31,8 @@ class AppSettings:
     recognition_thresholds_path: Path | None = None
     recognition_min_confidence: float = 0.6
     fuzzy_enigma_sim_truth_fallback: bool = False
+    startup_scan_max_retries: int = 1
+    verification_max_retries: int = 2
 
     @staticmethod
     def from_env(project_root: Path | None = None) -> "AppSettings":
@@ -80,6 +82,12 @@ class AppSettings:
             "SORTER_FUZZY_ENIGMA_SIM_TRUTH_FALLBACK",
             "1" if recognition_policy.allow_sim_truth_fallback else "0",
         ) in {"1", "true", "True"}
+        startup_scan_max_retries = int(
+            _setting("SORTER_STARTUP_SCAN_MAX_RETRIES", str(recognition_policy.startup_scan_max_retries))
+        )
+        verification_max_retries = int(
+            _setting("SORTER_VERIFICATION_MAX_RETRIES", str(recognition_policy.verification_max_retries))
+        )
         return AppSettings(
             mode=mode,
             random_seed=seed,
@@ -101,6 +109,8 @@ class AppSettings:
             recognition_thresholds_path=recognition_thresholds_path,
             recognition_min_confidence=recognition_min_confidence,
             fuzzy_enigma_sim_truth_fallback=fuzzy_enigma_sim_truth_fallback,
+            startup_scan_max_retries=max(0, startup_scan_max_retries),
+            verification_max_retries=max(0, verification_max_retries),
         )
 
 
