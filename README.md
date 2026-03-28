@@ -12,7 +12,7 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 - `src/sorter/adapters/persistence`: SQLite run store and local file card catalog.
 - `src/sorter/interfaces`: CLI and thin Pygame debug shell.
 - `scenarios/fixtures`: deterministic simulation fixtures.
-- `data/card_catalog/cards.json`: local runtime card catalog.
+- `data/card_catalog/cards.json`: local runtime card catalog synced from the vendored offline catalog.
 - `config/sort_policies/*.json`: ranking preference source-of-truth policies.
 - `tests/unit`, `tests/contract`, `tests/integration`: baseline automated tests.
 
@@ -126,7 +126,9 @@ If you want to run the real vendored recognizer, make sure the submodule OCR ext
 
 - Card list source-of-truth: `config/sim_card_lists/default_cards.json`
 - Runtime derived fixture: `data/generated/runtime_fixture.json`
-- The checked-in default card list is now seeded from the local catalog instead of a long handwritten demo bundle.
+- The checked-in parent card catalog is now synced from the vendored offline catalog instead of carrying a stale handwritten demo set.
+- Refresh the parent catalog from the current default sim list with:
+	- `python scripts/sync_parent_card_catalog.py`
 - Defaults are controlled by:
 	- `SORTER_SIM_CARD_LIST`
 	- `SORTER_RUNTIME_FIXTURE`
