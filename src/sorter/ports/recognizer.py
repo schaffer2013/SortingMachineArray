@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Protocol
+from dataclasses import dataclass, field
+from typing import Any, Protocol
 
 from sorter.ports.camera import Frame
 
@@ -10,6 +10,13 @@ from sorter.ports.camera import Frame
 class RecognitionResult:
     card_name: str | None
     confidence: float
+    backend: str = "unknown"
+    scryfall_id: str | None = None
+    oracle_id: str | None = None
+    needs_review: bool = False
+    fallback_used: bool = False
+    alternatives: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    debug: dict[str, Any] = field(default_factory=dict)
 
 
 class RecognizerPort(Protocol):

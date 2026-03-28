@@ -29,11 +29,57 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 1. Create/activate a Python 3.11+ environment.
 2. Install dependencies:
 	 - `pip install -e .[dev]`
+	 - if you want the real vendored recognizer, also install `pip install -e ./third_party/fuzzy-enigma-card-recognition[ocr]`
 3. Optional env file:
 	 - Copy `.env.example` values into your environment.
 4. Run:
 	 - `python -m sorter.interfaces.cli --mode sim`
 	 - or `python scripts/run_simulation.py`
+
+## Recognition backend toggle
+
+- Default sim backend: `SORTER_RECOGNIZER_BACKEND=sim_truth`
+- Vendored submodule backend: `SORTER_RECOGNIZER_BACKEND=fuzzy_enigma`
+- Parent-owned live card-engine config: `SORTER_CARD_ENGINE_CONFIG=config/card_engine/engine.json`
+- Optional card-engine mode: `SORTER_CARD_ENGINE_MODE=greenfield`
+- Recognition policy file: `SORTER_RECOGNITION_THRESHOLDS=config/vision/recognition_thresholds.json`
+- Optional low-confidence fallback: `SORTER_FUZZY_ENIGMA_SIM_TRUTH_FALLBACK=1`
+- Startup scan retry budget: `SORTER_STARTUP_SCAN_MAX_RETRIES=1`
+- Verification retry budget: `SORTER_VERIFICATION_MAX_RETRIES=2`
+
+When `fuzzy_enigma` is enabled, the sim camera now passes the rendered top-card image path through the parent `Frame` so the real recognizer can operate on the same simulated images the sorter sees.
+The parent repo now also owns a benchmark-specific card-engine config at `config/card_engine/benchmark.engine.json` so replay and benchmark runs can use a more realistic measurement budget without changing the live sorter config.
+The sim camera no longer mutates pile observation state on capture by itself; observation now advances when the application processes recognizer results, which makes retries and `REVIEW_REQUIRED` escalation more honest.
+
+## Recognition replay and benchmark
+
+- Replay the configured backend over simulated top-card captures:
+	- `python scripts/replay_recognition.py --backend sim_truth`
+- Replay the vendored recognizer with the parent benchmark config:
+	- `python scripts/replay_recognition.py --backend fuzzy_enigma --pile 0,0`
+- Generate a benchmark summary JSON:
+	- `python scripts/benchmark_recognizer.py --backend sim_truth`
+	- `python scripts/benchmark_recognizer.py --backend fuzzy_enigma`
+- Compare two saved summaries directly:
+	- `python scripts/compare_recognition_summaries.py --baseline data/recognition_reports/sim_truth_summary.json --candidate data/recognition_reports/fuzzy_enigma_summary.json`
+- The summary JSON is written under `data/recognition_reports/`.
+- For `fuzzy_enigma`, replay and benchmark commands automatically prefer the parent-owned benchmark config unless you override `--card-engine-config`.
+- The summary JSON now includes alternatives, review reasons, confidence-band counts, and debug payloads, not just the final score line.
+- `fuzzy_enigma` replay and benchmark runs also export inspectable per-case artifacts under `data/recognition_reports/artifacts/` by default, including copied source frames, `ocr_lines.txt`, `debug.json`, and `bbox.json` when available.
+- Sim runs can now return `REVIEW_REQUIRED` when startup scan or post-move verification exhausts the configured retry budget.
+
+## Vision dataset ingest
+
+- Parent-owned dataset root: `data/vision/`
+- Import replay or benchmark outputs into the dataset layout:
+	- `python scripts/ingest_frames.py --summary-json data/recognition_reports/fuzzy_enigma_summary.json --source-mode sim --split benchmark`
+- Imported frames land under `data/vision/raw/...`
+- Imported manifests land under `data/vision/labels/...`
+- The initial stable sim-backed regression slice is documented in `tests/golden_frames/runtime_small_stack_top_cards.json`
+
+If you want to run the real vendored recognizer, make sure the submodule OCR extras are installed first:
+
+- `pip install -e ./third_party/fuzzy-enigma-card-recognition[ocr]`
 
 ## Hardware mode notes
 
@@ -47,6 +93,8 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 
 - Run all tests:
 	- `pytest -q`
+- Noisy-sim review escalation coverage:
+	- `pytest tests/integration/test_noisy_sim_review_required.py -q`
 
 ## Sim image sync
 

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 import json
 import re
+from urllib.error import HTTPError, URLError
+from urllib.request import urlopen
 
 from sorter.adapters.persistence.sim_card_list_loader import load_sim_card_list
 
@@ -122,8 +124,13 @@ def _safe_filename(card_name: str) -> str:
 
 
 def _download_missing_cards(card_refs: list[CardImageRef], image_dir: Path) -> tuple[int, int]:
-    import requests
-    import scrython
+    try:
+        import scrython
+    except Exception as exc:
+        raise RuntimeError(
+            "Auto-fetching simulated card images requires 'scrython'. "
+            "Install it or disable auto image sync/fetch."
+        ) from exc
 
     image_dir.mkdir(parents=True, exist_ok=True)
     downloaded = 0
@@ -142,14 +149,16 @@ def _download_missing_cards(card_refs: list[CardImageRef], image_dir: Path) -> t
                 failed += 1
                 continue
 
-            response = requests.get(image_url, timeout=30)
-            response.raise_for_status()
+            with urlopen(image_url, timeout=30) as response:
+                content = response.read()
 
             target_dir = image_dir / card_data.set
             target_dir.mkdir(parents=True, exist_ok=True)
             file_path = target_dir / f"{_safe_filename(card_name)}.jpg"
-            file_path.write_bytes(response.content)
+            file_path.write_bytes(content)
             downloaded += 1
+        except (HTTPError, URLError, TimeoutError, OSError):
+            failed += 1
         except Exception:
             failed += 1
 
@@ -157,6 +166,15 @@ def _download_missing_cards(card_refs: list[CardImageRef], image_dir: Path) -> t
 
 
 def _extract_image_url(card_data: object) -> str | None:
+    get_image_url = getattr(card_data, "get_image_url", None)
+    if callable(get_image_url):
+        try:
+            image_url = get_image_url()
+            if image_url:
+                return str(image_url)
+        except Exception:
+            pass
+
     # Scryfall data can be exposed as properties (newer scrython) or callables (older scrython).
     image_uris_attr = getattr(card_data, "image_uris", None)
     if callable(image_uris_attr):
@@ -172,10 +190,16 @@ def _extract_image_url(card_data: object) -> str | None:
 
     # Try common raw payload attribute names used by different scrython versions.
     raw_payload = (
-        getattr(card_data, "scryfallJson", None)
+        getattr(card_data, "_scryfall_data", None)
+        or getattr(card_data, "scryfallJson", None)
         or getattr(card_data, "scryfall_json", None)
         or getattr(card_data, "_json", None)
     )
+    if callable(raw_payload):
+        try:
+            raw_payload = raw_payload()
+        except Exception:
+            raw_payload = None
     if isinstance(raw_payload, dict):
         root_uris = raw_payload.get("image_uris")
         if isinstance(root_uris, dict):
@@ -199,9 +223,16 @@ def _extract_image_url(card_data: object) -> str | None:
     faces_attr = getattr(card_data, "card_faces", None)
     if isinstance(faces_attr, list):
         for face in faces_attr:
-            if not isinstance(face, dict):
-                continue
-            face_uris = face.get("image_uris")
+            face_uris = None
+            if isinstance(face, dict):
+                face_uris = face.get("image_uris")
+            else:
+                face_uris = getattr(face, "image_uris", None)
+                if callable(face_uris):
+                    try:
+                        face_uris = face_uris()
+                    except Exception:
+                        face_uris = None
             if not isinstance(face_uris, dict):
                 continue
             image_url = face_uris.get("normal") or face_uris.get("large")

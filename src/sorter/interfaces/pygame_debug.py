@@ -7,6 +7,7 @@ import threading
 
 from sorter.application.orchestrator import Orchestrator
 from sorter.config.calibration import CalibrationProfile
+from sorter.domain.enums import PileObservationState, PileRole
 
 
 @dataclass
@@ -156,24 +157,24 @@ class PygameDebugUI:
             pygame.draw.rect(self.window, color, rect, border_radius=8)
             pygame.draw.rect(self.window, (220, 220, 220), rect, width=2, border_radius=8)
 
-            top_id = pile.top_card_id()
-            top_name = "(empty)"
-            top_rank_text = "-"
-            if top_id:
-                meta = self.orchestrator.world.card_by_id.get(top_id)
-                top_name = meta.name if meta else top_id
-                rank_value = rank_lookup.get(top_id)
-                top_rank_text = str(rank_value) if rank_value is not None else "-"
+            top_id = pile.top_card_id() if pile.has_observed_top_card() else None
+            top_name = self._top_label(pile)
+            top_rank_text = self._top_rank_label(pile, top_id, rank_lookup)
+            count_text = self._count_label(pile)
             image_path = self.orchestrator.world.top_card_image_path(pile.pile_id)
-            if image_path:
+            if pile.has_observed_top_card() and image_path:
                 surface = self._get_image_surface(image_path)
                 if surface is not None:
                     scaled = pygame.transform.smoothscale(surface, (70, 98))
                     self.window.blit(scaled, (px + rect.width - 82, py + 10))
+                else:
+                    self._draw_unknown_card_preview(px, py, rect.width)
+            else:
+                self._draw_unknown_card_preview(px, py, rect.width)
 
             self.window.blit(self.font.render(f"Pile {pile.pile_id.as_key()}", True, (255, 255, 255)), (px + 10, py + 10))
             self.window.blit(self.font.render(pile.role.value, True, (240, 240, 240)), (px + 10, py + 34))
-            self.window.blit(self.font.render(f"Count: {pile.num_cards()}  Rank: {top_rank_text}", True, (240, 240, 240)), (px + 10, py + 58))
+            self.window.blit(self.font.render(f"Count: {count_text}  Rank: {top_rank_text}", True, (240, 240, 240)), (px + 10, py + 58))
             self.window.blit(self.font.render(f"Top: {top_name[:22]}", True, (240, 240, 240)), (px + 10, py + 82))
 
         self._draw_held_card(anim_x_mm, anim_y_mm, anim_z_mm, area_left, area_top, area_width, area_height)
@@ -195,6 +196,30 @@ class PygameDebugUI:
             return surface
         except pygame.error:
             return None
+
+    def _count_label(self, pile) -> str:
+        if not pile.has_known_count():
+            return "?"
+        return str(pile.num_cards())
+
+    def _top_label(self, pile) -> str:
+        if pile.observation.state == PileObservationState.UNKNOWN:
+            return "(unknown)"
+        if pile.observation.state == PileObservationState.EMPTY_CONFIRMED:
+            return "(empty)"
+        return pile.observation.top_card_name or "(unknown)"
+
+    def _top_rank_label(self, pile, top_id: str | None, rank_lookup: dict[str, int]) -> str:
+        if not pile.has_observed_top_card() or top_id is None:
+            return "-"
+        rank_value = rank_lookup.get(top_id)
+        return str(rank_value) if rank_value is not None else "-"
+
+    def _draw_unknown_card_preview(self, px: int, py: int, rect_width: int) -> None:
+        preview_rect = pygame.Rect(px + rect_width - 82, py + 10, 70, 98)
+        pygame.draw.rect(self.window, (70, 70, 78), preview_rect, border_radius=6)
+        pygame.draw.rect(self.window, (150, 150, 158), preview_rect, width=2, border_radius=6)
+        self.window.blit(self.font.render("?", True, (220, 220, 220)), (preview_rect.x + 28, preview_rect.y + 38))
 
     def _update_animation_from_pose(self) -> None:
         pose = self.orchestrator.world.snapshot.pose

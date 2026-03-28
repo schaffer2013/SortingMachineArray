@@ -122,11 +122,11 @@ The goal is to classify correctly, not to maximize deletions.
 
 - [ ] `KEEP-STUB`
 - [ ] `ARCHIVE`
-- [ ] `DELETE`
+- [x] `DELETE`
 
 **Notes**
 
-- 
+- 2026-03-27: deleted. The file only raised `NotImplementedError`, had no callers, and advertised a feature the project does not currently support.
 - Current status:
 - Future-session context:
 
@@ -183,11 +183,11 @@ The goal is to classify correctly, not to maximize deletions.
 **Decision**
 
 - [ ] `KEEP-STUB`
-- [ ] `DELETE`
+- [x] `DELETE`
 
 **Notes**
 
-- 
+- 2026-03-27: deleted. The file only forwarded to `plan_next_move` and added no behavior or meaningful seam.
 - Current status:
 - Future-session context:
 
@@ -249,11 +249,11 @@ The goal is to classify correctly, not to maximize deletions.
 - [ ] `KEEP-LIVE`
 - [ ] `KEEP-STUB`
 - [ ] `ARCHIVE`
-- [ ] `DELETE`
+- [x] `DELETE`
 
 **Notes**
 
-- 
+- 2026-03-27: deleted both files. Neither had callers, both were superseded by the retained `sim_truth` backend plus the real `fuzzy_enigma` integration, and neither represented a supported runtime or debug path.
 - Current status:
 - Future-session context:
 

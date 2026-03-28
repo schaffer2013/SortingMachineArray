@@ -60,18 +60,20 @@
 
 - [ ] `docs/completion_spec.md`: one-page definition of the machine target and supported operating envelope.
 - [x] `docs/calibration_spec.md`: definition of initialization config ownership, pile-coordinate calibration, and supervised calibration flow.
-- [ ] `docs/acceptance_gates.md`: measurable test gates that define completion.
+- [x] `docs/phase2_gameplan.md`: actionable execution plan for observation-honest simulator behavior.
+- [x] `docs/acceptance_gates.md`: measurable test gates that define completion.
 - [ ] `config/vision/roi_profiles.json`: shared ROI definitions for sim and hardware captures.
-- [ ] `config/vision/recognition_thresholds.json`: thresholds for empty detection, OCR confidence, retries, and manual review.
+- [x] `config/vision/recognition_thresholds.json`: thresholds for empty detection, OCR confidence, retries, and manual review.
+- [x] `third_party/fuzzy-enigma-card-recognition/`: git submodule for the external recognition engine, evaluation tools, catalog maintenance, and debug UI.
 - [ ] `data/vision/raw/`: immutable raw captures from sim and hardware.
 - [ ] `data/vision/normalized/`: normalized and cropped derivatives for repeatable experiments.
 - [ ] `data/vision/labels/`: labels for empty detection, visible card identity, and ROI annotations.
-- [ ] `scripts/ingest_frames.py`: metadata-preserving frame import.
-- [ ] `scripts/replay_recognition.py`: run the recognizer pipeline over saved frames.
-- [ ] `scripts/benchmark_recognizer.py`: produce measurable recognition reports.
+- [x] `scripts/ingest_frames.py`: metadata-preserving frame import.
+- [x] `scripts/replay_recognition.py`: run the recognizer pipeline over saved frames.
+- [x] `scripts/benchmark_recognizer.py`: produce measurable recognition reports.
 - [ ] `scripts/audit_code_health.py`: summarize import-graph outliers, low-coverage modules, and likely vestigial code.
-- [ ] `tests/golden_frames/`: curated perception regression set.
-- [ ] `tests/noisy_sim/`: simulated conditions that intentionally break ideal assumptions.
+- [x] `tests/golden_frames/`: curated perception regression set.
+- [x] `tests/noisy_sim/`: simulated conditions that intentionally break ideal assumptions.
 
 ## Suggested Design Targets
 
@@ -81,6 +83,17 @@
 - Hidden world truth should remain inside sim and hardware adapters only. The application layer should consume observed state plus recognition results.
 - Every capture worth acting on should be persistable so a run can be replayed later without needing the original live hardware session.
 - ROI configs should use a stable coordinate convention such as normalized image coordinates so the same logical regions can be reused across resolutions.
+
+## Recognition Submodule Placement
+
+- The external recognizer should live at `third_party/fuzzy-enigma-card-recognition/` so recognition internals stay versioned with the parent repo without being folded into the sorter codebase.
+- This repo should continue to own camera capture, sorter orchestration, hardware control, supervised-review flow, replay datasets, and integration-specific config wiring.
+- The submodule should own card detection, normalization, OCR, candidate ranking, catalog maintenance, evaluation tooling, and recognition-specific debugging UI.
+- The parent integration point should remain a thin adapter, likely `src/sorter/adapters/recognition/fuzzy_enigma_recognizer.py`, implementing `RecognizerPort` and translating local `Frame` objects into the submodule's `SortingMachineRecognizer` or `recognize_card(...)` API.
+- Saved frames in `data/vision/raw/` and normalized derivatives in `data/vision/normalized/` should be reusable by both the parent replay scripts and the submodule's evaluation or debug tools so recognition work is benchmarked on the same captures the sorter actually sees.
+- The first parent-side integration step should keep the existing sim-truth recognizer available as a toggleable backend while adding a real `fuzzy_enigma` backend for the same sim runs.
+- Sim camera frames should carry the rendered card image path so the real recognizer can be exercised in simulation before hardware capture is ready.
+- Parent-owned settings should select recognizer backend, card-engine config path, and initial card-engine mode without leaking card-engine internals into application logic.
 
 ## Phase 1: Lock The Target
 
@@ -166,15 +179,15 @@
 
 **Primary outputs**
 
-- [ ] Where card names are tracked in the form "Snapcaster Mage#snapcastermage", it should be "Snapcaster Mage#{card.scryfall_id}" 
-- [ ] Split hidden world truth from observed machine state so the planner cannot read the full `card_stack` in normal execution.
-- [ ] Replace the binary `discovered` concept with richer pile observations such as `unknown`, `top_card_seen`, `empty_confirmed`, `confidence`, `last_seen_at`, and `frame_id`.
-- [ ] Make feeder discovery realistic: the picker only learns the next visible card after a scan and only learns a pile is empty when a scan or pick/verify sequence confirms it.
-- [ ] Ensure every move updates state through observations and verification, not direct knowledge shortcuts.
+- [x] Where card names are tracked in the form "Snapcaster Mage#snapcastermage", it should be "Snapcaster Mage#{card.scryfall_id}" 
+- [x] Split hidden world truth from observed machine state so the planner cannot read the live full `card_stack` in normal execution.
+- [x] Replace the binary `discovered` concept with richer pile observations such as `unknown`, `top_card_seen`, `empty_confirmed`, `confidence`, `last_seen_at`, and `frame_id`.
+- [x] Make feeder discovery realistic: the picker only learns the next visible card after a scan and only learns a pile is empty when a scan or pick/verify sequence confirms it.
+- [x] Ensure every move updates state through observations and verification, not direct knowledge shortcuts.
 - [ ] Define discovery-driven ranking behavior so newly identified cards can enter a provisional rank set before the final rank set is locked.
-- [ ] Model observation staleness so the system can distinguish "recently seen" from "assumed unchanged."
+- [x] Model observation staleness so the system can distinguish "recently seen" from "assumed unchanged."
 - [ ] Add simulated perception faults such as blur, glare, skew, occlusion, bad crop, false empty, missed pick, double feed, and dropped card.
-- [ ] Add tests that prove the planner still behaves correctly when pile contents are partially known or temporarily unknown.
+- [x] Add tests that prove the planner still behaves correctly when pile contents are partially known or temporarily unknown.
 
 **Implementation notes**
 
@@ -203,9 +216,13 @@
 - [ ] Build preprocessing steps that work in both sim and hardware captures: crop, perspective correction, brightness normalization, denoise, sharpen, threshold, and glare handling.
 - [ ] Implement empty-vs-card-present detection before card identity recognition.
 - [ ] Implement OCR on stable ROIs and combine it with image matching or embedding-based matching for final card identity scoring.
-- [ ] Add confidence fusion and fallback behavior: re-scan, reposition, alternate recognizer, or manual review.
-- [ ] Save intermediate outputs that matter during development, such as normalized crops and OCR text snippets, so tuning is inspectable.
-- [ ] Build a replay harness that runs the same recognizer pipeline against saved sim frames and real-world captures.
+- [x] Add `src/sorter/adapters/recognition/fuzzy_enigma_recognizer.py` to wrap the submodule and keep the rest of the application talking only to `RecognizerPort`.
+- [x] Add a toggleable sim recognizer backend so `sim_truth` remains available while `fuzzy_enigma` can be enabled for parent-side integration work.
+- [x] Pass rendered sim image paths through `Frame.path` so the real recognizer can run against simulation captures.
+- [x] Add an initial parent-side confidence and fallback policy so low-confidence `fuzzy_enigma` results can be marked for review and optionally fall back to `sim_truth` in sim-only workflows.
+- [x] Add parent-owned card-engine config files so live sorter runs and benchmark runs can use different recognition budgets without hard-coding submodule defaults in parent logic.
+- [x] Save intermediate outputs that matter during development, such as normalized crops and OCR text snippets, so tuning is inspectable.
+- [x] Build an initial replay and benchmark harness that runs the same recognizer pipeline against simulated top-card captures.
 
 **Implementation notes**
 
@@ -213,6 +230,7 @@
 - ROI definitions should be data-driven so the same logical crop can be tuned without changing code.
 - Recognition should return structured evidence, not just a final label. Future debugging will depend on seeing why a label was chosen.
 - The first viable recognizer does not need to be perfect, but it must expose enough internal detail to improve safely.
+- Prefer extending the submodule behind the adapter boundary over copying OCR or ranking internals into `src/sorter`.
 
 **Exit criteria**
 
@@ -239,6 +257,9 @@
 - Preserve raw captures. Derived crops and normalized images can be regenerated later, but source material should remain immutable.
 - Keep label formats simple and versioned so tooling can evolve without corrupting old data.
 - Favor benchmark repeatability over clever one-off scripts. A slower but reproducible benchmark is more valuable than a fast opaque one.
+- Reuse the submodule's debug UI and evaluation tooling against the parent repo's saved captures rather than building duplicate one-off recognition analysis scripts unless the parent needs sorter-specific behavior.
+- The next parent-project data milestone after basic integration should be a replay or benchmark script that runs the submodule over the same simulated captures the sorter uses during normal runs.
+- The next practical data step after replay/benchmark hookup is a parent-owned ingest path that can pull saved recognition summaries into `data/vision/` without manual file surgery.
 
 **Exit criteria**
 
@@ -255,8 +276,8 @@
 - [ ] Refactor discovery and planning so recognition updates state through explicit events rather than direct pile mutation shortcuts.
 - [ ] Update planning logic so it operates on observed top cards and confirmed empty states instead of full internal knowledge.
 - [ ] Support incremental ranking updates during discovery and an explicit "ranking finalized" transition once all active cards are discovered.
-- [ ] Add low-confidence branches for re-scan, second-look capture, different camera pose, or quarantine pile handling.
-- [ ] Strengthen move verification so source and destination observations are both checked after each move.
+- [x] Add low-confidence branches for re-scan, second-look capture, different camera pose, or quarantine pile handling.
+- [x] Strengthen move verification so source and destination observations are both checked after each move.
 - [ ] Track richer run metrics such as scan count, retries, distance traveled, confidence distribution, stale observations, and fault causes.
 - [ ] Revisit the sorting strategy after the observation model is honest so the planner can optimize for fewer scans and safer moves, not just rank order.
 - [ ] Define what counts as a recoverable fault versus a stop-the-run fault.

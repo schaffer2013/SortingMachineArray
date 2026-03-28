@@ -22,3 +22,5 @@ def test_small_stack_runs_headless(tmp_path):
     result = orchestrator.run_once(calibration)
     assert result["status"] in {"COMPLETED", "FAULTED"}
     assert result["seq"] >= 0
+    assert "metrics" in result
+    assert result["metrics"]["scan_count"] >= 0

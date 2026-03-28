@@ -113,14 +113,116 @@ def test_move_from_feed_selects_expected_piles():
     assert move.to_pile == sorting.pile_id
 
 
+def test_move_from_feed_waits_when_only_destination_is_unknown():
+    feeder = PileState(pile_id=PileId(0, 0), role=PileRole.FEEDER, capacity=10, card_stack=["a#1"], discovered=False)
+    sorting = PileState(pile_id=PileId(1, 0), role=PileRole.SORTING, capacity=10, card_stack=[], discovered=False)
+    snapshot = MachineSnapshot(piles={feeder.pile_id.as_key(): feeder, sorting.pile_id.as_key(): sorting})
+    workflow = LegacyWorkflowState(snapshot)
+
+    move = workflow.plan_next(rank_lookup={"a#1": 1})
+
+    assert move is None
+
+
 def test_step_transitions_to_initial_collection_when_feeders_discovered():
     feeder = PileState(pile_id=PileId(0, 0), role=PileRole.FEEDER, capacity=10, card_stack=["a#1"], discovered=True)
     sorting = PileState(pile_id=PileId(1, 0), role=PileRole.SORTING, capacity=10, card_stack=[], discovered=True)
     snapshot = MachineSnapshot(piles={feeder.pile_id.as_key(): feeder, sorting.pile_id.as_key(): sorting})
     workflow = LegacyWorkflowState(snapshot)
 
+    feeder.mark_empty_confirmed(source="test")
     workflow.update_step()
     assert workflow.step == LegacyStep.INITIAL_COLLECTION
+
+
+def test_step_does_not_transition_to_initial_collection_while_any_feeder_is_unknown():
+    feeder_known_empty = PileState(pile_id=PileId(0, 0), role=PileRole.FEEDER, capacity=10, discovered=True)
+    feeder_unknown = PileState(pile_id=PileId(1, 0), role=PileRole.FEEDER, capacity=10, discovered=False)
+    sorting = PileState(pile_id=PileId(2, 0), role=PileRole.SORTING, capacity=10, card_stack=[], discovered=True)
+    snapshot = MachineSnapshot(
+        piles={
+            feeder_known_empty.pile_id.as_key(): feeder_known_empty,
+            feeder_unknown.pile_id.as_key(): feeder_unknown,
+            sorting.pile_id.as_key(): sorting,
+        }
+    )
+    workflow = LegacyWorkflowState(snapshot)
+
+    feeder_known_empty.mark_empty_confirmed(source="test")
+    workflow.update_step()
+
+    assert workflow.step == LegacyStep.MOVE_FROM_FEED
+
+
+def test_initial_collection_allows_returning_multiple_cards_to_known_feeder():
+    feeder = PileState(
+        pile_id=PileId(0, 0),
+        role=PileRole.FEEDER,
+        capacity=10,
+        card_stack=["seen-card"],
+        discovered=True,
+    )
+    collection = PileState(
+        pile_id=PileId(1, 0),
+        role=PileRole.COLLECTION,
+        capacity=10,
+        card_stack=["bottom", "top"],
+        discovered=True,
+    )
+    snapshot = MachineSnapshot(
+        piles={
+            feeder.pile_id.as_key(): feeder,
+            collection.pile_id.as_key(): collection,
+        }
+    )
+    workflow = LegacyWorkflowState(snapshot)
+    workflow.step = LegacyStep.INITIAL_COLLECTION
+
+    move = workflow.plan_next(rank_lookup={"top": 1})
+
+    assert move is not None
+    assert move.from_pile == collection.pile_id
+    assert move.to_pile == feeder.pile_id
+
+
+def test_initial_collection_keeps_using_feeder_after_first_returned_card_updates_observation():
+    feeder = PileState(
+        pile_id=PileId(0, 0),
+        role=PileRole.FEEDER,
+        capacity=10,
+        card_stack=[],
+        discovered=True,
+    )
+    collection = PileState(
+        pile_id=PileId(1, 0),
+        role=PileRole.COLLECTION,
+        capacity=10,
+        card_stack=["first", "second"],
+        discovered=True,
+    )
+    snapshot = MachineSnapshot(
+        piles={
+            feeder.pile_id.as_key(): feeder,
+            collection.pile_id.as_key(): collection,
+        }
+    )
+    workflow = LegacyWorkflowState(snapshot)
+    workflow.step = LegacyStep.INITIAL_COLLECTION
+
+    feeder.mark_empty_confirmed(source="verification")
+    first_move = workflow.plan_next(rank_lookup={"second": 1})
+    assert first_move is not None
+    assert first_move.to_pile == feeder.pile_id
+
+    collection.card_stack.pop()
+    feeder.card_stack.append("second")
+    feeder.mark_top_card_seen("second", source="placement_assumption")
+
+    second_move = workflow.plan_next(rank_lookup={"first": 2, "second": 1})
+
+    assert second_move is not None
+    assert second_move.from_pile == collection.pile_id
+    assert second_move.to_pile == feeder.pile_id
 
 
 def test_rank_lookup_drives_scatter_and_gather_top_of_pile_choices():

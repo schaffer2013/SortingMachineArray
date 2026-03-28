@@ -1,10 +1,16 @@
+import logging
+from dataclasses import dataclass
+
 from sorter.config.settings import AppSettings
+from sorter.adapters.recognition.policy_recognizer import PolicyRecognizerAdapter
 from sorter.adapters.sim.sim_world import SimWorld
 from sorter.adapters.sim.sim_motion import SimMotionAdapter
 from sorter.adapters.sim.sim_camera import SimCameraAdapter
 from sorter.adapters.sim.sim_vacuum import SimVacuumAdapter
 from sorter.adapters.sim.sim_lights import SimLightsAdapter
 from sorter.adapters.sim.sim_recognizer import SimRecognizerAdapter
+from sorter.adapters.sim.sim_faulting_recognizer import SimFaultingRecognizerAdapter
+from sorter.adapters.recognition.fuzzy_enigma_recognizer import FuzzyEnigmaRecognizerAdapter
 from sorter.adapters.persistence.file_card_catalog import FileCardCatalog
 from sorter.adapters.persistence.sim_card_list_loader import expand_and_shuffle_instances, load_sim_card_list
 from sorter.adapters.persistence.sim_fixture_builder import build_runtime_fixture
@@ -15,7 +21,39 @@ from sorter.domain.ranking_service import RankingService
 from sorter.domain.sort_policy_config import load_sort_policy_file
 
 
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class SimRuntimeContext:
+    world: SimWorld
+    catalog: FileCardCatalog
+    motion: SimMotionAdapter
+    camera: SimCameraAdapter
+    vacuum: SimVacuumAdapter
+    lights: SimLightsAdapter
+    recognizer: object
+    run_store: SQLiteRunStore
+
+
 def build_sim_orchestrator(settings: AppSettings) -> Orchestrator:
+    context = build_sim_runtime_context(settings)
+    return Orchestrator(
+        motion=context.motion,
+        camera=context.camera,
+        vacuum=context.vacuum,
+        lights=context.lights,
+        recognizer=context.recognizer,
+        catalog=context.catalog,
+        run_store=context.run_store,
+        world=context.world,
+        recognition_min_confidence=settings.recognition_min_confidence,
+        startup_scan_max_retries=settings.startup_scan_max_retries,
+        verification_max_retries=settings.verification_max_retries,
+    )
+
+
+def build_sim_runtime_context(settings: AppSettings) -> SimRuntimeContext:
     root = settings.project_root or settings.scenario_fixture.parents[2]
     catalog = FileCardCatalog(settings.card_catalog_path)
     runtime_fixture_path = _resolve_runtime_fixture(settings, catalog)
@@ -32,8 +70,10 @@ def build_sim_orchestrator(settings: AppSettings) -> Orchestrator:
             auto_fetch=True,
         )
         if summary.missing_after > 0:
-            raise RuntimeError(
-                f"Image sync incomplete: {summary.missing_after} card images still missing. See {summary.log_path}"
+            logger.warning(
+                "Image sync incomplete: %s card images still missing. Continuing without them. See %s",
+                summary.missing_after,
+                summary.log_path,
             )
 
     world = SimWorld.from_fixture(runtime_fixture_path, settings.random_seed)
@@ -46,17 +86,51 @@ def build_sim_orchestrator(settings: AppSettings) -> Orchestrator:
     compiled_ranking = RankingService(policy_config).compile(world.card_by_id)
     world.set_compiled_ranking(compiled_ranking)
 
+    motion = SimMotionAdapter(world)
+    camera = SimCameraAdapter(world)
+    vacuum = SimVacuumAdapter(world)
+    lights = SimLightsAdapter(world)
+    recognizer = _build_recognizer(settings, world, catalog)
     run_store = SQLiteRunStore(settings.sqlite_path)
-    return Orchestrator(
-        motion=SimMotionAdapter(world),
-        camera=SimCameraAdapter(world),
-        vacuum=SimVacuumAdapter(world),
-        lights=SimLightsAdapter(world),
-        recognizer=SimRecognizerAdapter(world, catalog),
-        catalog=catalog,
-        run_store=run_store,
+    return SimRuntimeContext(
         world=world,
+        catalog=catalog,
+        motion=motion,
+        camera=camera,
+        vacuum=vacuum,
+        lights=lights,
+        recognizer=recognizer,
+        run_store=run_store,
     )
+
+
+def _build_recognizer(settings: AppSettings, world: SimWorld, catalog: FileCardCatalog):
+    backend = settings.recognizer_backend.strip().lower()
+    recognition_faults = getattr(world, "recognition_faults", ())
+    if backend == "sim_truth":
+        recognizer = SimRecognizerAdapter(world, catalog)
+        if recognition_faults:
+            return SimFaultingRecognizerAdapter(recognizer, recognition_faults)
+        return recognizer
+    if backend == "fuzzy_enigma":
+        root = settings.project_root or settings.scenario_fixture.parents[2]
+        primary = FuzzyEnigmaRecognizerAdapter(
+            project_root=root,
+            config_path=settings.card_engine_config_path,
+            mode=settings.card_engine_mode,
+            auto_track_results=settings.card_engine_auto_track_results,
+            prefer_visual_small_pool=settings.card_engine_prefer_visual_small_pool,
+        )
+        fallback = SimRecognizerAdapter(world, catalog) if settings.fuzzy_enigma_sim_truth_fallback else None
+        recognizer = PolicyRecognizerAdapter(
+            primary,
+            min_confidence=settings.recognition_min_confidence,
+            fallback=fallback,
+        )
+        if recognition_faults:
+            return SimFaultingRecognizerAdapter(recognizer, recognition_faults)
+        return recognizer
+    raise ValueError(f"Unsupported recognizer backend: {settings.recognizer_backend}")
 
 
 def _resolve_runtime_fixture(settings: AppSettings, catalog: FileCardCatalog):
@@ -66,7 +140,7 @@ def _resolve_runtime_fixture(settings: AppSettings, catalog: FileCardCatalog):
         return settings.scenario_fixture
 
     suffix_map = {
-        card.name: (card.oracle_id or _fallback_identity_suffix(card.name))
+        card.name: (_instance_identity_suffix(card))
         for card in catalog.all_cards()
     }
     config = load_sim_card_list(settings.sim_card_list_path)
@@ -83,6 +157,14 @@ def _resolve_runtime_fixture(settings: AppSettings, catalog: FileCardCatalog):
         output_fixture_path=settings.generated_runtime_fixture_path,
         card_set_by_instance_id=card_set_by_instance_id,
     )
+
+
+def _instance_identity_suffix(card) -> str:
+    if card.scryfall_id:
+        return card.scryfall_id
+    if card.oracle_id:
+        return card.oracle_id
+    return _fallback_identity_suffix(card.name)
 
 
 def _fallback_identity_suffix(name: str) -> str:

@@ -5,6 +5,9 @@ from pathlib import Path
 import json
 import os
 
+from sorter.config.card_engine import DEFAULT_CARD_ENGINE_CONFIG
+from sorter.config.recognition import RecognitionPolicyConfig
+
 
 @dataclass(frozen=True)
 class AppSettings:
@@ -20,6 +23,16 @@ class AppSettings:
     slow_ms: int = 0
     auto_image_sync: bool = True
     project_root: Path | None = None
+    recognizer_backend: str = "sim_truth"
+    card_engine_config_path: Path | None = None
+    card_engine_mode: str = "greenfield"
+    card_engine_auto_track_results: bool = False
+    card_engine_prefer_visual_small_pool: bool = False
+    recognition_thresholds_path: Path | None = None
+    recognition_min_confidence: float = 0.6
+    fuzzy_enigma_sim_truth_fallback: bool = False
+    startup_scan_max_retries: int = 1
+    verification_max_retries: int = 2
 
     @staticmethod
     def from_env(project_root: Path | None = None) -> "AppSettings":
@@ -44,6 +57,37 @@ class AppSettings:
         runtime_fixture_path = root / _setting("SORTER_RUNTIME_FIXTURE", "data/generated/runtime_fixture.json")
         slow_ms = int(_setting("SORTER_SLOW_MS", "0"))
         auto_image_sync = _setting("SORTER_AUTO_IMAGE_SYNC", "1") not in {"0", "false", "False"}
+        recognition_thresholds_path = root / _setting(
+            "SORTER_RECOGNITION_THRESHOLDS",
+            "config/vision/recognition_thresholds.json",
+        )
+        recognition_policy = RecognitionPolicyConfig.from_file(recognition_thresholds_path)
+        recognizer_backend = _setting("SORTER_RECOGNIZER_BACKEND", "sim_truth").strip().lower()
+        card_engine_config_raw = _setting("SORTER_CARD_ENGINE_CONFIG", str(DEFAULT_CARD_ENGINE_CONFIG))
+        card_engine_config_path = (
+            None
+            if card_engine_config_raw.lower() in {"", "none", "null"}
+            else (root / card_engine_config_raw)
+        )
+        card_engine_mode = _setting("SORTER_CARD_ENGINE_MODE", "greenfield").strip().lower()
+        card_engine_auto_track_results = _setting("SORTER_CARD_ENGINE_AUTO_TRACK_RESULTS", "0") in {"1", "true", "True"}
+        card_engine_prefer_visual_small_pool = _setting(
+            "SORTER_CARD_ENGINE_PREFER_VISUAL_SMALL_POOL",
+            "0",
+        ) in {"1", "true", "True"}
+        recognition_min_confidence = float(
+            _setting("SORTER_RECOGNITION_MIN_CONFIDENCE", str(recognition_policy.min_confidence))
+        )
+        fuzzy_enigma_sim_truth_fallback = _setting(
+            "SORTER_FUZZY_ENIGMA_SIM_TRUTH_FALLBACK",
+            "1" if recognition_policy.allow_sim_truth_fallback else "0",
+        ) in {"1", "true", "True"}
+        startup_scan_max_retries = int(
+            _setting("SORTER_STARTUP_SCAN_MAX_RETRIES", str(recognition_policy.startup_scan_max_retries))
+        )
+        verification_max_retries = int(
+            _setting("SORTER_VERIFICATION_MAX_RETRIES", str(recognition_policy.verification_max_retries))
+        )
         return AppSettings(
             mode=mode,
             random_seed=seed,
@@ -57,6 +101,16 @@ class AppSettings:
             slow_ms=slow_ms,
             auto_image_sync=auto_image_sync,
             project_root=root,
+            recognizer_backend=recognizer_backend,
+            card_engine_config_path=card_engine_config_path,
+            card_engine_mode=card_engine_mode,
+            card_engine_auto_track_results=card_engine_auto_track_results,
+            card_engine_prefer_visual_small_pool=card_engine_prefer_visual_small_pool,
+            recognition_thresholds_path=recognition_thresholds_path,
+            recognition_min_confidence=recognition_min_confidence,
+            fuzzy_enigma_sim_truth_fallback=fuzzy_enigma_sim_truth_fallback,
+            startup_scan_max_retries=max(0, startup_scan_max_retries),
+            verification_max_retries=max(0, verification_max_retries),
         )
 
 

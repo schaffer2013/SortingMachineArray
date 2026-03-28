@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 import math
 from typing import Literal
 
-from sorter.domain.enums import PileRole
+from sorter.domain.enums import PileObservationState, PileRole
 
 
 @dataclass(frozen=True)
 class CardMeta:
     name: str
+    scryfall_id: str | None = None
     oracle_id: str | None = None
     rarity: str | None = None
     colors: list[str] = field(default_factory=list)
@@ -47,6 +49,25 @@ class PileId:
 
 
 @dataclass
+class PileObservation:
+    state: PileObservationState = PileObservationState.UNKNOWN
+    top_card_name: str | None = None
+    confidence: float = 0.0
+    source: str | None = None
+    frame_id: str | None = None
+    observed_at_utc: str | None = None
+
+    def is_known(self) -> bool:
+        return self.state != PileObservationState.UNKNOWN
+
+    def has_top_card(self) -> bool:
+        return self.state == PileObservationState.TOP_CARD_SEEN
+
+    def is_empty_confirmed(self) -> bool:
+        return self.state == PileObservationState.EMPTY_CONFIRMED
+
+
+@dataclass
 class PileState:
     pile_id: PileId
     role: PileRole
@@ -55,6 +76,21 @@ class PileState:
     y_mm: float = 0.0
     card_stack: list[str] = field(default_factory=list)
     discovered: bool = False
+    stack_count_known: bool = False
+    observation: PileObservation = field(default_factory=PileObservation)
+
+    def __post_init__(self) -> None:
+        if self.observation.state != PileObservationState.UNKNOWN:
+            self.discovered = True
+            return
+        if self.discovered:
+            self.stack_count_known = True
+            if self.is_empty():
+                self.mark_empty_confirmed(source="legacy_discovered")
+            else:
+                self.observation.state = PileObservationState.TOP_CARD_SEEN
+                self.observation.confidence = 1.0
+                self.observation.source = "legacy_discovered"
 
     def num_cards(self) -> int:
         return len(self.card_stack)
@@ -75,6 +111,79 @@ class PileState:
             return None
         return self.card_stack[0]
 
+    def has_known_state(self) -> bool:
+        return self.observation.is_known()
+
+    def has_observed_top_card(self) -> bool:
+        return self.observation.has_top_card()
+
+    def has_known_count(self) -> bool:
+        return self.stack_count_known
+
+    def is_empty_confirmed(self) -> bool:
+        return self.observation.is_empty_confirmed()
+
+    def observation_is_stale(self, reference_utc: str, *, max_age_seconds: float) -> bool:
+        if self.observation.observed_at_utc is None:
+            return True
+        observed_at = datetime.fromisoformat(self.observation.observed_at_utc)
+        reference_at = datetime.fromisoformat(reference_utc)
+        return (reference_at - observed_at).total_seconds() > max_age_seconds
+
+    def mark_unknown(
+        self,
+        source: str | None = None,
+        frame_id: str | None = None,
+        observed_at_utc: str | None = None,
+    ) -> None:
+        self.discovered = False
+        self.stack_count_known = False
+        self.card_stack.clear()
+        self.observation = PileObservation(
+            source=source,
+            frame_id=frame_id,
+            observed_at_utc=observed_at_utc,
+        )
+
+    def mark_top_card_seen(
+        self,
+        card_name: str | None,
+        confidence: float = 1.0,
+        source: str | None = None,
+        frame_id: str | None = None,
+        observed_at_utc: str | None = None,
+        count_known: bool | None = None,
+    ) -> None:
+        self.discovered = True
+        if count_known is not None:
+            self.stack_count_known = count_known
+        self.observation = PileObservation(
+            state=PileObservationState.TOP_CARD_SEEN,
+            top_card_name=card_name,
+            confidence=confidence,
+            source=source,
+            frame_id=frame_id,
+            observed_at_utc=observed_at_utc,
+        )
+
+    def mark_empty_confirmed(
+        self,
+        confidence: float = 1.0,
+        source: str | None = None,
+        frame_id: str | None = None,
+        observed_at_utc: str | None = None,
+    ) -> None:
+        self.discovered = True
+        self.stack_count_known = True
+        self.observation = PileObservation(
+            state=PileObservationState.EMPTY_CONFIRMED,
+            top_card_name=None,
+            confidence=confidence,
+            source=source,
+            frame_id=frame_id,
+            observed_at_utc=observed_at_utc,
+        )
+
     def distance_from(self, other: "PileState") -> float:
         """Return Euclidean XY distance in millimeters to another pile."""
         return math.hypot(self.x_mm - other.x_mm, self.y_mm - other.y_mm)
@@ -94,6 +203,13 @@ class RunMetrics:
     move_count: int = 0
     distance_mm: float = 0.0
     failures: int = 0
+    scan_count: int = 0
+    retry_count: int = 0
+    review_required_count: int = 0
+    fallback_count: int = 0
+    low_confidence_count: int = 0
+    confidence_band_counts: dict[str, int] = field(default_factory=dict)
+    review_reason_counts: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass

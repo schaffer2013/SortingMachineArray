@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from pathlib import Path
 
 from sorter.bootstrap import build_sim_orchestrator
@@ -20,18 +21,7 @@ def main() -> int:
 
     settings = AppSettings.from_env()
     if args.mode != settings.mode:
-        settings = AppSettings(
-            mode=args.mode,
-            random_seed=settings.random_seed,
-            scenario_fixture=settings.scenario_fixture,
-            card_catalog_path=settings.card_catalog_path,
-            sqlite_path=settings.sqlite_path,
-            calibration_path=settings.calibration_path,
-            sort_policy_path=settings.sort_policy_path,
-            slow_ms=settings.slow_ms,
-            auto_image_sync=settings.auto_image_sync,
-            project_root=settings.project_root,
-        )
+        settings = replace(settings, mode=args.mode)
 
     if settings.mode != "sim":
         raise NotImplementedError("Hardware bootstrap is provided via scripts/hardware_smoke_test.py")

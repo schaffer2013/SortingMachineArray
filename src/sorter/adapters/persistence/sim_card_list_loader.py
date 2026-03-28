@@ -98,7 +98,7 @@ def load_expand_shuffle_instance_ids(
 
 
 def _identity_suffix(name: str) -> str:
-    # Fallback when no oracle id is supplied externally: stable token by name.
+    # Fallback when no scryfall/oracle id is supplied externally: stable token by name.
     return "".join(ch for ch in name.strip().lower() if ch.isalnum()) or "unknown"
 
 

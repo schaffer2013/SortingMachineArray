@@ -23,11 +23,13 @@ class SimWorld:
     scenario_name: str
     seed: int
     snapshot: MachineSnapshot
+    hidden_piles: dict[str, list[str]]
     card_by_id: dict[str, CardMeta]
     image_by_card_id: dict[str, str | None]
     coords: dict[str, tuple[float, float]]
     compiled_ranking: CompiledRanking | None = None
     held_card_id: str | None = None
+    recognition_faults: tuple[dict, ...] = ()
 
     @staticmethod
     def from_fixture(path: Path, override_seed: int | None = None) -> "SimWorld":
@@ -36,6 +38,7 @@ class SimWorld:
         seed = int(override_seed if override_seed is not None else data.get("seed", 42))
         random.seed(seed)
         piles: dict[str, PileState] = {}
+        hidden_piles: dict[str, list[str]] = {}
         card_by_id: dict[str, CardMeta] = {}
         image_by_card_id: dict[str, str | None] = {}
         coords: dict[str, tuple[float, float]] = {}
@@ -58,14 +61,14 @@ class SimWorld:
                 float(pile_cfg.get("y_mm", pile_id.y_index * 100.0)),
             )
             role = PileRole[pile_cfg.get("role", "SORTING")]
-            stack: list[str] = []
+            hidden_stack: list[str] = []
             for raw_card in pile_cfg.get("cards", []):
                 if "#" in raw_card:
                     base, instance = raw_card.split("#", 1)
                     card_id = f"{base}#{instance}"
                 else:
                     card_id = f"{raw_card}#{uuid4().hex[:6]}"
-                stack.append(card_id)
+                hidden_stack.append(card_id)
                 card_name = base if "#" in raw_card else raw_card
                 card_by_id[card_id] = CardMeta(name=card_name)
                 image_by_card_id[card_id] = _resolve_image_for_name(
@@ -73,24 +76,34 @@ class SimWorld:
                     project_root,
                     set_id=card_set_by_instance_id.get(card_id),
                 )
-            piles[key] = PileState(
+            hidden_piles[key] = list(hidden_stack)
+            pile = PileState(
                 pile_id=pile_id,
                 role=role,
                 capacity=int(pile_cfg.get("capacity", 85)),
                 x_mm=coords[key][0],
                 y_mm=coords[key][1],
-                card_stack=stack,
-                discovered=bool(pile_cfg.get("discovered", role != PileRole.FEEDER)),
+                card_stack=[],
+                discovered=False,
+                stack_count_known=False,
             )
+            piles[key] = pile
 
         snapshot = MachineSnapshot(piles=piles, pose=MachinePose(), run_state=RunState(phase="IDLE"))
+        recognition_faults = tuple(
+            fault
+            for fault in data.get("faults", [])
+            if isinstance(fault, dict) and str(fault.get("type", "")).startswith("recognition_")
+        )
         return SimWorld(
             scenario_name=data.get("name", path.stem),
             seed=seed,
             snapshot=snapshot,
+            hidden_piles=hidden_piles,
             card_by_id=card_by_id,
             image_by_card_id=image_by_card_id,
             coords=coords,
+            recognition_faults=recognition_faults,
         )
 
     def rank_lookup(self) -> dict[str, int]:
@@ -127,9 +140,18 @@ class SimWorld:
 
     def pick_from(self, pile_id: PileId) -> None:
         pile = self.snapshot.get_pile(pile_id)
-        if pile is None or pile.is_empty():
+        hidden_stack = self.hidden_piles.get(pile_id.as_key())
+        if pile is None or hidden_stack is None or not hidden_stack:
             raise RuntimeError("Cannot pick from empty pile")
-        self.held_card_id = pile.card_stack.pop()
+        self.held_card_id = hidden_stack.pop()
+        if pile.card_stack and pile.card_stack[-1] == self.held_card_id:
+            pile.card_stack.pop()
+        next_top_id = hidden_stack[-1] if hidden_stack else None
+        if next_top_id is None:
+            pile.card_stack.clear()
+            pile.mark_empty_confirmed(source="pick_reveal")
+        else:
+            pile.mark_unknown(source="pick_reveal")
         self.snapshot.pose.holding_card_id = self.held_card_id
 
     def place_to(self, pile_id: PileId) -> None:
@@ -138,19 +160,80 @@ class SimWorld:
         pile = self.snapshot.get_pile(pile_id)
         if pile is None:
             raise RuntimeError("Destination pile missing")
-        pile.card_stack.append(self.held_card_id)
+        hidden_stack = self.hidden_piles.get(pile_id.as_key())
+        if hidden_stack is None:
+            raise RuntimeError("Destination hidden pile missing")
+        hidden_stack.append(self.held_card_id)
+        if pile.has_known_count():
+            pile.card_stack.append(self.held_card_id)
+        else:
+            pile.card_stack = [self.held_card_id]
+        placed_card_name = self.card_by_id[self.held_card_id].name
+        pile.mark_top_card_seen(
+            card_name=placed_card_name,
+            confidence=1.0,
+            source="placement_assumption",
+            count_known=pile.has_known_count(),
+        )
         self.held_card_id = None
         self.snapshot.pose.holding_card_id = None
 
-    def top_card_name(self, pile_id: PileId) -> str | None:
+    def peek_top_card_id(self, pile_id: PileId) -> str | None:
+        hidden_stack = self.hidden_piles.get(pile_id.as_key(), [])
+        return hidden_stack[-1] if hidden_stack else None
+
+    def peek_top_card_name(self, pile_id: PileId) -> str | None:
+        top_id = self.peek_top_card_id(pile_id)
+        if top_id is None:
+            return None
+        card_meta = self.card_by_id.get(top_id)
+        return card_meta.name if card_meta is not None else None
+
+    def apply_recognition_observation(
+        self,
+        pile_id: PileId,
+        *,
+        recognized_name: str | None,
+        confidence: float,
+        frame_id: str | None = None,
+        observed_at_utc: str | None = None,
+        source: str = "recognizer",
+    ) -> None:
         pile = self.snapshot.get_pile(pile_id)
         if pile is None:
-            return None
-        top_id = pile.top_card_id()
+            return
+        top_id = self.peek_top_card_id(pile_id)
         if top_id is None:
-            pile.discovered = True
-            return None
-        return self.card_by_id[top_id].name
+            pile.card_stack.clear()
+            pile.mark_empty_confirmed(
+                confidence=confidence,
+                source=source,
+                frame_id=frame_id,
+                observed_at_utc=observed_at_utc,
+            )
+            return
+        if recognized_name is None:
+            pile.mark_unknown(
+                source=source,
+                frame_id=frame_id,
+                observed_at_utc=observed_at_utc,
+            )
+            return
+        if pile.has_known_count():
+            pile.card_stack = [top_id]
+        else:
+            pile.card_stack = [top_id]
+        pile.mark_top_card_seen(
+            card_name=recognized_name,
+            confidence=confidence,
+            source=source,
+            frame_id=frame_id,
+            observed_at_utc=observed_at_utc,
+            count_known=pile.has_known_count(),
+        )
+
+    def top_card_name(self, pile_id: PileId) -> str | None:
+        return self.peek_top_card_name(pile_id)
 
     def top_card_image_path(self, pile_id: PileId) -> str | None:
         pile = self.snapshot.get_pile(pile_id)
@@ -158,10 +241,11 @@ class SimWorld:
             return None
         top_id = pile.top_card_id()
         if top_id is None:
+            hidden_stack = self.hidden_piles.get(pile_id.as_key(), [])
+            top_id = hidden_stack[-1] if hidden_stack else None
+        if top_id is None:
             return None
         return self.image_by_card_id.get(top_id)
-
-
 def _resolve_image_for_name(card_name: str, project_root: Path, set_id: str | None = None) -> str | None:
     image_dirs = [
         project_root / "SimulatedCardImages",

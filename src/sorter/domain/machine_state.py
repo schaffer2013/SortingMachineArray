@@ -56,7 +56,7 @@ class LegacyWorkflowState:
         # If all sorting piles are empty.
         # If all collection piles are fully sorted in the correct order (not inverse). 
         # (Each collection pile is fully sorted AND the bottom card of each collection pile is higher rank than the top card of the previous collection pile, if any.)
-        if not all(pile.discovered for pile in piles):
+        if not all(pile.has_known_state() for pile in piles):
             return False
         feeder_piles = [pile for pile in piles if pile.role == PileRole.FEEDER]
         if any(not pile.is_empty() for pile in feeder_piles):
@@ -96,7 +96,7 @@ class LegacyWorkflowState:
             (
                 pile
                 for pile in self._piles_by_role(PileRole.FEEDER)
-                if not pile.discovered
+                if not pile.is_empty_confirmed()
             ),
             None,
         )
@@ -104,7 +104,7 @@ class LegacyWorkflowState:
             (
                 pile
                 for pile in self.snapshot.piles.values()
-                if pile.role != PileRole.FEEDER and pile.discovered and not pile.is_full()
+                if pile.role != PileRole.FEEDER and pile.has_known_state() and not pile.is_full()
             ),
             None,
         )
@@ -131,7 +131,7 @@ class LegacyWorkflowState:
             (
                 pile
                 for pile in self._piles_by_role(PileRole.FEEDER)
-                if pile.discovered and not pile.is_full()
+                if pile.has_known_state() and not pile.is_full()
             ),
             None,
         )
@@ -163,7 +163,7 @@ class LegacyWorkflowState:
         target = None
         for sorting_pile in self.priority_sorting:
             if (
-                sorting_pile.discovered
+                sorting_pile.has_known_state()
                 and not sorting_pile.is_full()
                 and (sorting_pile.is_empty() or self._top_rank(sorting_pile, rank_lookup) <= from_rank)
             ):
@@ -202,7 +202,7 @@ class LegacyWorkflowState:
             (
                 pile
                 for pile in priority_collection
-                if pile.discovered and not pile.is_full()
+                if pile.has_known_state() and not pile.is_full()
             ),
             None,
         )
@@ -266,7 +266,7 @@ class LegacyWorkflowState:
     def update_step(self):
         if self.step == LegacyStep.MOVE_FROM_FEED:
             feeders = self._piles_by_role(PileRole.FEEDER)
-            if feeders and all(pile.discovered for pile in feeders):
+            if feeders and all(pile.is_empty_confirmed() for pile in feeders):
                 self._set_step(LegacyStep.INITIAL_COLLECTION, "all feeder piles discovered")
         elif self.step == LegacyStep.INITIAL_COLLECTION:
             sorting = self._piles_by_role(PileRole.SORTING)

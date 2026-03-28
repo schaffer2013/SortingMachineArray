@@ -11,6 +11,13 @@ class PileRole(str, Enum):
     TEMP = "TEMP"
 
 
+class PileObservationState(str, Enum):
+    UNKNOWN = "UNKNOWN"
+    TOP_CARD_SEEN = "TOP_CARD_SEEN"
+    EMPTY_SUSPECTED = "EMPTY_SUSPECTED"
+    EMPTY_CONFIRMED = "EMPTY_CONFIRMED"
+
+
 class RunPhase(str, Enum):
     IDLE = "IDLE"
     DISCOVERING = "DISCOVERING"
