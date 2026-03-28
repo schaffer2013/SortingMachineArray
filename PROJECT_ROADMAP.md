@@ -61,18 +61,18 @@
 - [ ] `docs/completion_spec.md`: one-page definition of the machine target and supported operating envelope.
 - [x] `docs/calibration_spec.md`: definition of initialization config ownership, pile-coordinate calibration, and supervised calibration flow.
 - [x] `docs/phase2_gameplan.md`: actionable execution plan for observation-honest simulator behavior.
-- [ ] `docs/acceptance_gates.md`: measurable test gates that define completion.
+- [x] `docs/acceptance_gates.md`: measurable test gates that define completion.
 - [ ] `config/vision/roi_profiles.json`: shared ROI definitions for sim and hardware captures.
 - [x] `config/vision/recognition_thresholds.json`: thresholds for empty detection, OCR confidence, retries, and manual review.
 - [x] `third_party/fuzzy-enigma-card-recognition/`: git submodule for the external recognition engine, evaluation tools, catalog maintenance, and debug UI.
 - [ ] `data/vision/raw/`: immutable raw captures from sim and hardware.
 - [ ] `data/vision/normalized/`: normalized and cropped derivatives for repeatable experiments.
 - [ ] `data/vision/labels/`: labels for empty detection, visible card identity, and ROI annotations.
-- [ ] `scripts/ingest_frames.py`: metadata-preserving frame import.
+- [x] `scripts/ingest_frames.py`: metadata-preserving frame import.
 - [x] `scripts/replay_recognition.py`: run the recognizer pipeline over saved frames.
 - [x] `scripts/benchmark_recognizer.py`: produce measurable recognition reports.
 - [ ] `scripts/audit_code_health.py`: summarize import-graph outliers, low-coverage modules, and likely vestigial code.
-- [ ] `tests/golden_frames/`: curated perception regression set.
+- [x] `tests/golden_frames/`: curated perception regression set.
 - [ ] `tests/noisy_sim/`: simulated conditions that intentionally break ideal assumptions.
 
 ## Suggested Design Targets
@@ -220,6 +220,7 @@
 - [x] Add a toggleable sim recognizer backend so `sim_truth` remains available while `fuzzy_enigma` can be enabled for parent-side integration work.
 - [x] Pass rendered sim image paths through `Frame.path` so the real recognizer can run against simulation captures.
 - [x] Add an initial parent-side confidence and fallback policy so low-confidence `fuzzy_enigma` results can be marked for review and optionally fall back to `sim_truth` in sim-only workflows.
+- [x] Add parent-owned card-engine config files so live sorter runs and benchmark runs can use different recognition budgets without hard-coding submodule defaults in parent logic.
 - [ ] Save intermediate outputs that matter during development, such as normalized crops and OCR text snippets, so tuning is inspectable.
 - [x] Build an initial replay and benchmark harness that runs the same recognizer pipeline against simulated top-card captures.
 
@@ -258,6 +259,7 @@
 - Favor benchmark repeatability over clever one-off scripts. A slower but reproducible benchmark is more valuable than a fast opaque one.
 - Reuse the submodule's debug UI and evaluation tooling against the parent repo's saved captures rather than building duplicate one-off recognition analysis scripts unless the parent needs sorter-specific behavior.
 - The next parent-project data milestone after basic integration should be a replay or benchmark script that runs the submodule over the same simulated captures the sorter uses during normal runs.
+- The next practical data step after replay/benchmark hookup is a parent-owned ingest path that can pull saved recognition summaries into `data/vision/` without manual file surgery.
 
 **Exit criteria**
 

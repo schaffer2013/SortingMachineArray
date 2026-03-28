@@ -1,0 +1,8 @@
+{
+  "catalog_path": "data/catalog/cards.sqlite3",
+  "candidate_count": 5,
+  "lazy_group_basic_land_printings": true,
+  "recognition_deadline_seconds": 20.0,
+  "max_visual_tiebreak_candidates": 6,
+  "max_visual_tiebreak_seconds_per_card": 30.0
+}

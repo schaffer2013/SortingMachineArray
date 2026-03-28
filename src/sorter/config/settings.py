@@ -5,6 +5,7 @@ from pathlib import Path
 import json
 import os
 
+from sorter.config.card_engine import DEFAULT_CARD_ENGINE_CONFIG
 from sorter.config.recognition import RecognitionPolicyConfig
 
 
@@ -60,7 +61,7 @@ class AppSettings:
         )
         recognition_policy = RecognitionPolicyConfig.from_file(recognition_thresholds_path)
         recognizer_backend = _setting("SORTER_RECOGNIZER_BACKEND", "sim_truth").strip().lower()
-        card_engine_config_raw = _setting("SORTER_CARD_ENGINE_CONFIG", "")
+        card_engine_config_raw = _setting("SORTER_CARD_ENGINE_CONFIG", str(DEFAULT_CARD_ENGINE_CONFIG))
         card_engine_config_path = (
             None
             if card_engine_config_raw.lower() in {"", "none", "null"}

@@ -26,6 +26,8 @@ class RecognitionBenchmarkCase:
     fallback_used: bool
     matched_name: bool
     image_available: bool
+    alternatives: tuple[dict, ...]
+    debug: dict
 
 
 @dataclass(frozen=True)
@@ -94,6 +96,8 @@ def run_sim_recognition_benchmark(
                 fallback_used=result.fallback_used,
                 matched_name=result.card_name == expected_name,
                 image_available=frame.path is not None,
+                alternatives=tuple(result.alternatives),
+                debug=dict(result.debug),
             )
         )
 
