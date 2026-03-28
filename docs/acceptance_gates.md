@@ -37,6 +37,15 @@ Run these from the repo root with the shared `.venv`.
 .\.venv\Scripts\python.exe scripts\benchmark_recognizer.py --backend fuzzy_enigma
 ```
 
+### Mode-aware portable report sample
+
+```powershell
+.\.venv\Scripts\python.exe scripts\benchmark_recognizer.py `
+  --backend fuzzy_enigma `
+  --card-engine-mode small_pool `
+  --portable-out data\recognition_reports\portable\fuzzy_enigma_small_pool.portable.json
+```
+
 ### Real recognizer replay sample
 
 ```powershell
@@ -68,11 +77,14 @@ Run these from the repo root with the shared `.venv`.
   - confidence
   - review flag
   - review reason when applicable
+  - requested mode
+  - effective mode when available
   - fallback flag
   - alternatives
   - debug payload
   - confidence-band counts at the summary level
 - `fuzzy_enigma` replay and benchmark runs must also emit inspectable per-case artifacts for development-time review
+- portable report outputs must split success and failure cases so the parent can hand the result bundle directly to the submodule developer
 
 ### Gate 3: benchmark truthfulness
 
@@ -136,3 +148,9 @@ The next acceptance expansion after Sprint 1 should add:
 - replay and benchmark outputs now classify review reasons instead of leaving all review cases lumped together
 - replay and benchmark outputs now export inspectable OCR and bbox artifacts for `fuzzy_enigma`
 - planner coverage now includes partial-knowledge cases where unknown piles should block premature transitions or moves
+
+## Sprint 4 Additions
+
+- replay and benchmark outputs now generate portable success/failure reports with submodule SHA and mode metadata
+- parent mode experiments now fail safely when constrained recognition preconditions are missing, instead of crashing the benchmark run
+- the parent repo now tracks concrete upstream asks in `docs/submodule_feedback.md`
