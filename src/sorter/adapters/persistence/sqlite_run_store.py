@@ -7,6 +7,8 @@ from datetime import datetime, UTC
 
 from sorter.domain.events import DomainEvent
 from sorter.domain.models import MachineSnapshot
+from sorter.ports.camera import Frame
+from sorter.ports.recognizer import RecognitionResult
 
 
 DDL = [
@@ -49,8 +51,19 @@ DDL = [
       seq INTEGER NOT NULL,
       pile_id TEXT,
       path TEXT,
+      captured_at_utc TEXT,
+      camera_id TEXT,
+      source_mode TEXT,
+      metadata_json TEXT,
       recognized_name TEXT,
-      confidence REAL
+      confidence REAL,
+      recognizer_backend TEXT,
+      scryfall_id TEXT,
+      oracle_id TEXT,
+      needs_review INTEGER,
+      fallback_used INTEGER,
+      alternatives_json TEXT,
+      debug_json TEXT
     )
     """,
 ]
@@ -69,7 +82,30 @@ class SQLiteRunStore:
         with self._connect() as conn:
             for statement in DDL:
                 conn.execute(statement)
+            self._ensure_frame_columns(conn)
             conn.commit()
+
+    def _ensure_frame_columns(self, conn: sqlite3.Connection) -> None:
+        existing = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(frames)").fetchall()
+        }
+        migrations = {
+            "captured_at_utc": "ALTER TABLE frames ADD COLUMN captured_at_utc TEXT",
+            "camera_id": "ALTER TABLE frames ADD COLUMN camera_id TEXT",
+            "source_mode": "ALTER TABLE frames ADD COLUMN source_mode TEXT",
+            "metadata_json": "ALTER TABLE frames ADD COLUMN metadata_json TEXT",
+            "recognizer_backend": "ALTER TABLE frames ADD COLUMN recognizer_backend TEXT",
+            "scryfall_id": "ALTER TABLE frames ADD COLUMN scryfall_id TEXT",
+            "oracle_id": "ALTER TABLE frames ADD COLUMN oracle_id TEXT",
+            "needs_review": "ALTER TABLE frames ADD COLUMN needs_review INTEGER",
+            "fallback_used": "ALTER TABLE frames ADD COLUMN fallback_used INTEGER",
+            "alternatives_json": "ALTER TABLE frames ADD COLUMN alternatives_json TEXT",
+            "debug_json": "ALTER TABLE frames ADD COLUMN debug_json TEXT",
+        }
+        for column, statement in migrations.items():
+            if column not in existing:
+                conn.execute(statement)
 
     def start_run(self, run_id: str, mode: str, scenario_name: str | None, config_snapshot: dict) -> None:
         with self._connect() as conn:
@@ -103,11 +139,51 @@ class SQLiteRunStore:
                 )
             conn.commit()
 
-    def save_frame(self, run_id: str, seq: int, frame_id: str, path: str | None, pile_key: str | None, recognized_name: str | None, confidence: float | None) -> None:
+    def save_frame(self, run_id: str, seq: int, frame: Frame, recognition: RecognitionResult | None) -> None:
         with self._connect() as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO frames(frame_id, run_id, seq, pile_id, path, recognized_name, confidence) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (frame_id, run_id, seq, pile_key, path, recognized_name, confidence),
+                """
+                INSERT OR REPLACE INTO frames(
+                    frame_id,
+                    run_id,
+                    seq,
+                    pile_id,
+                    path,
+                    captured_at_utc,
+                    camera_id,
+                    source_mode,
+                    metadata_json,
+                    recognized_name,
+                    confidence,
+                    recognizer_backend,
+                    scryfall_id,
+                    oracle_id,
+                    needs_review,
+                    fallback_used,
+                    alternatives_json,
+                    debug_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    frame.frame_id,
+                    run_id,
+                    seq,
+                    frame.pile_id.as_key() if frame.pile_id is not None else None,
+                    frame.path,
+                    frame.captured_at_utc,
+                    frame.camera_id,
+                    frame.source_mode,
+                    json.dumps(frame.metadata),
+                    recognition.card_name if recognition is not None else None,
+                    recognition.confidence if recognition is not None else None,
+                    recognition.backend if recognition is not None else None,
+                    recognition.scryfall_id if recognition is not None else None,
+                    recognition.oracle_id if recognition is not None else None,
+                    int(recognition.needs_review) if recognition is not None else None,
+                    int(recognition.fallback_used) if recognition is not None else None,
+                    json.dumps(list(recognition.alternatives)) if recognition is not None else None,
+                    json.dumps(recognition.debug) if recognition is not None else None,
+                ),
             )
             conn.commit()
 

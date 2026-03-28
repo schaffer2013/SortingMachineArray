@@ -5,6 +5,8 @@ from pathlib import Path
 import json
 import os
 
+from sorter.config.recognition import RecognitionPolicyConfig
+
 
 @dataclass(frozen=True)
 class AppSettings:
@@ -25,6 +27,9 @@ class AppSettings:
     card_engine_mode: str = "greenfield"
     card_engine_auto_track_results: bool = False
     card_engine_prefer_visual_small_pool: bool = False
+    recognition_thresholds_path: Path | None = None
+    recognition_min_confidence: float = 0.6
+    fuzzy_enigma_sim_truth_fallback: bool = False
 
     @staticmethod
     def from_env(project_root: Path | None = None) -> "AppSettings":
@@ -49,6 +54,11 @@ class AppSettings:
         runtime_fixture_path = root / _setting("SORTER_RUNTIME_FIXTURE", "data/generated/runtime_fixture.json")
         slow_ms = int(_setting("SORTER_SLOW_MS", "0"))
         auto_image_sync = _setting("SORTER_AUTO_IMAGE_SYNC", "1") not in {"0", "false", "False"}
+        recognition_thresholds_path = root / _setting(
+            "SORTER_RECOGNITION_THRESHOLDS",
+            "config/vision/recognition_thresholds.json",
+        )
+        recognition_policy = RecognitionPolicyConfig.from_file(recognition_thresholds_path)
         recognizer_backend = _setting("SORTER_RECOGNIZER_BACKEND", "sim_truth").strip().lower()
         card_engine_config_raw = _setting("SORTER_CARD_ENGINE_CONFIG", "")
         card_engine_config_path = (
@@ -61,6 +71,13 @@ class AppSettings:
         card_engine_prefer_visual_small_pool = _setting(
             "SORTER_CARD_ENGINE_PREFER_VISUAL_SMALL_POOL",
             "0",
+        ) in {"1", "true", "True"}
+        recognition_min_confidence = float(
+            _setting("SORTER_RECOGNITION_MIN_CONFIDENCE", str(recognition_policy.min_confidence))
+        )
+        fuzzy_enigma_sim_truth_fallback = _setting(
+            "SORTER_FUZZY_ENIGMA_SIM_TRUTH_FALLBACK",
+            "1" if recognition_policy.allow_sim_truth_fallback else "0",
         ) in {"1", "true", "True"}
         return AppSettings(
             mode=mode,
@@ -80,6 +97,9 @@ class AppSettings:
             card_engine_mode=card_engine_mode,
             card_engine_auto_track_results=card_engine_auto_track_results,
             card_engine_prefer_visual_small_pool=card_engine_prefer_visual_small_pool,
+            recognition_thresholds_path=recognition_thresholds_path,
+            recognition_min_confidence=recognition_min_confidence,
+            fuzzy_enigma_sim_truth_fallback=fuzzy_enigma_sim_truth_fallback,
         )
 
 

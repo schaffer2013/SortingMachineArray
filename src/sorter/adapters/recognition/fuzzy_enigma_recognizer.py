@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import importlib
+import importlib.util
 from pathlib import Path
 import sys
 from types import ModuleType
@@ -54,6 +55,13 @@ def _load_card_engine_modules(project_root: Path) -> CardEngineModules:
         raise RuntimeError("Unable to import the vendored fuzzy-enigma-card-recognition submodule.") from exc
 
 
+def _card_engine_ocr_available() -> bool:
+    return (
+        importlib.util.find_spec("rapidocr_onnxruntime") is not None
+        or importlib.util.find_spec("paddleocr") is not None
+    )
+
+
 class FuzzyEnigmaRecognizerAdapter:
     def __init__(
         self,
@@ -64,6 +72,11 @@ class FuzzyEnigmaRecognizerAdapter:
         auto_track_results: bool = False,
         prefer_visual_small_pool: bool = False,
     ) -> None:
+        if not _card_engine_ocr_available():
+            raise RuntimeError(
+                "Fuzzy Enigma recognizer requires an OCR backend. Install the vendored submodule with "
+                "`pip install -e ./third_party/fuzzy-enigma-card-recognition[ocr]`."
+            )
         modules = _load_card_engine_modules(project_root)
         if config_path is not None:
             config = modules.config.load_engine_config(str(config_path))
@@ -79,7 +92,7 @@ class FuzzyEnigmaRecognizerAdapter:
     def recognize_top_card(self, frame: Frame) -> RecognitionResult:
         if frame.path is None:
             if frame.metadata.get("card_name") is None:
-                return RecognitionResult(card_name=None, confidence=1.0)
+                return RecognitionResult(card_name=None, confidence=1.0, backend="fuzzy_enigma")
             raise RuntimeError(
                 "Fuzzy Enigma recognizer requires a frame image path. "
                 "Ensure the camera adapter persists or exposes the captured image."
@@ -88,6 +101,32 @@ class FuzzyEnigmaRecognizerAdapter:
         output = self._recognizer.recognize_top_card(
             frame.path,
             mode=self._mode,
+            detailed=True,
             prefer_visual_small_pool=self._prefer_visual_small_pool,
         )
-        return RecognitionResult(card_name=output.card_name, confidence=float(output.confidence))
+        alternatives = tuple(
+            {
+                "name": candidate.name,
+                "score": float(candidate.score),
+                "scryfall_id": candidate.scryfall_id,
+                "oracle_id": candidate.oracle_id,
+                "set_code": candidate.set_code,
+                "collector_number": candidate.collector_number,
+            }
+            for candidate in output.top_k_candidates
+        )
+        return RecognitionResult(
+            card_name=output.card_name,
+            confidence=float(output.confidence),
+            backend="fuzzy_enigma",
+            scryfall_id=output.scryfall_id,
+            oracle_id=output.oracle_id,
+            alternatives=alternatives,
+            debug={
+                "active_roi": output.active_roi,
+                "tried_rois": list(output.tried_rois),
+                "bbox": output.bbox,
+                "ocr_lines": list(output.ocr_lines),
+                "raw": dict(output.debug),
+            },
+        )

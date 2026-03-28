@@ -42,8 +42,22 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 - Vendored submodule backend: `SORTER_RECOGNIZER_BACKEND=fuzzy_enigma`
 - Optional card-engine config path: `SORTER_CARD_ENGINE_CONFIG=config/card_engine/engine.json`
 - Optional card-engine mode: `SORTER_CARD_ENGINE_MODE=greenfield`
+- Recognition policy file: `SORTER_RECOGNITION_THRESHOLDS=config/vision/recognition_thresholds.json`
+- Optional low-confidence fallback: `SORTER_FUZZY_ENIGMA_SIM_TRUTH_FALLBACK=1`
 
 When `fuzzy_enigma` is enabled, the sim camera now passes the rendered top-card image path through the parent `Frame` so the real recognizer can operate on the same simulated images the sorter sees.
+
+## Recognition replay and benchmark
+
+- Replay the configured backend over simulated top-card captures:
+	- `python scripts/replay_recognition.py --backend sim_truth`
+- Generate a benchmark summary JSON:
+	- `python scripts/benchmark_recognizer.py --backend sim_truth`
+- The summary JSON is written under `data/recognition_reports/`.
+
+If you want to run the real vendored recognizer, make sure the submodule OCR extras are installed first:
+
+- `pip install -e ./third_party/fuzzy-enigma-card-recognition[ocr]`
 
 ## Hardware mode notes
 

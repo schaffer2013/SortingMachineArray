@@ -167,3 +167,6 @@ data/logs/
 card_cache.json
 card_data.json
 data/runs.sqlite3
+data/cache/
+data/catalog/
+data/recognition_reports/

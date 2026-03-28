@@ -35,6 +35,7 @@ class Orchestrator:
     catalog: CardCatalogPort
     run_store: RunStorePort
     world: Any
+    recognition_min_confidence: float = 0.6
 
     def _run_id(self) -> str:
         return f"run-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:8]}"
@@ -48,7 +49,16 @@ class Orchestrator:
         run_id = self._run_id()
         snapshot = self.world.snapshot
         rank_lookup = self.world.rank_lookup()
-        self.run_store.start_run(run_id, mode="sim", scenario_name=self.world.scenario_name, config_snapshot={"seed": self.world.seed})
+        self.run_store.start_run(
+            run_id,
+            mode="sim",
+            scenario_name=self.world.scenario_name,
+            config_snapshot={
+                "seed": self.world.seed,
+                "recognition_min_confidence": self.recognition_min_confidence,
+                "recognizer_backend": getattr(self.recognizer, "__class__", type(self.recognizer)).__name__,
+            },
+        )
         self.lights.set_status("running")
         seq = 0
         logger.info(
@@ -119,40 +129,46 @@ class Orchestrator:
                 next_move,
                 per_command_delay_s=per_command_delay_s,
             )
-            verified, confidence, card_name = verify_move(next_move, self.camera, self.recognizer)
+            verified, verification_result, verification_frame = verify_move(
+                next_move,
+                self.camera,
+                self.recognizer,
+                min_confidence=self.recognition_min_confidence,
+            )
             self.run_store.append_event(run_id, seq, DomainEvent.now("move_verified", {
                 "verified": verified,
-                "confidence": confidence,
-                "card_name": card_name,
+                "confidence": verification_result.confidence,
+                "card_name": verification_result.card_name,
+                "backend": verification_result.backend,
+                "scryfall_id": verification_result.scryfall_id,
+                "oracle_id": verification_result.oracle_id,
+                "needs_review": verification_result.needs_review,
+                "fallback_used": verification_result.fallback_used,
             }))
             logger.debug(
-                "move verification: run_id=%s seq=%s verified=%s confidence=%.3f card=%s",
+                "move verification: run_id=%s seq=%s verified=%s confidence=%.3f card=%s backend=%s review=%s fallback=%s",
                 run_id,
                 seq,
                 verified,
-                confidence,
-                card_name,
+                verification_result.confidence,
+                verification_result.card_name,
+                verification_result.backend,
+                verification_result.needs_review,
+                verification_result.fallback_used,
             )
-            frame = self.camera.capture_top_card(next_move.from_pile)
-            self.run_store.save_frame(
-                run_id,
-                seq,
-                frame.frame_id,
-                frame.path,
-                next_move.from_pile.as_key(),
-                card_name,
-                confidence,
-            )
+            self.run_store.save_frame(run_id, seq, verification_frame, verification_result)
             self.run_store.save_snapshot(run_id, seq, snapshot)
             if not verified:
                 self.lights.set_status("fault")
                 self.run_store.finish_run(run_id, "FAULTED")
                 logger.warning(
-                    "run faulted: run_id=%s seq=%s card=%s confidence=%.3f",
+                    "run faulted: run_id=%s seq=%s card=%s confidence=%.3f backend=%s review=%s",
                     run_id,
                     seq,
-                    card_name,
-                    confidence,
+                    verification_result.card_name,
+                    verification_result.confidence,
+                    verification_result.backend,
+                    verification_result.needs_review,
                 )
                 return {"run_id": run_id, "status": "FAULTED", "seq": seq}
 
@@ -208,26 +224,26 @@ class Orchestrator:
                         "pile": pile.pile_id.as_key(),
                         "card_name": result.card_name,
                         "confidence": result.confidence,
+                        "backend": result.backend,
+                        "scryfall_id": result.scryfall_id,
+                        "oracle_id": result.oracle_id,
+                        "needs_review": result.needs_review,
+                        "fallback_used": result.fallback_used,
                         "empty_confirmed": result.card_name is None,
                     },
                 ),
             )
             logger.debug(
-                "startup discovery result: run_id=%s pile=%s card=%s confidence=%.3f",
+                "startup discovery result: run_id=%s pile=%s card=%s confidence=%.3f backend=%s review=%s fallback=%s",
                 run_id,
                 pile.pile_id.as_key(),
                 result.card_name,
                 result.confidence,
+                result.backend,
+                result.needs_review,
+                result.fallback_used,
             )
-            self.run_store.save_frame(
-                run_id,
-                0,
-                frame.frame_id,
-                frame.path,
-                pile.pile_id.as_key(),
-                result.card_name,
-                result.confidence,
-            )
+            self.run_store.save_frame(run_id, 0, frame, result)
             self.run_store.save_snapshot(run_id, 0, snapshot)
 
         logger.info("startup discovery scan completed: run_id=%s", run_id)

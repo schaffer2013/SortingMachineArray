@@ -63,14 +63,14 @@
 - [x] `docs/phase2_gameplan.md`: actionable execution plan for observation-honest simulator behavior.
 - [ ] `docs/acceptance_gates.md`: measurable test gates that define completion.
 - [ ] `config/vision/roi_profiles.json`: shared ROI definitions for sim and hardware captures.
-- [ ] `config/vision/recognition_thresholds.json`: thresholds for empty detection, OCR confidence, retries, and manual review.
+- [x] `config/vision/recognition_thresholds.json`: thresholds for empty detection, OCR confidence, retries, and manual review.
 - [x] `third_party/fuzzy-enigma-card-recognition/`: git submodule for the external recognition engine, evaluation tools, catalog maintenance, and debug UI.
 - [ ] `data/vision/raw/`: immutable raw captures from sim and hardware.
 - [ ] `data/vision/normalized/`: normalized and cropped derivatives for repeatable experiments.
 - [ ] `data/vision/labels/`: labels for empty detection, visible card identity, and ROI annotations.
 - [ ] `scripts/ingest_frames.py`: metadata-preserving frame import.
-- [ ] `scripts/replay_recognition.py`: run the recognizer pipeline over saved frames.
-- [ ] `scripts/benchmark_recognizer.py`: produce measurable recognition reports.
+- [x] `scripts/replay_recognition.py`: run the recognizer pipeline over saved frames.
+- [x] `scripts/benchmark_recognizer.py`: produce measurable recognition reports.
 - [ ] `scripts/audit_code_health.py`: summarize import-graph outliers, low-coverage modules, and likely vestigial code.
 - [ ] `tests/golden_frames/`: curated perception regression set.
 - [ ] `tests/noisy_sim/`: simulated conditions that intentionally break ideal assumptions.
@@ -219,9 +219,9 @@
 - [x] Add `src/sorter/adapters/recognition/fuzzy_enigma_recognizer.py` to wrap the submodule and keep the rest of the application talking only to `RecognizerPort`.
 - [x] Add a toggleable sim recognizer backend so `sim_truth` remains available while `fuzzy_enigma` can be enabled for parent-side integration work.
 - [x] Pass rendered sim image paths through `Frame.path` so the real recognizer can run against simulation captures.
-- [ ] Add confidence fusion and fallback behavior: re-scan, reposition, alternate recognizer, or manual review.
+- [x] Add an initial parent-side confidence and fallback policy so low-confidence `fuzzy_enigma` results can be marked for review and optionally fall back to `sim_truth` in sim-only workflows.
 - [ ] Save intermediate outputs that matter during development, such as normalized crops and OCR text snippets, so tuning is inspectable.
-- [ ] Build a replay harness that runs the same recognizer pipeline against saved sim frames and real-world captures.
+- [x] Build an initial replay and benchmark harness that runs the same recognizer pipeline against simulated top-card captures.
 
 **Implementation notes**
 

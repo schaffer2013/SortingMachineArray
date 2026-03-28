@@ -218,6 +218,9 @@ class SimWorld:
             return None
         top_id = pile.top_card_id()
         if top_id is None:
+            hidden_stack = self.hidden_piles.get(pile_id.as_key(), [])
+            top_id = hidden_stack[-1] if hidden_stack else None
+        if top_id is None:
             return None
         return self.image_by_card_id.get(top_id)
 def _resolve_image_for_name(card_name: str, project_root: Path, set_id: str | None = None) -> str | None:

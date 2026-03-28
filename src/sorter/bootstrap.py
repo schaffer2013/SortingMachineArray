@@ -1,6 +1,8 @@
 import logging
+from dataclasses import dataclass
 
 from sorter.config.settings import AppSettings
+from sorter.adapters.recognition.policy_recognizer import PolicyRecognizerAdapter
 from sorter.adapters.sim.sim_world import SimWorld
 from sorter.adapters.sim.sim_motion import SimMotionAdapter
 from sorter.adapters.sim.sim_camera import SimCameraAdapter
@@ -21,7 +23,34 @@ from sorter.domain.sort_policy_config import load_sort_policy_file
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class SimRuntimeContext:
+    world: SimWorld
+    catalog: FileCardCatalog
+    motion: SimMotionAdapter
+    camera: SimCameraAdapter
+    vacuum: SimVacuumAdapter
+    lights: SimLightsAdapter
+    recognizer: object
+    run_store: SQLiteRunStore
+
+
 def build_sim_orchestrator(settings: AppSettings) -> Orchestrator:
+    context = build_sim_runtime_context(settings)
+    return Orchestrator(
+        motion=context.motion,
+        camera=context.camera,
+        vacuum=context.vacuum,
+        lights=context.lights,
+        recognizer=context.recognizer,
+        catalog=context.catalog,
+        run_store=context.run_store,
+        world=context.world,
+        recognition_min_confidence=settings.recognition_min_confidence,
+    )
+
+
+def build_sim_runtime_context(settings: AppSettings) -> SimRuntimeContext:
     root = settings.project_root or settings.scenario_fixture.parents[2]
     catalog = FileCardCatalog(settings.card_catalog_path)
     runtime_fixture_path = _resolve_runtime_fixture(settings, catalog)
@@ -54,16 +83,21 @@ def build_sim_orchestrator(settings: AppSettings) -> Orchestrator:
     compiled_ranking = RankingService(policy_config).compile(world.card_by_id)
     world.set_compiled_ranking(compiled_ranking)
 
+    motion = SimMotionAdapter(world)
+    camera = SimCameraAdapter(world)
+    vacuum = SimVacuumAdapter(world)
+    lights = SimLightsAdapter(world)
+    recognizer = _build_recognizer(settings, world, catalog)
     run_store = SQLiteRunStore(settings.sqlite_path)
-    return Orchestrator(
-        motion=SimMotionAdapter(world),
-        camera=SimCameraAdapter(world),
-        vacuum=SimVacuumAdapter(world),
-        lights=SimLightsAdapter(world),
-        recognizer=_build_recognizer(settings, world, catalog),
-        catalog=catalog,
-        run_store=run_store,
+    return SimRuntimeContext(
         world=world,
+        catalog=catalog,
+        motion=motion,
+        camera=camera,
+        vacuum=vacuum,
+        lights=lights,
+        recognizer=recognizer,
+        run_store=run_store,
     )
 
 
@@ -73,12 +107,18 @@ def _build_recognizer(settings: AppSettings, world: SimWorld, catalog: FileCardC
         return SimRecognizerAdapter(world, catalog)
     if backend == "fuzzy_enigma":
         root = settings.project_root or settings.scenario_fixture.parents[2]
-        return FuzzyEnigmaRecognizerAdapter(
+        primary = FuzzyEnigmaRecognizerAdapter(
             project_root=root,
             config_path=settings.card_engine_config_path,
             mode=settings.card_engine_mode,
             auto_track_results=settings.card_engine_auto_track_results,
             prefer_visual_small_pool=settings.card_engine_prefer_visual_small_pool,
+        )
+        fallback = SimRecognizerAdapter(world, catalog) if settings.fuzzy_enigma_sim_truth_fallback else None
+        return PolicyRecognizerAdapter(
+            primary,
+            min_confidence=settings.recognition_min_confidence,
+            fallback=fallback,
         )
     raise ValueError(f"Unsupported recognizer backend: {settings.recognizer_backend}")
 

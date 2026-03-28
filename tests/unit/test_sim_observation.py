@@ -23,6 +23,10 @@ def test_sim_camera_capture_updates_pile_observation_state():
     assert pile.observation.frame_id == frame.frame_id
     assert pile.observation.top_card_name is not None
     assert frame.path == world.top_card_image_path(pile_id)
+    assert frame.captured_at_utc is not None
+    assert frame.camera_id == "sim_topdown"
+    assert frame.source_mode == "sim"
+    assert frame.metadata["scryfall_id"] is not None or frame.metadata["oracle_id"] is not None or frame.metadata["card_name"] is not None
 
 
 def test_all_piles_start_undiscovered_before_startup_scan():
@@ -37,7 +41,7 @@ def test_all_piles_start_undiscovered_before_startup_scan():
     assert pile.card_stack == []
 
 
-def test_snapshot_does_not_expose_full_hidden_stack_for_undiscovered_feeder():
+def test_snapshot_keeps_hidden_stack_private_even_if_sim_camera_can_render_top_card():
     root = Path(__file__).resolve().parents[2]
     world = SimWorld.from_fixture(root / "data/generated/runtime_fixture.json")
     pile_id = PileId(x_index=0, y_index=0)
@@ -46,7 +50,7 @@ def test_snapshot_does_not_expose_full_hidden_stack_for_undiscovered_feeder():
     assert pile is not None
     assert pile.card_stack == []
     assert len(world.hidden_piles[pile_id.as_key()]) > 0
-    assert world.top_card_image_path(pile_id) is None
+    assert world.top_card_image_path(pile_id) is not None
 
 
 def test_capture_reveals_only_top_card_without_leaking_full_hidden_stack():

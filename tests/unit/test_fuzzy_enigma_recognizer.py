@@ -19,7 +19,27 @@ def test_fuzzy_enigma_recognizer_uses_frame_path_and_translates_result(monkeypat
         def recognize_top_card(self, image, **kwargs):
             seen["image"] = image
             seen["kwargs"] = kwargs
-            return SimpleNamespace(card_name="Opt", confidence=0.88)
+            return SimpleNamespace(
+                card_name="Opt",
+                confidence=0.88,
+                scryfall_id="opt-scryfall-id",
+                oracle_id="opt-oracle-id",
+                bbox=(1, 2, 3, 4),
+                ocr_lines=["Opt"],
+                top_k_candidates=[
+                    SimpleNamespace(
+                        name="Opt",
+                        score=0.88,
+                        scryfall_id="opt-scryfall-id",
+                        oracle_id="opt-oracle-id",
+                        set_code="XLN",
+                        collector_number="65",
+                    )
+                ],
+                active_roi="standard",
+                tried_rois=["standard", "set_symbol"],
+                debug={"mode": {"effective": "greenfield"}},
+            )
 
     fake_modules = SimpleNamespace(
         config=SimpleNamespace(load_engine_config=lambda path=None: {"path": path}),
@@ -29,6 +49,7 @@ def test_fuzzy_enigma_recognizer_uses_frame_path_and_translates_result(monkeypat
         "sorter.adapters.recognition.fuzzy_enigma_recognizer._load_card_engine_modules",
         lambda project_root: fake_modules,
     )
+    monkeypatch.setattr("sorter.adapters.recognition.fuzzy_enigma_recognizer._card_engine_ocr_available", lambda: True)
 
     adapter = FuzzyEnigmaRecognizerAdapter(
         project_root=tmp_path,
@@ -50,9 +71,15 @@ def test_fuzzy_enigma_recognizer_uses_frame_path_and_translates_result(monkeypat
     assert seen["auto_track_results"] is True
     assert seen["image"] == str(tmp_path / "card.jpg")
     assert seen["kwargs"]["mode"] == "greenfield"
+    assert seen["kwargs"]["detailed"] is True
     assert seen["kwargs"]["prefer_visual_small_pool"] is True
     assert result.card_name == "Opt"
     assert result.confidence == 0.88
+    assert result.backend == "fuzzy_enigma"
+    assert result.scryfall_id == "opt-scryfall-id"
+    assert result.oracle_id == "opt-oracle-id"
+    assert result.alternatives[0]["set_code"] == "XLN"
+    assert result.debug["active_roi"] == "standard"
 
 
 def test_fuzzy_enigma_recognizer_returns_empty_result_when_frame_has_no_image_or_card(monkeypatch, tmp_path):
@@ -66,6 +93,7 @@ def test_fuzzy_enigma_recognizer_returns_empty_result_when_frame_has_no_image_or
         "sorter.adapters.recognition.fuzzy_enigma_recognizer._load_card_engine_modules",
         lambda project_root: fake_modules,
     )
+    monkeypatch.setattr("sorter.adapters.recognition.fuzzy_enigma_recognizer._card_engine_ocr_available", lambda: True)
 
     adapter = FuzzyEnigmaRecognizerAdapter(project_root=tmp_path)
     frame = Frame(frame_id="frame-2", path=None, pile_id=None, metadata={"mode": "sim"})
@@ -87,6 +115,7 @@ def test_fuzzy_enigma_recognizer_requires_image_path_for_non_empty_card(monkeypa
         "sorter.adapters.recognition.fuzzy_enigma_recognizer._load_card_engine_modules",
         lambda project_root: fake_modules,
     )
+    monkeypatch.setattr("sorter.adapters.recognition.fuzzy_enigma_recognizer._card_engine_ocr_available", lambda: True)
 
     adapter = FuzzyEnigmaRecognizerAdapter(project_root=Path(tmp_path))
     frame = Frame(
@@ -102,3 +131,14 @@ def test_fuzzy_enigma_recognizer_requires_image_path_for_non_empty_card(monkeypa
         assert "requires a frame image path" in str(exc)
     else:
         raise AssertionError("Expected missing frame path to raise for non-empty recognition")
+
+
+def test_fuzzy_enigma_recognizer_requires_ocr_backend(monkeypatch, tmp_path):
+    monkeypatch.setattr("sorter.adapters.recognition.fuzzy_enigma_recognizer._card_engine_ocr_available", lambda: False)
+
+    try:
+        FuzzyEnigmaRecognizerAdapter(project_root=tmp_path)
+    except RuntimeError as exc:
+        assert "requires an OCR backend" in str(exc)
+    else:
+        raise AssertionError("Expected missing OCR backend to raise")
