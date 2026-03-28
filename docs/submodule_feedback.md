@@ -182,6 +182,13 @@ Recent mode comparison results from the parent repo:
   - `name_accuracy=0.833`
   - `review_count=0`
 
+The parent repo can also package the current feedback doc plus portable evidence
+into one handoff bundle with:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\package_submodule_feedback.py
+```
+
 ## Current Ask Priority
 
 1. structured failure codes

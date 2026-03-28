@@ -69,6 +69,8 @@ The sim camera no longer mutates pile observation state on capture by itself; ob
 	- `python scripts/run_golden_frames.py --backend fuzzy_enigma --card-engine-mode small_pool --use-expected-label`
 - Compare two saved summaries directly:
 	- `python scripts/compare_recognition_summaries.py --baseline data/recognition_reports/sim_truth_summary.json --candidate data/recognition_reports/fuzzy_enigma_summary.json`
+- Package the current feedback doc plus portable evidence for the submodule developer:
+	- `python scripts/package_submodule_feedback.py`
 - The summary JSON is written under `data/recognition_reports/`.
 - Portable success/failure reports are written under `data/recognition_reports/portable/`.
 - For `fuzzy_enigma`, replay and benchmark commands automatically prefer the parent-owned benchmark config unless you override `--card-engine-config`.
