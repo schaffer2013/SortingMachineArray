@@ -1,199 +1,146 @@
 {
+  "version": 2,
+  "source": "vendored_card_engine_offline_catalog",
+  "source_sim_card_list": "config/sim_card_lists/default_cards.json",
   "cards": [
     {
-      "name": "Aberrant",
-      "rarity": null,
-      "colors": [],
-      "color_identity": [],
-      "card_types": [],
-      "supertypes": [],
+      "name": "Elspeth, Storm Slayer",
+      "scryfall_id": "73a065e3-b530-4e62-ab3c-4f6f908184ec",
+      "oracle_id": "f78af825-023a-42e9-8374-5c52303a1417",
+      "set_code": "tdm",
+      "collector_number": "11",
+      "rarity": "mythic",
+      "colors": [
+        "w"
+      ],
+      "color_identity": [
+        "w"
+      ],
+      "card_types": [
+        "planeswalker"
+      ],
+      "supertypes": [
+        "legendary"
+      ],
       "is_land": false,
       "is_basic_land": false,
       "mana_value": null,
-      "market_price_usd": null,
-      "images": [
-        "SimulatedCardImages/Aberrant.jpg"
-      ]
+      "market_price_usd": null
     },
     {
-      "name": "Abandoned Sarcophagus",
-      "rarity": null,
-      "colors": [],
-      "color_identity": [],
-      "card_types": [],
+      "name": "Furious Forebear",
+      "scryfall_id": "a4f247b6-8212-4e78-a452-d2d3be228d8e",
+      "oracle_id": "4fb1d33f-a87d-46cf-a73e-882c3dbcb26f",
+      "set_code": "tdm",
+      "collector_number": "13",
+      "rarity": "uncommon",
+      "colors": [
+        "w"
+      ],
+      "color_identity": [
+        "w"
+      ],
+      "card_types": [
+        "creature"
+      ],
       "supertypes": [],
       "is_land": false,
       "is_basic_land": false,
       "mana_value": null,
-      "market_price_usd": null,
-      "images": [
-        "SimulatedCardImages/Abandoned_Sarcophagus.jpg"
-      ]
+      "market_price_usd": null
     },
     {
-      "name": "Abandon the Post",
-      "rarity": null,
-      "colors": [],
-      "color_identity": [],
-      "card_types": [],
+      "name": "Flood",
+      "scryfall_id": "2aefbeae-ac72-4a13-8898-8d1e42a633a6",
+      "oracle_id": "e8eb2abb-daf9-43e0-b909-d96b679f71c2",
+      "set_code": "5ed",
+      "collector_number": "87",
+      "rarity": "common",
+      "colors": [
+        "u"
+      ],
+      "color_identity": [
+        "u"
+      ],
+      "card_types": [
+        "enchantment"
+      ],
       "supertypes": [],
       "is_land": false,
       "is_basic_land": false,
       "mana_value": null,
-      "market_price_usd": null,
-      "images": [
-        "SimulatedCardImages/Abandon_the_Post.jpg"
-      ]
+      "market_price_usd": null
     },
     {
-      "name": "Lightning Bolt",
-      "rarity": null,
-      "colors": [],
-      "color_identity": [],
-      "card_types": [],
+      "name": "Future Sight",
+      "scryfall_id": "639cb483-ffe2-4abc-a050-5cdc8aebd5a2",
+      "oracle_id": "93a0e938-b916-47ec-9803-369e885e253c",
+      "set_code": "mh1",
+      "collector_number": "53",
+      "rarity": "rare",
+      "colors": [
+        "u"
+      ],
+      "color_identity": [
+        "u"
+      ],
+      "card_types": [
+        "enchantment"
+      ],
       "supertypes": [],
       "is_land": false,
       "is_basic_land": false,
       "mana_value": null,
-      "market_price_usd": null,
-      "images": [
-        "SimulatedCardImages\\Lightning_Bolt.jpg"
-      ]
+      "market_price_usd": null
     },
     {
-      "name": "Counterspell",
-      "rarity": null,
-      "colors": [],
-      "color_identity": [],
-      "card_types": [],
-      "supertypes": [],
+      "name": "Alpharael, Dreaming Acolyte",
+      "scryfall_id": "349a2211-2b23-418d-a1ef-1c72ad2e171d",
+      "oracle_id": "e4be4071-7910-460f-90f3-6c4d8cc9db65",
+      "set_code": "eoe",
+      "collector_number": "212",
+      "rarity": "uncommon",
+      "colors": [
+        "b",
+        "u"
+      ],
+      "color_identity": [
+        "b",
+        "u"
+      ],
+      "card_types": [
+        "creature"
+      ],
+      "supertypes": [
+        "legendary"
+      ],
       "is_land": false,
       "is_basic_land": false,
       "mana_value": null,
-      "market_price_usd": null,
-      "images": [
-        "SimulatedCardImages\\Counterspell.jpg"
-      ]
+      "market_price_usd": null
     },
     {
-      "name": "Llanowar Elves",
-      "rarity": null,
-      "colors": [],
-      "color_identity": [],
-      "card_types": [],
+      "name": "Garenbrig Carver // Shield's Might",
+      "scryfall_id": "194b7a1c-291a-470e-9a40-61b72a46793b",
+      "oracle_id": "496c9633-ff17-48df-9b24-1d8cbfd06126",
+      "set_code": "eld",
+      "collector_number": "156",
+      "rarity": "common",
+      "colors": [
+        "g"
+      ],
+      "color_identity": [
+        "g"
+      ],
+      "card_types": [
+        "creature",
+        "instant"
+      ],
       "supertypes": [],
       "is_land": false,
       "is_basic_land": false,
       "mana_value": null,
-      "market_price_usd": null,
-      "images": [
-        "SimulatedCardImages\\Llanowar_Elves.jpg"
-      ]
-    },
-    {
-      "name": "Doom Blade",
-      "rarity": null,
-      "colors": [],
-      "color_identity": [],
-      "card_types": [],
-      "supertypes": [],
-      "is_land": false,
-      "is_basic_land": false,
-      "mana_value": null,
-      "market_price_usd": null,
-      "images": [
-        "SimulatedCardImages\\Doom_Blade.jpg"
-      ]
-    },
-    {
-      "name": "Pacifism",
-      "rarity": null,
-      "colors": [],
-      "color_identity": [],
-      "card_types": [],
-      "supertypes": [],
-      "is_land": false,
-      "is_basic_land": false,
-      "mana_value": null,
-      "market_price_usd": null,
-      "images": [
-        "SimulatedCardImages\\Pacifism.jpg"
-      ]
-    },
-    {
-      "name": "Arcane Signet",
-      "rarity": null,
-      "colors": [],
-      "color_identity": [],
-      "card_types": [],
-      "supertypes": [],
-      "is_land": false,
-      "is_basic_land": false,
-      "mana_value": null,
-      "market_price_usd": null,
-      "images": [
-        "SimulatedCardImages\\Arcane_Signet.jpg"
-      ]
-    },
-    {
-      "name": "Evolving Wilds",
-      "rarity": null,
-      "colors": [],
-      "color_identity": [],
-      "card_types": [],
-      "supertypes": [],
-      "is_land": false,
-      "is_basic_land": false,
-      "mana_value": null,
-      "market_price_usd": null,
-      "images": [
-        "SimulatedCardImages\\Evolving_Wilds.jpg"
-      ]
-    },
-    {
-      "name": "Island",
-      "rarity": null,
-      "colors": [],
-      "color_identity": [],
-      "card_types": [],
-      "supertypes": [],
-      "is_land": false,
-      "is_basic_land": false,
-      "mana_value": null,
-      "market_price_usd": null,
-      "images": [
-        "SimulatedCardImages\\Island.jpg"
-      ]
-    },
-    {
-      "name": "Mountain",
-      "rarity": null,
-      "colors": [],
-      "color_identity": [],
-      "card_types": [],
-      "supertypes": [],
-      "is_land": false,
-      "is_basic_land": false,
-      "mana_value": null,
-      "market_price_usd": null,
-      "images": [
-        "SimulatedCardImages\\Mountain.jpg"
-      ]
-    },
-    {
-      "name": "Shivan Dragon",
-      "rarity": null,
-      "colors": [],
-      "color_identity": [],
-      "card_types": [],
-      "supertypes": [],
-      "is_land": false,
-      "is_basic_land": false,
-      "mana_value": null,
-      "market_price_usd": null,
-      "images": [
-        "SimulatedCardImages\\Shivan_Dragon.jpg"
-      ]
+      "market_price_usd": null
     }
   ]
 }
