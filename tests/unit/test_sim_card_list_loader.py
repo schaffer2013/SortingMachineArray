@@ -7,8 +7,10 @@ import tempfile
 
 from sorter.adapters.persistence.sim_card_list_loader import (
     DEFAULT_SIM_CARD_LIST_PAYLOAD,
+    build_default_sim_card_list_payload,
     expand_and_shuffle_instances,
     expand_and_shuffle_instance_ids,
+    load_catalog_image_candidates,
     load_expand_shuffle_instance_ids,
     load_sim_card_list,
 )
@@ -24,6 +26,53 @@ def test_sim_card_list_file_is_created_when_missing(tmp_path: Path) -> None:
     assert config.shuffle is True
     raw = json.loads(card_list_path.read_text(encoding="utf-8"))
     assert raw["list_name"] == DEFAULT_SIM_CARD_LIST_PAYLOAD["list_name"]
+    assert raw["entries"]
+
+
+def test_load_catalog_image_candidates_reads_available_catalog_entries(tmp_path: Path) -> None:
+    catalog_path = tmp_path / "cards.json"
+    catalog_path.write_text(
+        json.dumps(
+            {
+                "cards": [
+                    {"name": "Alpha", "images": ["SimulatedCardImages/lea/Alpha.jpg"]},
+                    {"name": "Beta", "images": ["SimulatedCardImages/Beta.jpg"]},
+                    {"name": "Gamma", "images": []},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    candidates = load_catalog_image_candidates(catalog_path)
+
+    assert [(candidate.name, candidate.set_id) for candidate in candidates] == [
+        ("Alpha", "lea"),
+        ("Beta", None),
+    ]
+
+
+def test_build_default_sim_card_list_payload_uses_local_catalog_candidates(tmp_path: Path) -> None:
+    catalog_path = tmp_path / "cards.json"
+    catalog_path.write_text(
+        json.dumps(
+            {
+                "cards": [
+                    {"name": "Alpha", "images": ["SimulatedCardImages/lea/Alpha.jpg"]},
+                    {"name": "Beta", "images": ["SimulatedCardImages/leb/Beta.jpg"]},
+                    {"name": "Gamma", "images": ["SimulatedCardImages/Gamma.jpg"]},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    payload = build_default_sim_card_list_payload(catalog_path=catalog_path, desired_entry_count=2, random_seed=7)
+
+    assert payload["list_name"] == "default_demo_cards"
+    assert payload["entries"]
+    assert len(payload["entries"]) == 2
+    assert all(entry["count"] == 1 for entry in payload["entries"])
 
 
 def test_expansion_and_shuffle_is_deterministic_with_seed_42(tmp_path: Path) -> None:
@@ -99,8 +148,8 @@ def test_expansion_prefers_supplied_scryfall_id_style_suffixes() -> None:
         "random_seed": 42,
         "shuffle": False,
         "entries": [
-            {"name": "Snapcaster Mage", "count": 1},
-            {"name": "Lightning Bolt", "count": 1},
+            {"name": "Alpha Adept", "count": 1},
+            {"name": "Beta Burst", "count": 1},
         ],
     }
     config = load_sim_card_list_from_payload(config_payload)
@@ -108,14 +157,14 @@ def test_expansion_prefers_supplied_scryfall_id_style_suffixes() -> None:
     expanded = expand_and_shuffle_instance_ids(
         config,
         id_suffix_by_name={
-            "Snapcaster Mage": "c1a2b3c4-d5e6-7890-abcd-ef1234567890",
-            "Lightning Bolt": "11111111-2222-3333-4444-555555555555",
+            "Alpha Adept": "c1a2b3c4-d5e6-7890-abcd-ef1234567890",
+            "Beta Burst": "11111111-2222-3333-4444-555555555555",
         },
     )
 
     assert expanded == [
-        "Snapcaster Mage#c1a2b3c4-d5e6-7890-abcd-ef1234567890",
-        "Lightning Bolt#11111111-2222-3333-4444-555555555555",
+        "Alpha Adept#c1a2b3c4-d5e6-7890-abcd-ef1234567890",
+        "Beta Burst#11111111-2222-3333-4444-555555555555",
     ]
 
 
@@ -127,9 +176,9 @@ def test_sim_card_list_parses_set_aliases() -> None:
         "random_seed": 42,
         "shuffle": False,
         "entries": [
-            {"name": "Lightning Bolt", "set": "6ED", "count": 1},
-            {"name": "Counterspell", "setId": "lea", "count": 1},
-            {"name": "Island", "count": 1},
+            {"name": "Alpha Adept", "set": "6ED", "count": 1},
+            {"name": "Beta Burst", "setId": "lea", "count": 1},
+            {"name": "Gamma Grove", "count": 1},
         ],
     }
 
@@ -148,8 +197,8 @@ def test_expand_instances_keeps_set_id_metadata() -> None:
         "random_seed": 42,
         "shuffle": False,
         "entries": [
-            {"name": "Lightning Bolt", "set": "6ED", "count": 2},
-            {"name": "Counterspell", "count": 1},
+            {"name": "Alpha Adept", "set": "6ED", "count": 2},
+            {"name": "Beta Burst", "count": 1},
         ],
     }
     config = load_sim_card_list_from_payload(config_payload)
@@ -157,9 +206,9 @@ def test_expand_instances_keeps_set_id_metadata() -> None:
     expanded = expand_and_shuffle_instances(config)
 
     assert [entry.card_id for entry in expanded] == [
-        "Lightning Bolt#lightningbolt",
-        "Lightning Bolt#lightningbolt",
-        "Counterspell#counterspell",
+        "Alpha Adept#alphaadept",
+        "Alpha Adept#alphaadept",
+        "Beta Burst#betaburst",
     ]
     assert [entry.set_id for entry in expanded] == ["6ed", "6ed", None]
 

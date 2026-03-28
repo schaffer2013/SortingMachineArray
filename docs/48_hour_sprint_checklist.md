@@ -98,14 +98,14 @@ By the end of this sprint, the parent project should have:
 ## Block 2: Mode-Aware Parent Integration
 
 - [ ] Add parent-side policy for using more than one recognition mode.
-- [ ] Start with practical use of:
+- [x] Start with practical use of:
   - `greenfield`
   - `small_pool`
   - `reevaluation`
   - `confirmation`
 - [x] Make mode choice explicit in saved reports and logs.
-- [ ] Add benchmark or replay coverage that compares modes, not just backends.
-- [ ] If the parent cannot yet use a mode safely, document the missing requirement in the submodule feedback doc.
+- [x] Add benchmark or replay coverage that compares modes, not just backends.
+- [x] If the parent cannot yet use a mode safely, document the missing requirement in the submodule feedback doc.
 
 ## Block 3: Remove Static Card Assumptions
 
@@ -115,18 +115,18 @@ By the end of this sprint, the parent project should have:
   - tracked-pool entries
   - expected-card identifiers
   - offline catalog queries through the submodule when appropriate
-- [ ] Avoid new network-based card lookups in the parent repo.
+- [x] Avoid new network-based card lookups in the parent repo.
 - [ ] Add tests proving the parent flow does not rely on example cards like `Lightning Bolt` or other baked-in names.
 
 ## Block 4: Golden-Frame Hardening
 
-- [ ] Add a stable golden-frame command that does not depend on regenerating the runtime fixture during the run.
+- [x] Add a stable golden-frame command that does not depend on regenerating the runtime fixture during the run.
 - [ ] Expand the golden-frame manifest beyond the current small slice if practical.
-- [ ] Make golden-frame output portable and diffable across:
+- [x] Make golden-frame output portable and diffable across:
   - backend
   - mode
   - config
-- [ ] Add at least one command or doc section that a future hardware debugging session could reuse unchanged.
+- [x] Add at least one command or doc section that a future hardware debugging session could reuse unchanged.
 
 ## Block 5: Broader Noisy-Sim Fault Modeling
 
@@ -162,10 +162,10 @@ By the end of this sprint, the parent project should have:
 
 ## Block 8: Docs And Acceptance Tightening
 
-- [ ] Update acceptance docs to include portable evidence bundles and mode-aware runs.
+- [x] Update acceptance docs to include portable evidence bundles and mode-aware runs.
 - [ ] Update the roadmap for anything truly completed.
 - [ ] Keep one current sprint log only if active execution starts again.
-- [ ] Make sure the docs folder reflects the current plan instead of old sprint-by-sprint narration.
+- [x] Make sure the docs folder reflects the current plan instead of old sprint-by-sprint narration.
 
 ## Suggested Execution Order
 

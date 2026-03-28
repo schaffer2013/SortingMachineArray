@@ -46,6 +46,8 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 - Optional low-confidence fallback: `SORTER_FUZZY_ENIGMA_SIM_TRUTH_FALLBACK=1`
 - Startup scan retry budget: `SORTER_STARTUP_SCAN_MAX_RETRIES=1`
 - Verification retry budget: `SORTER_VERIFICATION_MAX_RETRIES=2`
+- Keep external image fetch opt-in: `SORTER_SIM_IMAGE_AUTO_FETCH=0`
+- Keep external ranking enrichment opt-in: `SORTER_ALLOW_EXTERNAL_CARD_ENRICHMENT=0`
 
 When `fuzzy_enigma` is enabled, the sim camera now passes the rendered top-card image path through the parent `Frame` so the real recognizer can operate on the same simulated images the sorter sees.
 The parent repo now also owns a benchmark-specific card-engine config at `config/card_engine/benchmark.engine.json` so replay and benchmark runs can use a more realistic measurement budget without changing the live sorter config.
@@ -60,7 +62,11 @@ The sim camera no longer mutates pile observation state on capture by itself; ob
 - Generate a benchmark summary JSON:
 	- `python scripts/benchmark_recognizer.py --backend sim_truth`
 	- `python scripts/benchmark_recognizer.py --backend fuzzy_enigma`
-	- `python scripts/benchmark_recognizer.py --backend fuzzy_enigma --card-engine-mode small_pool`
+	- `python scripts/benchmark_recognizer.py --backend fuzzy_enigma --card-engine-mode small_pool --use-expected-label`
+	- `python scripts/benchmark_recognizer.py --backend fuzzy_enigma --card-engine-mode reevaluation --use-expected-label`
+	- `python scripts/benchmark_recognizer.py --backend fuzzy_enigma --card-engine-mode confirmation --use-expected-label`
+- Run the fixed golden-frame manifest without regenerating runtime state:
+	- `python scripts/run_golden_frames.py --backend fuzzy_enigma --card-engine-mode small_pool --use-expected-label`
 - Compare two saved summaries directly:
 	- `python scripts/compare_recognition_summaries.py --baseline data/recognition_reports/sim_truth_summary.json --candidate data/recognition_reports/fuzzy_enigma_summary.json`
 - The summary JSON is written under `data/recognition_reports/`.
@@ -68,9 +74,11 @@ The sim camera no longer mutates pile observation state on capture by itself; ob
 - For `fuzzy_enigma`, replay and benchmark commands automatically prefer the parent-owned benchmark config unless you override `--card-engine-config`.
 - The summary JSON now includes alternatives, review reasons, confidence-band counts, and debug payloads, not just the final score line.
 - Replay and benchmark commands now accept `--card-engine-mode` so mode requests are explicit and reportable.
+- Replay and benchmark commands now accept `--use-expected-label`, `--use-tracked-pool`, `--track-result`, and `--prefer-visual-small-pool` so parent-side mode experiments are explicit and portable.
 - `fuzzy_enigma` replay and benchmark runs also export inspectable per-case artifacts under `data/recognition_reports/artifacts/` by default, including copied source frames, `ocr_lines.txt`, `debug.json`, and `bbox.json` when available.
-- Portable reports include requested mode, effective mode, submodule SHA, and separate success/failure case lists so they can be handed to the submodule developer directly.
+- Portable reports include requested mode, effective mode, request options, submodule SHA, and separate success/failure case lists so they can be handed to the submodule developer directly.
 - Sim runs can now return `REVIEW_REQUIRED` when startup scan or post-move verification exhausts the configured retry budget.
+- Golden-frame runs reuse the same summary, artifact, and portable-report pipeline, so saved sim slices and future hardware captures can converge on one evidence format.
 
 ## Vision dataset ingest
 
@@ -108,11 +116,13 @@ If you want to run the real vendored recognizer, make sure the submodule OCR ext
 	- `python scripts/sync_simulated_images.py --no-fetch`
 - The script writes a card log to `data/logs/simulated_cards.log`.
 - Sim runs call this sync automatically before bootstrapping (`SORTER_AUTO_IMAGE_SYNC=1`).
+- Automatic remote image fetch is opt-in (`SORTER_SIM_IMAGE_AUTO_FETCH=0` by default).
 
 ## Configurable sim card list
 
 - Card list source-of-truth: `config/sim_card_lists/default_cards.json`
 - Runtime derived fixture: `data/generated/runtime_fixture.json`
+- The checked-in default card list is now seeded from the local catalog instead of a long handwritten demo bundle.
 - Defaults are controlled by:
 	- `SORTER_SIM_CARD_LIST`
 	- `SORTER_RUNTIME_FIXTURE`

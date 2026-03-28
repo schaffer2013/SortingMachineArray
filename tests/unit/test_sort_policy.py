@@ -102,3 +102,22 @@ def test_name_alpha_sort_ignores_leading_articles() -> None:
     assert ranking.card_id_to_rank["plain"] < ranking.card_id_to_rank["the_card"]
     # "A Dragon" sorts by "dragon", so it should rank before both others.
     assert ranking.card_id_to_rank["a_card"] < ranking.card_id_to_rank["plain"]
+
+
+def test_ranking_service_does_not_call_external_enrichment_by_default(monkeypatch) -> None:
+    root = Path(__file__).resolve().parents[2]
+    policy = load_sort_policy_file(root / "config/sort_policies/default_color_then_alpha.json")
+
+    def _boom(card_by_id):
+        raise AssertionError("External enrichment should not run by default")
+
+    monkeypatch.setattr("sorter.domain.ranking_service._enrich_missing_metadata_with_scrython", _boom)
+
+    ranking = RankingService(policy).compile(
+        {
+            "dup_a": CardMeta(name="Local Alpha"),
+            "dup_b": CardMeta(name="Local Alpha"),
+        }
+    )
+
+    assert ranking.card_id_to_rank["dup_a"] == ranking.card_id_to_rank["dup_b"]

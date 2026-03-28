@@ -43,6 +43,7 @@ Run these from the repo root with the shared `.venv`.
 .\.venv\Scripts\python.exe scripts\benchmark_recognizer.py `
   --backend fuzzy_enigma `
   --card-engine-mode small_pool `
+  --use-expected-label `
   --portable-out data\recognition_reports\portable\fuzzy_enigma_small_pool.portable.json
 ```
 
@@ -50,6 +51,15 @@ Run these from the repo root with the shared `.venv`.
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\replay_recognition.py --backend fuzzy_enigma --pile 0,0
+```
+
+### Fixed golden-frame sample
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_golden_frames.py `
+  --backend fuzzy_enigma `
+  --card-engine-mode small_pool `
+  --use-expected-label
 ```
 
 ### Dataset ingest from a saved recognition summary
@@ -154,3 +164,10 @@ The next acceptance expansion after Sprint 1 should add:
 - replay and benchmark outputs now generate portable success/failure reports with submodule SHA and mode metadata
 - parent mode experiments now fail safely when constrained recognition preconditions are missing, instead of crashing the benchmark run
 - the parent repo now tracks concrete upstream asks in `docs/submodule_feedback.md`
+
+## Sprint 5 Additions
+
+- parent replay and benchmark runs now support explicit expected-label mode requests for `small_pool`, `reevaluation`, and `confirmation`
+- parent portable reports now include mode request options, not only requested and effective mode labels
+- fixed golden-frame commands now exercise saved manifests without depending on runtime fixture regeneration
+- external image fetch and Scryfall card enrichment are now opt-in instead of ambient defaults in the supported sim path

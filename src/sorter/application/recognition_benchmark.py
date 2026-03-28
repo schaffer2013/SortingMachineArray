@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, UTC
 import json
 from pathlib import Path
@@ -41,6 +41,7 @@ class RecognitionBenchmarkCase:
     image_available: bool
     alternatives: tuple[dict, ...]
     debug: dict
+    mode_request: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,7 @@ class RecognitionBenchmarkSummary:
     backend: str
     scenario_name: str
     requested_mode: str | None
+    mode_request_options: dict[str, object]
     total_cases: int
     scored_cases: int
     exact_name_matches: int
@@ -74,6 +76,7 @@ class RecognitionBenchmarkSummary:
             "backend": self.backend,
             "scenario_name": self.scenario_name,
             "requested_mode": self.requested_mode,
+            "mode_request_options": dict(self.mode_request_options),
             "total_cases": self.total_cases,
             "scored_cases": self.scored_cases,
             "exact_name_matches": self.exact_name_matches,
@@ -97,16 +100,35 @@ def run_sim_recognition_benchmark(
     pile_keys: Iterable[str] | None = None,
     include_empty: bool = False,
     report_type: str = "benchmark",
+    use_expected_label: bool = False,
+    use_tracked_pool: bool | None = None,
+    track_result: bool | None = None,
+    prefer_visual_small_pool: bool | None = None,
 ) -> RecognitionBenchmarkSummary:
     context = build_sim_runtime_context(settings)
     selected_piles = set(pile_keys) if pile_keys is not None else None
     cases: list[RecognitionBenchmarkCase] = []
+    mode_request_options = _mode_request_options(
+        settings,
+        use_expected_label=use_expected_label,
+        use_tracked_pool=use_tracked_pool,
+        track_result=track_result,
+        prefer_visual_small_pool=prefer_visual_small_pool,
+    )
 
     for pile in context.world.snapshot.piles.values():
         pile_key = pile.pile_id.as_key()
         if selected_piles is not None and pile_key not in selected_piles:
             continue
         frame = context.camera.capture_top_card(pile.pile_id)
+        frame = _frame_with_recognition_request(
+            frame,
+            settings,
+            use_expected_label=use_expected_label,
+            use_tracked_pool=use_tracked_pool,
+            track_result=track_result,
+            prefer_visual_small_pool=prefer_visual_small_pool,
+        )
         expected_name = frame.metadata.get("card_name")
         if expected_name is None and not include_empty:
             continue
@@ -134,34 +156,56 @@ def run_sim_recognition_benchmark(
                 matched_name=result.card_name == expected_name,
                 image_available=frame.path is not None,
                 alternatives=tuple(result.alternatives),
+                mode_request=_serialize_mode_request(frame.metadata.get("recognition_request")),
                 debug=dict(result.debug),
             )
         )
 
-    scored_cases = len(cases)
-    exact_name_matches = sum(1 for case in cases if case.matched_name)
-    review_count = sum(1 for case in cases if case.needs_review)
-    low_confidence_count = sum(1 for case in cases if case.review_reason == "confidence_below_threshold")
-    missing_prediction_count = sum(1 for case in cases if case.review_reason == "missing_prediction_for_visible_card")
-    fallback_count = sum(1 for case in cases if case.fallback_used)
-    missing_image_count = sum(1 for case in cases if not case.image_available)
-    average_confidence = sum(case.confidence for case in cases) / scored_cases if scored_cases else 0.0
-    name_accuracy = exact_name_matches / scored_cases if scored_cases else 0.0
-    confidence_band_counts = summarize_confidence_bands(case.confidence for case in cases)
-    review_reason_counts = summarize_review_reasons(case.review_reason for case in cases)
-    effective_mode_counts = summarize_review_reasons(case.effective_mode for case in cases)
     requested_mode = getattr(settings, "card_engine_mode", None) if settings.recognizer_backend == "fuzzy_enigma" else None
     if requested_mode is None:
         requested_modes = {case.requested_mode for case in cases if case.requested_mode}
         if len(requested_modes) == 1:
             requested_mode = next(iter(requested_modes))
+    return summarize_recognition_cases(
+        cases,
+        backend=settings.recognizer_backend,
+        scenario_name=context.world.scenario_name,
+        report_type=report_type,
+        requested_mode=requested_mode,
+        mode_request_options=mode_request_options,
+    )
+
+
+def summarize_recognition_cases(
+    cases: Iterable[RecognitionBenchmarkCase],
+    *,
+    backend: str,
+    scenario_name: str,
+    report_type: str,
+    requested_mode: str | None,
+    mode_request_options: dict[str, object] | None = None,
+) -> RecognitionBenchmarkSummary:
+    case_tuple = tuple(cases)
+    scored_cases = len(case_tuple)
+    exact_name_matches = sum(1 for case in case_tuple if case.matched_name)
+    review_count = sum(1 for case in case_tuple if case.needs_review)
+    low_confidence_count = sum(1 for case in case_tuple if case.review_reason == "confidence_below_threshold")
+    missing_prediction_count = sum(1 for case in case_tuple if case.review_reason == "missing_prediction_for_visible_card")
+    fallback_count = sum(1 for case in case_tuple if case.fallback_used)
+    missing_image_count = sum(1 for case in case_tuple if not case.image_available)
+    average_confidence = sum(case.confidence for case in case_tuple) / scored_cases if scored_cases else 0.0
+    name_accuracy = exact_name_matches / scored_cases if scored_cases else 0.0
+    confidence_band_counts = summarize_confidence_bands(case.confidence for case in case_tuple)
+    review_reason_counts = summarize_review_reasons(case.review_reason for case in case_tuple)
+    effective_mode_counts = summarize_review_reasons(case.effective_mode for case in case_tuple)
     return RecognitionBenchmarkSummary(
         schema_version=1,
         report_type=report_type,
         generated_at_utc=datetime.now(UTC).isoformat(),
-        backend=settings.recognizer_backend,
-        scenario_name=context.world.scenario_name,
+        backend=backend,
+        scenario_name=scenario_name,
         requested_mode=requested_mode,
+        mode_request_options=dict(mode_request_options or {}),
         total_cases=scored_cases,
         scored_cases=scored_cases,
         exact_name_matches=exact_name_matches,
@@ -175,8 +219,102 @@ def run_sim_recognition_benchmark(
         confidence_band_counts=confidence_band_counts,
         review_reason_counts=review_reason_counts,
         effective_mode_counts=effective_mode_counts,
-        cases=tuple(cases),
+        cases=case_tuple,
     )
+
+
+def _frame_with_recognition_request(
+    frame,
+    settings: AppSettings,
+    *,
+    use_expected_label: bool,
+    use_tracked_pool: bool | None,
+    track_result: bool | None,
+    prefer_visual_small_pool: bool | None,
+):
+    if settings.recognizer_backend != "fuzzy_enigma":
+        return frame
+
+    request: dict[str, object] = {}
+    if settings.card_engine_mode:
+        request["mode"] = settings.card_engine_mode
+    if use_expected_label:
+        expected_card = _expected_card_payload(frame)
+        if expected_card:
+            request["expected_card"] = expected_card
+    if use_tracked_pool is not None:
+        request["use_tracked_pool"] = use_tracked_pool
+    elif settings.card_engine_mode == "small_pool" and use_expected_label:
+        # Let small-pool experiments constrain by expected label instead of requiring pre-seeded tracking state.
+        request["use_tracked_pool"] = False
+    if track_result is not None:
+        request["track_result"] = track_result
+    if prefer_visual_small_pool is not None:
+        request["prefer_visual_small_pool"] = prefer_visual_small_pool
+
+    if not request:
+        return frame
+    metadata = dict(frame.metadata)
+    metadata["recognition_request"] = request
+    return replace(frame, metadata=metadata)
+
+
+def _expected_card_payload(frame) -> dict[str, str] | None:
+    name = frame.metadata.get("card_name")
+    if not isinstance(name, str) or not name.strip():
+        return None
+    payload: dict[str, str] = {"name": name.strip()}
+    set_code = frame.metadata.get("set_code")
+    collector_number = frame.metadata.get("collector_number")
+    if isinstance(set_code, str) and set_code.strip():
+        payload["set_code"] = set_code.strip()
+    if isinstance(collector_number, str) and collector_number.strip():
+        payload["collector_number"] = collector_number.strip()
+    return payload
+
+
+def _mode_request_options(
+    settings: AppSettings,
+    *,
+    use_expected_label: bool,
+    use_tracked_pool: bool | None,
+    track_result: bool | None,
+    prefer_visual_small_pool: bool | None,
+) -> dict[str, object]:
+    if settings.recognizer_backend != "fuzzy_enigma":
+        return {}
+    options: dict[str, object] = {
+        "mode": settings.card_engine_mode,
+        "use_expected_label": use_expected_label,
+    }
+    if use_tracked_pool is not None:
+        options["use_tracked_pool"] = use_tracked_pool
+    elif settings.card_engine_mode == "small_pool" and use_expected_label:
+        options["use_tracked_pool"] = False
+    if track_result is not None:
+        options["track_result"] = track_result
+    if prefer_visual_small_pool is not None:
+        options["prefer_visual_small_pool"] = prefer_visual_small_pool
+    return options
+
+
+def _serialize_mode_request(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        return {}
+    out: dict[str, object] = {}
+    for key, item in value.items():
+        if item is None:
+            continue
+        if isinstance(item, (str, int, float, bool)):
+            out[str(key)] = item
+            continue
+        if isinstance(item, dict):
+            nested: dict[str, object] = {}
+            for nested_key, nested_item in item.items():
+                if isinstance(nested_item, (str, int, float, bool)) and nested_item is not None:
+                    nested[str(nested_key)] = nested_item
+            out[str(key)] = nested
+    return out
 
 
 def default_json_path(project_root: Path, backend: str) -> Path:
@@ -249,12 +387,13 @@ def write_portable_report(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_root_str = str(artifact_root) if artifact_root is not None else None
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "report_type": summary.report_type,
         "generated_at_utc": summary.generated_at_utc,
         "backend": summary.backend,
         "scenario_name": summary.scenario_name,
         "requested_mode": summary.requested_mode,
+        "mode_request_options": dict(summary.mode_request_options),
         "card_engine_config_path": card_engine_config_path,
         "submodule_sha": detect_submodule_sha(project_root) if project_root is not None else None,
         "summary": {
@@ -324,6 +463,7 @@ def _portable_case_dict(case: RecognitionBenchmarkCase, *, artifact_root_str: st
         "requested_mode": case.requested_mode,
         "effective_mode": case.effective_mode,
         "mode_features": list(case.mode_features),
+        "mode_request": dict(case.mode_request),
         "needs_review": case.needs_review,
         "review_reason": case.review_reason,
         "fallback_used": case.fallback_used,

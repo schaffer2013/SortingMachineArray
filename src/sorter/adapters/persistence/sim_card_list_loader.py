@@ -5,27 +5,6 @@ from pathlib import Path
 import json
 import random
 
-
-DEFAULT_SIM_CARD_LIST_PAYLOAD = {
-    "version": 1,
-    "list_name": "default_demo_cards",
-    "description": "Seeded demo list for sim visuals",
-    "random_seed": 42,
-    "shuffle": True,
-    "entries": [
-        {"name": "Lightning Bolt", "count": 4},
-        {"name": "Counterspell", "count": 4},
-        {"name": "Llanowar Elves", "count": 4},
-        {"name": "Doom Blade", "count": 4},
-        {"name": "Pacifism", "count": 4},
-        {"name": "Arcane Signet", "count": 4},
-        {"name": "Evolving Wilds", "count": 4},
-        {"name": "Island", "count": 8},
-        {"name": "Mountain", "count": 8},
-    ],
-}
-
-
 @dataclass(frozen=True)
 class SimCardListEntry:
     name: str
@@ -47,6 +26,106 @@ class SimCardListConfig:
     random_seed: int
     shuffle: bool
     entries: list[SimCardListEntry]
+
+
+@dataclass(frozen=True)
+class CatalogImageCandidate:
+    name: str
+    set_id: str | None
+    image_path: str
+
+
+def _default_catalog_path() -> Path:
+    return Path(__file__).resolve().parents[4] / "data" / "card_catalog" / "cards.json"
+
+
+def _extract_set_id_from_image_path(image_path: str) -> str | None:
+    normalized = Path(image_path.replace("\\", "/"))
+    parts = [part.strip() for part in normalized.parts if part.strip()]
+    if not parts:
+        return None
+    if "SimulatedCardImages" in parts:
+        index = parts.index("SimulatedCardImages")
+        if len(parts) > index + 2:
+            return parts[index + 1].lower()
+        return None
+    return None
+
+
+def load_catalog_image_candidates(catalog_path: Path | None = None) -> list[CatalogImageCandidate]:
+    path = catalog_path or _default_catalog_path()
+    if not path.exists():
+        return []
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    raw_cards = payload.get("cards", [])
+    if not isinstance(raw_cards, list):
+        return []
+
+    candidates: list[CatalogImageCandidate] = []
+    seen: set[tuple[str, str | None]] = set()
+    for card in raw_cards:
+        if not isinstance(card, dict):
+            continue
+        name = str(card.get("name", "")).strip()
+        if not name:
+            continue
+        images = card.get("images")
+        if not isinstance(images, list) or not images:
+            continue
+        image_path = next((str(value).strip() for value in images if str(value).strip()), "")
+        if not image_path:
+            continue
+        set_id = _extract_set_id_from_image_path(image_path)
+        dedupe_key = (name, set_id)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        candidates.append(CatalogImageCandidate(name=name, set_id=set_id, image_path=image_path))
+    candidates.sort(key=lambda candidate: (candidate.name.lower(), candidate.set_id or "", candidate.image_path.lower()))
+    return candidates
+
+
+def build_default_sim_card_list_payload(
+    *,
+    catalog_path: Path | None = None,
+    random_seed: int = 42,
+    desired_entry_count: int = 24,
+) -> dict:
+    candidates = load_catalog_image_candidates(catalog_path)
+    if not candidates:
+        return {
+            "version": 1,
+            "list_name": "default_demo_cards",
+            "description": "Fallback seeded demo list when local catalog images are unavailable",
+            "random_seed": random_seed,
+            "shuffle": True,
+            "entries": [{"name": "Unknown Card", "count": 1}],
+        }
+
+    rng = random.Random(random_seed)
+    selected = list(candidates)
+    rng.shuffle(selected)
+    selected = selected[: min(desired_entry_count, len(selected))]
+    selected.sort(key=lambda candidate: (candidate.name.lower(), candidate.set_id or ""))
+
+    entries = []
+    for candidate in selected:
+        entry = {"name": candidate.name, "count": 1}
+        if candidate.set_id:
+            entry["set"] = candidate.set_id.upper()
+        entries.append(entry)
+
+    return {
+        "version": 1,
+        "list_name": "default_demo_cards",
+        "description": "Seeded demo list sourced from the local catalog and available sim images",
+        "random_seed": random_seed,
+        "shuffle": True,
+        "entries": entries,
+    }
+
+
+DEFAULT_SIM_CARD_LIST_PAYLOAD = build_default_sim_card_list_payload()
 
 
 def ensure_sim_card_list_file(path: Path) -> Path:

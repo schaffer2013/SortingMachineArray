@@ -71,6 +71,7 @@
 - [x] `scripts/ingest_frames.py`: metadata-preserving frame import.
 - [x] `scripts/replay_recognition.py`: run the recognizer pipeline over saved frames.
 - [x] `scripts/benchmark_recognizer.py`: produce measurable recognition reports.
+- [x] `scripts/run_golden_frames.py`: run fixed saved-frame manifests through the same reporting pipeline without runtime fixture regeneration.
 - [ ] `scripts/audit_code_health.py`: summarize import-graph outliers, low-coverage modules, and likely vestigial code.
 - [x] `tests/golden_frames/`: curated perception regression set.
 - [x] `tests/noisy_sim/`: simulated conditions that intentionally break ideal assumptions.
@@ -223,6 +224,7 @@
 - [x] Add parent-owned card-engine config files so live sorter runs and benchmark runs can use different recognition budgets without hard-coding submodule defaults in parent logic.
 - [x] Save intermediate outputs that matter during development, such as normalized crops and OCR text snippets, so tuning is inspectable.
 - [x] Build an initial replay and benchmark harness that runs the same recognizer pipeline against simulated top-card captures.
+- [x] Add parent-side mode request plumbing so replay and benchmark runs can explicitly exercise `greenfield`, `small_pool`, `reevaluation`, and `confirmation`.
 
 **Implementation notes**
 
@@ -250,7 +252,7 @@
 - [ ] Add a way to mark unusable frames such as blur, glare, occlusion, or framing errors so they are still learnable from.
 - [ ] Expand the card catalog pipeline so sorter metadata and recognition assets come from a consistent source of truth.
 - [ ] Add reports for missing assets, weak coverage, mislabeled frames, low-confidence clusters, and cards with no usable image examples.
-- [ ] Define a benchmark split that will remain stable across recognizer experiments.
+- [x] Define an initial stable saved-frame slice that remains fixed across recognizer experiments.
 
 **Implementation notes**
 
@@ -342,6 +344,7 @@
 - [ ] Add unit tests for ROI configs, observation-state transitions, confidence thresholds, and recovery decisions.
 - [ ] Add contract tests for camera and recognizer adapters using saved frames rather than perfect sim metadata.
 - [ ] Add golden-frame regression tests so recognition changes can be measured before and after refactors.
+- [x] Add a fixed golden-frame command that exercises a saved manifest through the same summary, artifact, and portable-report pipeline as replay and benchmark runs.
 - [ ] Add noisy sim scenarios that mimic real hardware conditions instead of always returning perfect identity data.
 - [ ] Establish a repeatable coverage baseline for `src/sorter` and track which modules remain effectively untested.
 - [ ] Add static analysis or scripted import-graph checks to flag modules, wrappers, and symbols with no live callers.

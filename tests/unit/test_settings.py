@@ -15,6 +15,8 @@ def test_app_settings_from_env_reads_recognizer_backend_controls(monkeypatch, tm
     monkeypatch.setenv("SORTER_FUZZY_ENIGMA_SIM_TRUTH_FALLBACK", "1")
     monkeypatch.setenv("SORTER_STARTUP_SCAN_MAX_RETRIES", "3")
     monkeypatch.setenv("SORTER_VERIFICATION_MAX_RETRIES", "4")
+    monkeypatch.setenv("SORTER_SIM_IMAGE_AUTO_FETCH", "1")
+    monkeypatch.setenv("SORTER_ALLOW_EXTERNAL_CARD_ENRICHMENT", "1")
 
     settings = AppSettings.from_env(project_root=tmp_path)
 
@@ -27,6 +29,8 @@ def test_app_settings_from_env_reads_recognizer_backend_controls(monkeypatch, tm
     assert settings.fuzzy_enigma_sim_truth_fallback is True
     assert settings.startup_scan_max_retries == 3
     assert settings.verification_max_retries == 4
+    assert settings.sim_image_auto_fetch is True
+    assert settings.allow_external_card_enrichment is True
 
 
 def test_app_settings_defaults_card_engine_config_to_parent_owned_file(monkeypatch, tmp_path):
