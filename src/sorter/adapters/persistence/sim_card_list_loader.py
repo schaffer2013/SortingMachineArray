@@ -35,6 +35,23 @@ class CatalogImageCandidate:
     image_path: str
 
 
+KNOWN_GOOD_SIM_CARD_LIST_PAYLOAD = {
+    "version": 1,
+    "list_name": "default_demo_cards",
+    "description": "Stable local-only demo list backed by checked-in simulated images",
+    "random_seed": 42,
+    "shuffle": True,
+    "entries": [
+        {"name": "Elspeth, Storm Slayer", "set": "TDM", "count": 1},
+        {"name": "Furious Forebear", "set": "TDM", "count": 1},
+        {"name": "Flood", "set": "5ED", "count": 1},
+        {"name": "Future Sight", "set": "MH1", "count": 1},
+        {"name": "Alpharael, Dreaming Acolyte", "set": "EOE", "count": 1},
+        {"name": "Garenbrig Carver // Shield's Might", "set": "ELD", "count": 1},
+    ],
+}
+
+
 def _default_catalog_path() -> Path:
     return Path(__file__).resolve().parents[4] / "data" / "card_catalog" / "cards.json"
 
@@ -49,6 +66,17 @@ def _extract_set_id_from_image_path(image_path: str) -> str | None:
         if len(parts) > index + 2:
             return parts[index + 1].lower()
         return None
+    return None
+
+
+def _resolve_catalog_image_path(catalog_path: Path, image_path: str) -> Path | None:
+    raw_path = Path(image_path.replace("\\", "/"))
+    if raw_path.is_absolute() and raw_path.exists():
+        return raw_path
+    project_root = catalog_path.resolve().parents[2]
+    for candidate in (project_root / raw_path, catalog_path.parent / raw_path):
+        if candidate.exists():
+            return candidate
     return None
 
 
@@ -75,12 +103,15 @@ def load_catalog_image_candidates(catalog_path: Path | None = None) -> list[Cata
         image_path = next((str(value).strip() for value in images if str(value).strip()), "")
         if not image_path:
             continue
+        resolved_path = _resolve_catalog_image_path(path, image_path)
+        if resolved_path is None:
+            continue
         set_id = _extract_set_id_from_image_path(image_path)
         dedupe_key = (name, set_id)
         if dedupe_key in seen:
             continue
         seen.add(dedupe_key)
-        candidates.append(CatalogImageCandidate(name=name, set_id=set_id, image_path=image_path))
+        candidates.append(CatalogImageCandidate(name=name, set_id=set_id, image_path=str(resolved_path)))
     candidates.sort(key=lambda candidate: (candidate.name.lower(), candidate.set_id or "", candidate.image_path.lower()))
     return candidates
 
@@ -93,14 +124,7 @@ def build_default_sim_card_list_payload(
 ) -> dict:
     candidates = load_catalog_image_candidates(catalog_path)
     if not candidates:
-        return {
-            "version": 1,
-            "list_name": "default_demo_cards",
-            "description": "Fallback seeded demo list when local catalog images are unavailable",
-            "random_seed": random_seed,
-            "shuffle": True,
-            "entries": [{"name": "Unknown Card", "count": 1}],
-        }
+        return dict(KNOWN_GOOD_SIM_CARD_LIST_PAYLOAD)
 
     rng = random.Random(random_seed)
     selected = list(candidates)
