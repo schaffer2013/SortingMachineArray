@@ -54,6 +54,12 @@ def test_parent_can_call_vendored_submodule_recognizer(monkeypatch):
                 ],
                 active_roi="standard",
                 tried_rois=["standard"],
+                requested_mode="greenfield",
+                effective_mode="greenfield",
+                mode_flags={"has_candidate_pool": False},
+                pipeline_summary={"resolution_path": "title_only", "branches_fired": ["title_ocr"]},
+                failure_code=None,
+                review_reason=None,
                 debug={"mode": {"effective": "greenfield"}},
             )
 
@@ -77,6 +83,10 @@ def test_parent_can_call_vendored_submodule_recognizer(monkeypatch):
     assert output.scryfall_id == "opt-scryfall-id"
     assert output.oracle_id == "opt-oracle-id"
     assert output.active_roi == "standard"
+    assert output.requested_mode == "greenfield"
+    assert output.effective_mode == "greenfield"
+    assert output.mode_flags == {"has_candidate_pool": False}
+    assert output.pipeline_summary["resolution_path"] == "title_only"
     assert output.top_k_candidates[0].set_code == "XLN"
 
     parent_result = ParentRecognitionResult(card_name=output.card_name, confidence=output.confidence)

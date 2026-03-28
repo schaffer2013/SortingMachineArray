@@ -6,6 +6,10 @@ from typing import Iterable
 def classify_review_reason(frame, result) -> str | None:
     if not result.needs_review:
         return None
+    if isinstance(result.review_reason, str) and result.review_reason:
+        return result.review_reason
+    if isinstance(result.failure_code, str) and result.failure_code:
+        return result.failure_code
     engine_error_code = result.debug.get("engine_error_code")
     if isinstance(engine_error_code, str) and engine_error_code:
         return engine_error_code

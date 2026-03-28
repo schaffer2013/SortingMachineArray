@@ -123,7 +123,12 @@ def test_run_sim_recognition_benchmark_can_attach_expected_card_requests(monkeyp
                 frame_id="frame-a",
                 path=str(frame_path),
                 pile_id=pile_id,
-                metadata={"card_name": "Alpha", "set_code": "lea"},
+                metadata={
+                    "card_name": "Alpha",
+                    "set_code": "lea",
+                    "scryfall_id": "alpha-printing-id",
+                    "oracle_id": "alpha-oracle-id",
+                },
             )
         ),
         recognizer=SimpleNamespace(recognize_top_card=_recognize),
@@ -146,12 +151,22 @@ def test_run_sim_recognition_benchmark_can_attach_expected_card_requests(monkeyp
     assert captured_frames
     assert captured_frames[0].metadata["recognition_request"] == {
         "mode": "small_pool",
-        "expected_card": {"name": "Alpha", "set_code": "lea"},
+        "expected_card": {
+            "scryfall_id": "alpha-printing-id",
+            "oracle_id": "alpha-oracle-id",
+            "name": "Alpha",
+            "set_code": "lea",
+        },
         "use_tracked_pool": False,
     }
     assert summary.cases[0].mode_request == {
         "mode": "small_pool",
-        "expected_card": {"name": "Alpha", "set_code": "lea"},
+        "expected_card": {
+            "scryfall_id": "alpha-printing-id",
+            "oracle_id": "alpha-oracle-id",
+            "name": "Alpha",
+            "set_code": "lea",
+        },
         "use_tracked_pool": False,
     }
 

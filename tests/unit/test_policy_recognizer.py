@@ -22,6 +22,7 @@ def test_policy_recognizer_marks_low_confidence_result_for_review():
             backend="fuzzy_enigma",
             requested_mode="small_pool",
             effective_mode="greenfield",
+            mode_flags={"has_candidate_pool": True},
             mode_features=("has_candidate_pool",),
         )
     )
@@ -39,6 +40,7 @@ def test_policy_recognizer_marks_low_confidence_result_for_review():
     assert result.fallback_used is False
     assert result.requested_mode == "small_pool"
     assert result.effective_mode == "greenfield"
+    assert result.review_reason == "confidence_below_threshold"
     assert result.debug["policy"]["reason"] == "confidence_below_threshold"
 
 
@@ -50,6 +52,7 @@ def test_policy_recognizer_can_fallback_to_sim_truth_for_visible_sim_card():
             backend="fuzzy_enigma",
             requested_mode="confirmation",
             effective_mode="confirmation",
+            mode_flags={"has_expected_card": True},
             mode_features=("has_expected_card",),
         )
     )
@@ -78,4 +81,5 @@ def test_policy_recognizer_can_fallback_to_sim_truth_for_visible_sim_card():
     assert result.fallback_used is True
     assert result.requested_mode == "confirmation"
     assert result.effective_mode == "confirmation"
+    assert result.mode_flags == {"has_expected_card": True}
     assert result.debug["fallback_reason"] == "confidence_below_threshold"

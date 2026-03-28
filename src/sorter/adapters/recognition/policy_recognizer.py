@@ -30,7 +30,11 @@ class PolicyRecognizerAdapter:
                 fallback_used=True,
                 requested_mode=primary_result.requested_mode or fallback_result.requested_mode,
                 effective_mode=primary_result.effective_mode or fallback_result.effective_mode,
+                mode_flags=primary_result.mode_flags or fallback_result.mode_flags,
                 mode_features=primary_result.mode_features or fallback_result.mode_features,
+                pipeline_summary=primary_result.pipeline_summary or fallback_result.pipeline_summary,
+                failure_code=primary_result.failure_code or fallback_result.failure_code,
+                review_reason=primary_result.review_reason or fallback_result.review_reason,
                 debug={
                     "fallback_reason": self._fallback_reason(frame, primary_result),
                     "primary_backend": primary_result.backend,
@@ -38,20 +42,24 @@ class PolicyRecognizerAdapter:
                     "primary_card_name": primary_result.card_name,
                     "primary_requested_mode": primary_result.requested_mode,
                     "primary_effective_mode": primary_result.effective_mode,
+                    "primary_failure_code": primary_result.failure_code,
+                    "primary_review_reason": primary_result.review_reason,
                     "fallback_backend": fallback_result.backend,
                     "fallback_result": dict(fallback_result.debug),
                 },
             )
 
+        review_reason = primary_result.review_reason or self._fallback_reason(frame, primary_result)
         return replace(
             primary_result,
             needs_review=True,
+            review_reason=review_reason,
             debug={
                 **dict(primary_result.debug),
                 "policy": {
                     "accepted": False,
                     "min_confidence": self.min_confidence,
-                    "reason": self._fallback_reason(frame, primary_result),
+                    "reason": review_reason,
                 },
             },
         )
