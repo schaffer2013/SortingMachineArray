@@ -2,6 +2,11 @@
 
 This project supports local development on both **Windows PCs** and **Raspberry Pi** devices.
 
+If you prefer scripted setup, use:
+
+- Windows: `scripts/install_windows.ps1`
+- Raspberry Pi: `scripts/install_raspberry_pi.sh`
+
 > [!IMPORTANT]
 > The repository uses the **fuzzy enigma card recognizer** as a git submodule at `third_party/fuzzy-enigma-card-recognition`. Always initialize and update submodules after cloning.
 >
@@ -22,6 +27,12 @@ Optional but recommended:
 ## 2) Windows PC installation
 
 These steps use **PowerShell**.
+
+Scripted alternative:
+
+```powershell
+.\scripts\install_windows.ps1
+```
 
 ### Step A — Clone with submodules
 
@@ -90,6 +101,12 @@ python -m sorter.interfaces.cli --mode sim
 ## 3) Raspberry Pi installation
 
 These steps assume Raspberry Pi OS (Bookworm/Bullseye) and shell access.
+
+Scripted alternative:
+
+```bash
+./scripts/install_raspberry_pi.sh
+```
 
 ### Step A — Install system packages
 
