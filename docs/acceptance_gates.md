@@ -171,3 +171,8 @@ The next acceptance expansion after Sprint 1 should add:
 - parent portable reports now include mode request options, not only requested and effective mode labels
 - fixed golden-frame commands now exercise saved manifests without depending on runtime fixture regeneration
 - external image fetch and Scryfall card enrichment are now opt-in instead of ambient defaults in the supported sim path
+
+## Sprint 6 Additions
+
+- noisy-sim recognition faults now include false-empty, ambiguous-candidate, and confirmation-contradiction shapes in addition to low-confidence and missing-prediction cases
+- noisy-sim integration coverage now proves that false-empty startup scans escalate safely to `REVIEW_REQUIRED` with a specific saved review reason

@@ -29,3 +29,27 @@ def test_noisy_sim_fixture_escalates_to_review_required(tmp_path):
     assert result["metrics"]["review_required_count"] == 1
     assert result["metrics"]["review_reason_counts"]
     assert sum(result["metrics"]["confidence_band_counts"].values()) >= result["metrics"]["scan_count"]
+
+
+def test_false_empty_noisy_sim_fixture_reports_false_empty_reason(tmp_path):
+    root = Path(__file__).resolve().parents[2]
+    settings = AppSettings(
+        mode="sim",
+        random_seed=42,
+        scenario_fixture=root / "tests/noisy_sim/false_empty_fixture.json",
+        card_catalog_path=root / "data/card_catalog/cards.json",
+        sqlite_path=tmp_path / "runs.sqlite3",
+        calibration_path=root / "config/calibration.json",
+        sort_policy_path=root / "config/sort_policies/default_color_then_alpha.json",
+        sim_card_list_path=None,
+        startup_scan_max_retries=1,
+        verification_max_retries=1,
+    )
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+
+    result = orchestrator.run_once(calibration)
+
+    assert result["status"] == "REVIEW_REQUIRED"
+    assert result["metrics"]["review_required_count"] == 1
+    assert result["metrics"]["review_reason_counts"].get("recognition_false_empty", 0) >= 1

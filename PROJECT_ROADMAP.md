@@ -187,7 +187,7 @@
 - [x] Ensure every move updates state through observations and verification, not direct knowledge shortcuts.
 - [ ] Define discovery-driven ranking behavior so newly identified cards can enter a provisional rank set before the final rank set is locked.
 - [x] Model observation staleness so the system can distinguish "recently seen" from "assumed unchanged."
-- [ ] Add simulated perception faults such as blur, glare, skew, occlusion, bad crop, false empty, missed pick, double feed, and dropped card.
+- [x] Add initial simulated perception faults for low confidence, missing prediction, false empty, ambiguous candidates, and confirmation contradiction.
 - [x] Add tests that prove the planner still behaves correctly when pile contents are partially known or temporarily unknown.
 
 **Implementation notes**
