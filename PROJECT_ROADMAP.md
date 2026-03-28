@@ -277,6 +277,7 @@
 
 - [ ] Refactor discovery and planning so recognition updates state through explicit events rather than direct pile mutation shortcuts.
 - [ ] Update planning logic so it operates on observed top cards and confirmed empty states instead of full internal knowledge.
+- [x] Require known destination counts before the planner treats a pile as safely placeable or fully sorted.
 - [ ] Support incremental ranking updates during discovery and an explicit "ranking finalized" transition once all active cards are discovered.
 - [x] Add low-confidence branches for re-scan, second-look capture, different camera pose, or quarantine pile handling.
 - [x] Strengthen move verification so source and destination observations are both checked after each move.
