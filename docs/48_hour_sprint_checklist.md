@@ -6,6 +6,8 @@ This is the short-term execution checklist for the next `48` hours of software w
 
 The goal is not to "finish the whole roadmap." The goal is to remove as much software uncertainty as possible so hardware bring-up this week is blocked by real hardware issues, not missing tooling, missing evidence, or avoidable recognition ambiguity.
 
+For the follow-on plan after this sprint, see `docs/next_extended_sprint_plan.md`.
+
 ## Outcome Target
 
 By the end of this sprint, the parent project should have:
@@ -22,6 +24,7 @@ By the end of this sprint, the parent project should have:
 - Prefer parent-owned evidence and manifests over screenshots or hand notes.
 - Prefer `scryfall_id` and `oracle_id` over hardcoded card-name assumptions.
 - Prefer submodule queries and structured outputs over external card lookups.
+- Prefer first-class submodule metadata over parent-side debug scraping when both exist.
 - Prefer changes that help both sim and upcoming hardware work.
 
 ## Git Strategy
