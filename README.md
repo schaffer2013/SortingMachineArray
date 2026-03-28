@@ -14,6 +14,7 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 - `scenarios/fixtures`: deterministic simulation fixtures.
 - `data/card_catalog/cards.json`: local runtime card catalog synced from the vendored offline catalog.
 - `config/sort_policies/*.json`: ranking preference source-of-truth policies.
+- `config/vision/roi_profiles.json`: initial shared ROI ownership scaffold for sim and upcoming hardware captures.
 - `tests/unit`, `tests/contract`, `tests/integration`: baseline automated tests.
 
 ## Architecture rules
@@ -99,6 +100,8 @@ If you want to run the real vendored recognizer, make sure the submodule OCR ext
 
 - Hardware smoke entrypoint:
 	- `python scripts/hardware_smoke_test.py`
+- Hardware preflight checklist:
+	- `docs/hardware_prep_checklist.md`
 - NeoPixels on BTT SKR 1.4 Turbo:
 	- `src/sorter/adapters/hardware/neopixel_lights.py` maps machine status to Marlin `M150` RGB commands.
 	- Integrate this with your serial transport to the SKR board firmware.

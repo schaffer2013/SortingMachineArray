@@ -93,12 +93,15 @@ Run these from the repo root with the shared `.venv`.
   - confidence
   - review flag
   - review reason when applicable
+  - review family when applicable
+  - suggested recovery action when applicable
   - requested mode
   - effective mode when available
   - fallback flag
   - alternatives
   - debug payload
   - confidence-band counts at the summary level
+  - review-family counts at the summary level
 - `fuzzy_enigma` replay and benchmark runs must also emit inspectable per-case artifacts for development-time review
 - portable report outputs must split success and failure cases so the parent can hand the result bundle directly to the submodule developer
 
@@ -187,3 +190,9 @@ The next acceptance expansion after Sprint 1 should add:
 
 - the repo now has a single acceptance-envelope command that runs the current test and recognizer checks and emits `data/recognition_reports/acceptance_envelope.json`
 - the acceptance command now acts as the first repo-native answer to "are we inside the current pre-hardware envelope?"
+
+## Sprint 8 Additions
+
+- replay and benchmark outputs now classify review cases into broader families such as `perception` and `policy`
+- replay and benchmark outputs now attach suggested next recovery actions to review cases
+- the repo now has a focused software-side hardware preflight checklist in `docs/hardware_prep_checklist.md`

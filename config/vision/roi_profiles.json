@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "coordinate_space": "normalized_xywh",
+  "notes": [
+    "Initial shared ROI ownership scaffold for sim and upcoming hardware captures.",
+    "These values are placeholders until the first real camera framing pass is complete."
+  ],
+  "profiles": {
+    "sim_topdown": {
+      "description": "Initial logical ROI anchors for simulated top-down captures.",
+      "regions": {
+        "title_bar": {
+          "x": 0.12,
+          "y": 0.06,
+          "w": 0.76,
+          "h": 0.12
+        },
+        "set_code": {
+          "x": 0.73,
+          "y": 0.86,
+          "w": 0.12,
+          "h": 0.06
+        },
+        "collector_number": {
+          "x": 0.54,
+          "y": 0.86,
+          "w": 0.16,
+          "h": 0.06
+        },
+        "art_box": {
+          "x": 0.10,
+          "y": 0.18,
+          "w": 0.80,
+          "h": 0.42
+        },
+        "empty_check": {
+          "x": 0.18,
+          "y": 0.20,
+          "w": 0.64,
+          "h": 0.55
+        }
+      }
+    },
+    "hardware_topdown_placeholder": {
+      "description": "Temporary hardware ROI placeholder until the first calibrated camera pass is captured.",
+      "regions": {
+        "title_bar": {
+          "x": 0.12,
+          "y": 0.06,
+          "w": 0.76,
+          "h": 0.12
+        },
+        "set_code": {
+          "x": 0.73,
+          "y": 0.86,
+          "w": 0.12,
+          "h": 0.06
+        },
+        "collector_number": {
+          "x": 0.54,
+          "y": 0.86,
+          "w": 0.16,
+          "h": 0.06
+        },
+        "art_box": {
+          "x": 0.10,
+          "y": 0.18,
+          "w": 0.80,
+          "h": 0.42
+        },
+        "empty_check": {
+          "x": 0.18,
+          "y": 0.20,
+          "w": 0.64,
+          "h": 0.55
+        }
+      }
+    }
+  }
+}

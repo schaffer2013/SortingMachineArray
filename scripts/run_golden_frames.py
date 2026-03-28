@@ -19,7 +19,11 @@ from sorter.application.recognition_benchmark import (
     write_benchmark_artifacts,
     write_portable_report,
 )
-from sorter.application.recognition_reporting import classify_review_reason
+from sorter.application.recognition_reporting import (
+    classify_review_reason,
+    recommend_recovery_action,
+    review_reason_family,
+)
 from sorter.config.card_engine import resolve_card_engine_config_path
 from sorter.config.settings import AppSettings
 from sorter.domain.models import PileId
@@ -81,6 +85,8 @@ def main() -> int:
         )
         result = recognizer.recognize_top_card(frame)
         review_reason = classify_review_reason(frame, result)
+        review_family = review_reason_family(review_reason)
+        recovery_action = recommend_recovery_action(frame, result)
         pile_key = str(case.get("pile_key") or "")
         cases.append(
             RecognitionBenchmarkCase(
@@ -104,6 +110,8 @@ def main() -> int:
                 engine_review_reason=result.review_reason,
                 needs_review=result.needs_review,
                 review_reason=review_reason,
+                review_family=review_family,
+                recovery_action=recovery_action,
                 fallback_used=result.fallback_used,
                 matched_name=result.card_name == frame.metadata.get("card_name"),
                 image_available=frame.path is not None,

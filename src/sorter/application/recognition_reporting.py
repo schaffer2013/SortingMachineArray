@@ -3,6 +3,25 @@ from __future__ import annotations
 from typing import Iterable
 
 
+_REVIEW_REASON_FAMILIES = {
+    "candidate_tie_unresolved": "perception",
+    "deadline_exceeded": "perception",
+    "detection_failed": "perception",
+    "empty_prediction_below_threshold": "policy",
+    "expected_card_contradicted": "perception",
+    "expected_card_not_found": "policy",
+    "missing_candidate_pool_or_expected_card": "policy",
+    "missing_expected_card": "policy",
+    "missing_prediction_for_visible_card": "policy",
+    "missing_tracked_pool": "policy",
+    "ocr_weak": "perception",
+    "recognition_ambiguous_candidates": "perception",
+    "recognition_confirmation_contradiction": "perception",
+    "recognition_false_empty": "perception",
+    "confidence_below_threshold": "policy",
+}
+
+
 def classify_review_reason(frame, result) -> str | None:
     if not result.needs_review:
         return None
@@ -29,6 +48,35 @@ def classify_review_reason(frame, result) -> str | None:
     if result.card_name is None:
         return "empty_prediction_below_threshold"
     return "confidence_below_threshold"
+
+
+def review_reason_family(reason: str | None) -> str | None:
+    if reason is None:
+        return None
+    return _REVIEW_REASON_FAMILIES.get(reason, "unknown")
+
+
+def recommend_recovery_action(frame, result) -> str | None:
+    reason = classify_review_reason(frame, result)
+    if reason is None:
+        return None
+    if reason == "missing_tracked_pool":
+        return "seed_candidate_pool_or_disable_small_pool"
+    if reason in {"missing_expected_card", "missing_candidate_pool_or_expected_card"}:
+        return "attach_expected_card_or_switch_mode"
+    if reason == "expected_card_not_found":
+        return "verify_expected_identity_against_catalog"
+    if reason == "expected_card_contradicted":
+        return "operator_confirm_or_retry_confirmation"
+    if reason in {"candidate_tie_unresolved", "recognition_ambiguous_candidates"}:
+        return "capture_additional_signal"
+    if reason in {"detection_failed", "ocr_weak", "deadline_exceeded"}:
+        return "rescan_with_more_budget"
+    if reason in {"missing_prediction_for_visible_card", "recognition_false_empty"}:
+        return "rescan_visible_card"
+    if reason in {"confidence_below_threshold", "empty_prediction_below_threshold"}:
+        return "retry_or_operator_review"
+    return "operator_review"
 
 
 def confidence_band_for(confidence: float) -> str:
@@ -59,6 +107,16 @@ def summarize_review_reasons(reasons: Iterable[str | None]) -> dict[str, int]:
         if reason is None:
             continue
         increment_counter(counts, reason)
+    return counts
+
+
+def summarize_review_families(reasons: Iterable[str | None]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for reason in reasons:
+        family = review_reason_family(reason)
+        if family is None:
+            continue
+        increment_counter(counts, family)
     return counts
 
 
