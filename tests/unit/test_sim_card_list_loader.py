@@ -7,6 +7,7 @@ import tempfile
 
 from sorter.adapters.persistence.sim_card_list_loader import (
     DEFAULT_SIM_CARD_LIST_PAYLOAD,
+    KNOWN_GOOD_SIM_CARD_LIST_PAYLOAD,
     build_default_sim_card_list_payload,
     expand_and_shuffle_instances,
     expand_and_shuffle_instance_ids,
@@ -31,6 +32,10 @@ def test_sim_card_list_file_is_created_when_missing(tmp_path: Path) -> None:
 
 def test_load_catalog_image_candidates_reads_available_catalog_entries(tmp_path: Path) -> None:
     catalog_path = tmp_path / "cards.json"
+    simulated_root = tmp_path / "SimulatedCardImages"
+    (simulated_root / "lea").mkdir(parents=True)
+    (simulated_root / "lea" / "Alpha.jpg").write_bytes(b"alpha")
+    (simulated_root / "Beta.jpg").write_bytes(b"beta")
     catalog_path.write_text(
         json.dumps(
             {
@@ -54,6 +59,12 @@ def test_load_catalog_image_candidates_reads_available_catalog_entries(tmp_path:
 
 def test_build_default_sim_card_list_payload_uses_local_catalog_candidates(tmp_path: Path) -> None:
     catalog_path = tmp_path / "cards.json"
+    simulated_root = tmp_path / "SimulatedCardImages"
+    (simulated_root / "lea").mkdir(parents=True)
+    (simulated_root / "lea" / "Alpha.jpg").write_bytes(b"alpha")
+    (simulated_root / "leb").mkdir(parents=True)
+    (simulated_root / "leb" / "Beta.jpg").write_bytes(b"beta")
+    (simulated_root / "Gamma.jpg").write_bytes(b"gamma")
     catalog_path.write_text(
         json.dumps(
             {
@@ -73,6 +84,12 @@ def test_build_default_sim_card_list_payload_uses_local_catalog_candidates(tmp_p
     assert payload["entries"]
     assert len(payload["entries"]) == 2
     assert all(entry["count"] == 1 for entry in payload["entries"])
+
+
+def test_build_default_sim_card_list_payload_falls_back_to_known_good_local_list(tmp_path: Path) -> None:
+    payload = build_default_sim_card_list_payload(catalog_path=tmp_path / "missing.json")
+
+    assert payload == KNOWN_GOOD_SIM_CARD_LIST_PAYLOAD
 
 
 def test_expansion_and_shuffle_is_deterministic_with_seed_42(tmp_path: Path) -> None:

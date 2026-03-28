@@ -352,7 +352,7 @@
 - [ ] Perform a vestigial-code audit to classify low-signal files as entrypoint, compatibility shim, future placeholder, or removal candidate.
 - [ ] Add hardware acceptance scripts for homing, frame quality, repeated pick-place cycles, and supervised end-to-end sorts.
 - [ ] Define pass-fail thresholds that must be met before the project is called complete.
-- [ ] Add one command or documented workflow that runs the benchmark suite and summarizes whether the project is currently inside or outside the acceptance envelope.
+- [x] Add one command or documented workflow that runs the benchmark suite and summarizes whether the project is currently inside or outside the acceptance envelope.
 
 **Implementation notes**
 

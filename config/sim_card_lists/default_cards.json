@@ -1,60 +1,38 @@
 {
   "version": 1,
   "list_name": "default_demo_cards",
-  "description": "Seeded demo list sourced from the local catalog and available sim images",
+  "description": "Stable local-only demo list backed by checked-in simulated images",
   "random_seed": 42,
   "shuffle": true,
   "entries": [
     {
-      "name": "Abandon the Post",
+      "name": "Elspeth, Storm Slayer",
+      "set": "TDM",
       "count": 1
     },
     {
-      "name": "Abandoned Sarcophagus",
+      "name": "Furious Forebear",
+      "set": "TDM",
       "count": 1
     },
     {
-      "name": "Aberrant",
+      "name": "Flood",
+      "set": "5ED",
       "count": 1
     },
     {
-      "name": "Arcane Signet",
+      "name": "Future Sight",
+      "set": "MH1",
       "count": 1
     },
     {
-      "name": "Counterspell",
+      "name": "Alpharael, Dreaming Acolyte",
+      "set": "EOE",
       "count": 1
     },
     {
-      "name": "Doom Blade",
-      "count": 1
-    },
-    {
-      "name": "Evolving Wilds",
-      "count": 1
-    },
-    {
-      "name": "Island",
-      "count": 1
-    },
-    {
-      "name": "Lightning Bolt",
-      "count": 1
-    },
-    {
-      "name": "Llanowar Elves",
-      "count": 1
-    },
-    {
-      "name": "Mountain",
-      "count": 1
-    },
-    {
-      "name": "Pacifism",
-      "count": 1
-    },
-    {
-      "name": "Shivan Dragon",
+      "name": "Garenbrig Carver // Shield's Might",
+      "set": "ELD",
       "count": 1
     }
   ]

@@ -163,7 +163,7 @@ By the end of this sprint, the parent project should have:
 ## Block 8: Docs And Acceptance Tightening
 
 - [x] Update acceptance docs to include portable evidence bundles and mode-aware runs.
-- [ ] Update the roadmap for anything truly completed.
+- [x] Update the roadmap for anything truly completed.
 - [ ] Keep one current sprint log only if active execution starts again.
 - [x] Make sure the docs folder reflects the current plan instead of old sprint-by-sprint narration.
 

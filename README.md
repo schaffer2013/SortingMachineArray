@@ -107,6 +107,8 @@ If you want to run the real vendored recognizer, make sure the submodule OCR ext
 	- `pytest -q`
 - Noisy-sim review escalation coverage:
 	- `pytest tests/integration/test_noisy_sim_review_required.py -q`
+- Run the current pre-hardware acceptance envelope:
+	- `python scripts/check_acceptance.py`
 
 ## Sim image sync
 

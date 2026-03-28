@@ -25,6 +25,12 @@ Run these from the repo root with the shared `.venv`.
 .\.venv\Scripts\python.exe -m pytest tests
 ```
 
+### Current acceptance envelope command
+
+```powershell
+.\.venv\Scripts\python.exe scripts\check_acceptance.py
+```
+
 ### Sim-truth benchmark baseline
 
 ```powershell
@@ -176,3 +182,8 @@ The next acceptance expansion after Sprint 1 should add:
 
 - noisy-sim recognition faults now include false-empty, ambiguous-candidate, and confirmation-contradiction shapes in addition to low-confidence and missing-prediction cases
 - noisy-sim integration coverage now proves that false-empty startup scans escalate safely to `REVIEW_REQUIRED` with a specific saved review reason
+
+## Sprint 7 Additions
+
+- the repo now has a single acceptance-envelope command that runs the current test and recognizer checks and emits `data/recognition_reports/acceptance_envelope.json`
+- the acceptance command now acts as the first repo-native answer to "are we inside the current pre-hardware envelope?"
