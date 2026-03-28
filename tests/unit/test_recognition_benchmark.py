@@ -63,6 +63,8 @@ def test_run_sim_recognition_benchmark_summarizes_cases(monkeypatch, tmp_path):
     assert summary.name_accuracy == 1.0
     assert summary.fallback_count == 1
     assert summary.missing_image_count == 1
+    assert summary.cases[0].alternatives == ()
+    assert summary.cases[0].debug == {}
 
 
 def test_run_sim_recognition_benchmark_can_skip_empty_cases(monkeypatch, tmp_path):

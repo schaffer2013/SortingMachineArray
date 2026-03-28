@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "name": "runtime_small_stack_top_cards",
+  "source_mode": "sim",
+  "scenario_name": "runtime_small_stack",
+  "cases": [
+    {
+      "pile_key": "0,0",
+      "frame_path": "SimulatedCardImages/tdm/Elspeth,_Storm_Slayer.jpg",
+      "expected_name": "Elspeth, Storm Slayer"
+    },
+    {
+      "pile_key": "1,0",
+      "frame_path": "SimulatedCardImages/tdm/Furious_Forebear.jpg",
+      "expected_name": "Furious Forebear"
+    },
+    {
+      "pile_key": "0,1",
+      "frame_path": "SimulatedCardImages/5ed/Flood.jpg",
+      "expected_name": "Flood"
+    },
+    {
+      "pile_key": "1,1",
+      "frame_path": "SimulatedCardImages/mh1/Future_Sight.jpg",
+      "expected_name": "Future Sight"
+    },
+    {
+      "pile_key": "2,0",
+      "frame_path": "SimulatedCardImages/eoe/Alpharael,_Dreaming_Acolyte.jpg",
+      "expected_name": "Alpharael, Dreaming Acolyte"
+    },
+    {
+      "pile_key": "2,1",
+      "frame_path": "SimulatedCardImages/eld/Garenbrig_Carver____Shield's_Might.jpg",
+      "expected_name": "Garenbrig Carver // Shield's Might"
+    }
+  ]
+}

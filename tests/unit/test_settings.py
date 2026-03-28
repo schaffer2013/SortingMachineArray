@@ -25,6 +25,17 @@ def test_app_settings_from_env_reads_recognizer_backend_controls(monkeypatch, tm
     assert settings.fuzzy_enigma_sim_truth_fallback is True
 
 
+def test_app_settings_defaults_card_engine_config_to_parent_owned_file(monkeypatch, tmp_path):
+    config_path = tmp_path / "config" / "card_engine" / "engine.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text("{}", encoding="utf-8")
+    monkeypatch.delenv("SORTER_CARD_ENGINE_CONFIG", raising=False)
+
+    settings = AppSettings.from_env(project_root=tmp_path)
+
+    assert settings.card_engine_config_path == config_path
+
+
 def test_app_settings_reads_default_recognition_policy_from_file(monkeypatch, tmp_path):
     policy_path = tmp_path / "config" / "vision" / "recognition_thresholds.json"
     policy_path.parent.mkdir(parents=True, exist_ok=True)

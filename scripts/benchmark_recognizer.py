@@ -12,6 +12,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from sorter.application.recognition_benchmark import default_json_path, run_sim_recognition_benchmark
+from sorter.config.card_engine import resolve_card_engine_config_path
 from sorter.config.settings import AppSettings
 
 
@@ -20,12 +21,23 @@ def main() -> int:
     parser.add_argument("--backend", choices=["sim_truth", "fuzzy_enigma"], default=None)
     parser.add_argument("--include-empty", action="store_true")
     parser.add_argument("--pile", action="append", dest="piles", help="Limit benchmarking to one or more pile keys like 0,0")
+    parser.add_argument("--card-engine-config", default=None, help="Optional parent-owned card-engine config path.")
     parser.add_argument("--json-out", default=None)
     args = parser.parse_args()
 
     settings = AppSettings.from_env(project_root=PROJECT_ROOT)
     if args.backend is not None:
         settings = replace(settings, recognizer_backend=args.backend)
+    if settings.recognizer_backend == "fuzzy_enigma":
+        override_path = None if args.card_engine_config is None else (PROJECT_ROOT / args.card_engine_config)
+        settings = replace(
+            settings,
+            card_engine_config_path=resolve_card_engine_config_path(
+                settings,
+                for_benchmark=True,
+                override_path=override_path,
+            ),
+        )
 
     summary = run_sim_recognition_benchmark(
         settings,
@@ -44,6 +56,7 @@ def main() -> int:
     print(f"review_count={summary.review_count}")
     print(f"fallback_count={summary.fallback_count}")
     print(f"missing_image_count={summary.missing_image_count}")
+    print(f"card_engine_config={settings.card_engine_config_path}")
     print(f"json_out={output_path}")
     return 0
 
