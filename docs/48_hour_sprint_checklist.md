@@ -24,6 +24,57 @@ By the end of this sprint, the parent project should have:
 - Prefer submodule queries and structured outputs over external card lookups.
 - Prefer changes that help both sim and upcoming hardware work.
 
+## Git Strategy
+
+- Start the sprint from a clean integration branch.
+  Current expected base: `pre_hardware_48h_sprint`
+- Use short-lived feature branches for major slices when the write scope is large enough to deserve isolation.
+  Expected examples:
+  - `portable_recognition_reports`
+  - `mode_aware_parent_integration`
+  - `golden_frame_hardening`
+  - `noisy_sim_expansion`
+- Commit locally at meaningful checkpoints even if the slice is not fully done yet.
+- Push branches when a slice is stable enough to preserve remotely or open for review.
+- Merge back into the active sprint branch at stable points, not only at the very end.
+- Merge into `main` only when a checkpoint is:
+  - tested
+  - documented
+  - coherent as a standalone improvement
+- Prefer several stable merges to `main` across the `48` hours instead of one giant end-of-sprint merge.
+- Keep unfinished exploratory work off `main` unless it is hidden behind a safe flag or clearly non-disruptive.
+- If a branch reveals a bad direction, close it locally or keep it unmerged rather than forcing partial work into the mainline.
+
+## Stable Merge Points
+
+- Stable Point 1:
+  - portable recognition evidence format
+  - initial `docs/submodule_feedback.md`
+  - tests for evidence export
+- Stable Point 2:
+  - mode-aware parent integration
+  - saved mode metadata in reports
+  - replay or benchmark comparison coverage by mode
+- Stable Point 3:
+  - static-card cleanup
+  - submodule-query-based replacements where practical
+  - tests proving parent flow no longer depends on example card names
+- Stable Point 4:
+  - golden-frame command hardening
+  - broader noisy-sim fault coverage
+  - updated acceptance docs
+
+## Merge Discipline
+
+- Before each stable merge:
+  - run the targeted tests for that slice
+  - run broader validation if the slice touches shared orchestration or benchmark code
+  - update the checklist or acceptance docs if the slice changes the supported workflow
+- After each stable merge:
+  - verify the branch is clean
+  - note what was merged and what remains
+  - continue from a fresh clean branch if the next slice is large enough
+
 ## Block 1: Portable Recognition Evidence
 
 - [ ] Add a parent-owned portable report format for recognition outcomes.
