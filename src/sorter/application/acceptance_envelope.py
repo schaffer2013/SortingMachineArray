@@ -84,6 +84,22 @@ def evaluate_acceptance_envelope(
                 "actual_review_count": int(fuzzy_golden_small_pool_summary.get("review_count", 0)),
             },
         ),
+        AcceptanceGate(
+            name="fuzzy_review_classification_present",
+            passed=all(
+                isinstance(summary.get("review_family_counts"), dict)
+                for summary in (
+                    fuzzy_greenfield_summary,
+                    fuzzy_small_pool_summary,
+                    fuzzy_golden_small_pool_summary,
+                )
+            ),
+            details={
+                "greenfield_review_family_counts": fuzzy_greenfield_summary.get("review_family_counts"),
+                "small_pool_review_family_counts": fuzzy_small_pool_summary.get("review_family_counts"),
+                "golden_review_family_counts": fuzzy_golden_small_pool_summary.get("review_family_counts"),
+            },
+        ),
     )
     return AcceptanceEnvelope(
         generated_at_utc=datetime.now(UTC).isoformat(),

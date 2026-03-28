@@ -13,7 +13,7 @@
       },
       "role": "FEEDER",
       "cards": [
-        "Future Sight#futuresight"
+        "Future Sight#639cb483-ffe2-4abc-a050-5cdc8aebd5a2"
       ],
       "capacity": 85,
       "discovered": false,
@@ -27,7 +27,7 @@
       },
       "role": "COLLECTION",
       "cards": [
-        "Furious Forebear#furiousforebear"
+        "Furious Forebear#a4f247b6-8212-4e78-a452-d2d3be228d8e"
       ],
       "capacity": 85,
       "discovered": true,
@@ -41,7 +41,7 @@
       },
       "role": "SORTING",
       "cards": [
-        "Flood#flood"
+        "Flood#2aefbeae-ac72-4a13-8898-8d1e42a633a6"
       ],
       "capacity": 85,
       "discovered": true,
@@ -55,7 +55,7 @@
       },
       "role": "SORTING",
       "cards": [
-        "Alpharael, Dreaming Acolyte#alpharaeldreamingacolyte"
+        "Alpharael, Dreaming Acolyte#349a2211-2b23-418d-a1ef-1c72ad2e171d"
       ],
       "capacity": 85,
       "discovered": true,
@@ -69,7 +69,7 @@
       },
       "role": "SORTING",
       "cards": [
-        "Elspeth, Storm Slayer#elspethstormslayer"
+        "Elspeth, Storm Slayer#73a065e3-b530-4e62-ab3c-4f6f908184ec"
       ],
       "capacity": 85,
       "discovered": true,
@@ -83,7 +83,7 @@
       },
       "role": "SORTING",
       "cards": [
-        "Garenbrig Carver // Shield's Might#garenbrigcarvershieldsmight"
+        "Garenbrig Carver // Shield's Might#194b7a1c-291a-470e-9a40-61b72a46793b"
       ],
       "capacity": 85,
       "discovered": true,
@@ -93,11 +93,11 @@
   ],
   "faults": [],
   "card_set_by_instance_id": {
-    "Future Sight#futuresight": "mh1",
-    "Furious Forebear#furiousforebear": "tdm",
-    "Flood#flood": "5ed",
-    "Alpharael, Dreaming Acolyte#alpharaeldreamingacolyte": "eoe",
-    "Elspeth, Storm Slayer#elspethstormslayer": "tdm",
-    "Garenbrig Carver // Shield's Might#garenbrigcarvershieldsmight": "eld"
+    "Future Sight#639cb483-ffe2-4abc-a050-5cdc8aebd5a2": "mh1",
+    "Furious Forebear#a4f247b6-8212-4e78-a452-d2d3be228d8e": "tdm",
+    "Flood#2aefbeae-ac72-4a13-8898-8d1e42a633a6": "5ed",
+    "Alpharael, Dreaming Acolyte#349a2211-2b23-418d-a1ef-1c72ad2e171d": "eoe",
+    "Elspeth, Storm Slayer#73a065e3-b530-4e62-ab3c-4f6f908184ec": "tdm",
+    "Garenbrig Carver // Shield's Might#194b7a1c-291a-470e-9a40-61b72a46793b": "eld"
   }
 }

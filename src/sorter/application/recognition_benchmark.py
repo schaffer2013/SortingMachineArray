@@ -10,8 +10,11 @@ from typing import Iterable
 
 from sorter.application.recognition_reporting import (
     classify_review_reason,
+    recommend_recovery_action,
     summarize_confidence_bands,
+    summarize_review_families,
     summarize_review_reasons,
+    review_reason_family,
 )
 from sorter.bootstrap import build_sim_runtime_context
 from sorter.config.settings import AppSettings
@@ -40,6 +43,8 @@ class RecognitionBenchmarkCase:
     engine_review_reason: str | None = None
     needs_review: bool = False
     review_reason: str | None = None
+    review_family: str | None = None
+    recovery_action: str | None = None
     fallback_used: bool = False
     matched_name: bool = False
     image_available: bool = False
@@ -67,10 +72,11 @@ class RecognitionBenchmarkSummary:
     fallback_count: int
     missing_image_count: int
     average_confidence: float
-    confidence_band_counts: dict[str, int]
-    review_reason_counts: dict[str, int]
-    effective_mode_counts: dict[str, int]
-    cases: tuple[RecognitionBenchmarkCase, ...]
+    confidence_band_counts: dict[str, int] = field(default_factory=dict)
+    review_reason_counts: dict[str, int] = field(default_factory=dict)
+    review_family_counts: dict[str, int] = field(default_factory=dict)
+    effective_mode_counts: dict[str, int] = field(default_factory=dict)
+    cases: tuple[RecognitionBenchmarkCase, ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict:
         return {
@@ -93,6 +99,7 @@ class RecognitionBenchmarkSummary:
             "average_confidence": self.average_confidence,
             "confidence_band_counts": dict(self.confidence_band_counts),
             "review_reason_counts": dict(self.review_reason_counts),
+            "review_family_counts": dict(self.review_family_counts),
             "effective_mode_counts": dict(self.effective_mode_counts),
             "cases": [asdict(case) for case in self.cases],
         }
@@ -138,6 +145,8 @@ def run_sim_recognition_benchmark(
             continue
         result = context.recognizer.recognize_top_card(frame)
         review_reason = classify_review_reason(frame, result)
+        review_family = review_reason_family(review_reason)
+        recovery_action = recommend_recovery_action(frame, result)
         cases.append(
             RecognitionBenchmarkCase(
                 pile_key=pile_key,
@@ -160,6 +169,8 @@ def run_sim_recognition_benchmark(
                 engine_review_reason=result.review_reason,
                 needs_review=result.needs_review,
                 review_reason=review_reason,
+                review_family=review_family,
+                recovery_action=recovery_action,
                 fallback_used=result.fallback_used,
                 matched_name=result.card_name == expected_name,
                 image_available=frame.path is not None,
@@ -205,6 +216,7 @@ def summarize_recognition_cases(
     name_accuracy = exact_name_matches / scored_cases if scored_cases else 0.0
     confidence_band_counts = summarize_confidence_bands(case.confidence for case in case_tuple)
     review_reason_counts = summarize_review_reasons(case.review_reason for case in case_tuple)
+    review_family_counts = summarize_review_families(case.review_reason for case in case_tuple)
     effective_mode_counts = summarize_review_reasons(case.effective_mode for case in case_tuple)
     return RecognitionBenchmarkSummary(
         schema_version=1,
@@ -226,6 +238,7 @@ def summarize_recognition_cases(
         average_confidence=average_confidence,
         confidence_band_counts=confidence_band_counts,
         review_reason_counts=review_reason_counts,
+        review_family_counts=review_family_counts,
         effective_mode_counts=effective_mode_counts,
         cases=case_tuple,
     )
@@ -425,6 +438,7 @@ def write_portable_report(
             "average_confidence": summary.average_confidence,
             "confidence_band_counts": dict(summary.confidence_band_counts),
             "review_reason_counts": dict(summary.review_reason_counts),
+            "review_family_counts": dict(summary.review_family_counts),
             "effective_mode_counts": dict(summary.effective_mode_counts),
         },
         "success_cases": [
@@ -486,6 +500,8 @@ def _portable_case_dict(case: RecognitionBenchmarkCase, *, artifact_root_str: st
         "mode_request": dict(case.mode_request),
         "needs_review": case.needs_review,
         "review_reason": case.review_reason,
+        "review_family": case.review_family,
+        "recovery_action": case.recovery_action,
         "fallback_used": case.fallback_used,
         "matched_name": case.matched_name,
         "image_available": case.image_available,

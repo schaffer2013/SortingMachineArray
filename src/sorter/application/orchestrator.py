@@ -11,6 +11,8 @@ from sorter.application.recognition_reporting import (
     classify_review_reason,
     confidence_band_for,
     increment_counter,
+    recommend_recovery_action,
+    review_reason_family,
 )
 from sorter.application.use_cases.execute_move import build_pick_place_sequence
 from sorter.domain.events import DomainEvent
@@ -91,8 +93,12 @@ class Orchestrator:
                 confidence_band_for(result.confidence),
             )
             review_reason = classify_review_reason(frame, result)
+            review_family = review_reason_family(review_reason)
+            recovery_action = recommend_recovery_action(frame, result)
             if review_reason is not None:
                 increment_counter(self.world.snapshot.run_state.metrics.review_reason_counts, review_reason)
+            if review_family is not None:
+                increment_counter(self.world.snapshot.run_state.metrics.review_family_counts, review_family)
             accepted, reason = self._recognition_decision(frame, result)
             if not accepted:
                 self.world.snapshot.run_state.metrics.low_confidence_count += 1
@@ -122,6 +128,12 @@ class Orchestrator:
                         "needs_review": result.needs_review,
                         "fallback_used": result.fallback_used,
                         "review_reason": review_reason,
+                        "review_family": review_family,
+                        "recovery_action": recovery_action,
+                        "failure_code": result.failure_code,
+                        "engine_review_reason": result.review_reason,
+                        "requested_mode": result.requested_mode,
+                        "effective_mode": result.effective_mode,
                     },
                 ),
             )
@@ -260,6 +272,11 @@ class Orchestrator:
                 "fallback_used": verification_result.fallback_used,
                 "attempts": verification.attempts,
                 "reason": verification.reason,
+                "review_reason": classify_review_reason(verification.frame, verification_result),
+                "review_family": review_reason_family(classify_review_reason(verification.frame, verification_result)),
+                "recovery_action": recommend_recovery_action(verification.frame, verification_result),
+                "failure_code": verification_result.failure_code,
+                "engine_review_reason": verification_result.review_reason,
             }))
             logger.debug(
                 "move verification: run_id=%s seq=%s verified=%s confidence=%.3f card=%s backend=%s review=%s fallback=%s attempts=%s reason=%s",
@@ -361,6 +378,11 @@ class Orchestrator:
                         "empty_confirmed": result.card_name is None,
                         "attempts": observation.attempts,
                         "reason": observation.reason,
+                        "review_reason": classify_review_reason(observation.frame, result),
+                        "review_family": review_reason_family(classify_review_reason(observation.frame, result)),
+                        "recovery_action": recommend_recovery_action(observation.frame, result),
+                        "failure_code": result.failure_code,
+                        "engine_review_reason": result.review_reason,
                     },
                 ),
             )

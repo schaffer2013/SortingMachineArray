@@ -90,6 +90,7 @@ def test_run_sim_recognition_benchmark_summarizes_review_reasons_and_confidence_
         "085_plus": 1,
     }
     assert summary.review_reason_counts == {"missing_prediction_for_visible_card": 1}
+    assert summary.review_family_counts == {"policy": 1}
     assert summary.effective_mode_counts == {"greenfield": 2}
     assert summary.requested_mode == "greenfield"
     assert summary.mode_request_options == {"mode": "greenfield", "use_expected_label": False}
@@ -256,6 +257,7 @@ def test_write_portable_report_splits_success_and_failure_cases(tmp_path):
         average_confidence=0.52,
         confidence_band_counts={"lt_050": 1, "050_to_069": 0, "070_to_084": 0, "085_plus": 1},
         review_reason_counts={"confidence_below_threshold": 1},
+        review_family_counts={"policy": 1},
         effective_mode_counts={"greenfield": 2},
         cases=(
             RecognitionBenchmarkCase(
@@ -299,6 +301,8 @@ def test_write_portable_report_splits_success_and_failure_cases(tmp_path):
                 mode_features=("has_candidate_pool",),
                 needs_review=True,
                 review_reason="confidence_below_threshold",
+                review_family="policy",
+                recovery_action="retry_or_operator_review",
                 fallback_used=False,
                 matched_name=False,
                 image_available=True,
@@ -322,8 +326,11 @@ def test_write_portable_report_splits_success_and_failure_cases(tmp_path):
     assert payload["mode_request_options"] == {"mode": "small_pool", "use_expected_label": True, "use_tracked_pool": False}
     assert payload["summary"]["review_count"] == 1
     assert payload["summary"]["effective_mode_counts"] == {"greenfield": 2}
+    assert payload["summary"]["review_family_counts"] == {"policy": 1}
     assert len(payload["success_cases"]) == 1
     assert len(payload["failure_cases"]) == 1
     assert payload["failure_cases"][0]["review_reason"] == "confidence_below_threshold"
+    assert payload["failure_cases"][0]["review_family"] == "policy"
+    assert payload["failure_cases"][0]["recovery_action"] == "retry_or_operator_review"
     assert payload["failure_cases"][0]["requested_mode"] == "small_pool"
     assert payload["failure_cases"][0]["mode_request"] == {"mode": "small_pool"}
