@@ -28,11 +28,16 @@ class PolicyRecognizerAdapter:
             return replace(
                 fallback_result,
                 fallback_used=True,
+                requested_mode=primary_result.requested_mode or fallback_result.requested_mode,
+                effective_mode=primary_result.effective_mode or fallback_result.effective_mode,
+                mode_features=primary_result.mode_features or fallback_result.mode_features,
                 debug={
                     "fallback_reason": self._fallback_reason(frame, primary_result),
                     "primary_backend": primary_result.backend,
                     "primary_confidence": primary_result.confidence,
                     "primary_card_name": primary_result.card_name,
+                    "primary_requested_mode": primary_result.requested_mode,
+                    "primary_effective_mode": primary_result.effective_mode,
                     "fallback_backend": fallback_result.backend,
                     "fallback_result": dict(fallback_result.debug),
                 },

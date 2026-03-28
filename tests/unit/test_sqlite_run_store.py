@@ -25,6 +25,9 @@ def test_sqlite_run_store_persists_rich_frame_and_recognition_fields(tmp_path):
         backend="fuzzy_enigma",
         scryfall_id="opt-id",
         oracle_id="oracle-opt",
+        requested_mode="greenfield",
+        effective_mode="greenfield",
+        mode_features=("prefer_visual_small_pool",),
         needs_review=False,
         fallback_used=False,
         alternatives=({"name": "Opt", "score": 0.91},),
@@ -49,6 +52,8 @@ def test_sqlite_run_store_persists_rich_frame_and_recognition_fields(tmp_path):
                 recognizer_backend,
                 scryfall_id,
                 oracle_id,
+                requested_mode,
+                effective_mode,
                 needs_review,
                 fallback_used
             FROM frames
@@ -70,6 +75,8 @@ def test_sqlite_run_store_persists_rich_frame_and_recognition_fields(tmp_path):
         "fuzzy_enigma",
         "opt-id",
         "oracle-opt",
+        "greenfield",
+        "greenfield",
         0,
         0,
     )

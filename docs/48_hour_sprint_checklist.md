@@ -77,9 +77,9 @@ By the end of this sprint, the parent project should have:
 
 ## Block 1: Portable Recognition Evidence
 
-- [ ] Add a parent-owned portable report format for recognition outcomes.
-- [ ] Include both success and failure cases.
-- [ ] Record:
+- [x] Add a parent-owned portable report format for recognition outcomes.
+- [x] Include both success and failure cases.
+- [x] Record:
   - backend
   - requested mode
   - effective mode or mode-related flags when available
@@ -93,7 +93,7 @@ By the end of this sprint, the parent project should have:
   - candidate list
   - artifact paths
   - timing data when available
-- [ ] Ensure the format is easy to hand to the submodule developer without needing local SQLite access.
+- [x] Ensure the format is easy to hand to the submodule developer without needing local SQLite access.
 
 ## Block 2: Mode-Aware Parent Integration
 
@@ -103,7 +103,7 @@ By the end of this sprint, the parent project should have:
   - `small_pool`
   - `reevaluation`
   - `confirmation`
-- [ ] Make mode choice explicit in saved reports and logs.
+- [x] Make mode choice explicit in saved reports and logs.
 - [ ] Add benchmark or replay coverage that compares modes, not just backends.
 - [ ] If the parent cannot yet use a mode safely, document the missing requirement in the submodule feedback doc.
 
@@ -150,15 +150,15 @@ By the end of this sprint, the parent project should have:
 
 ## Block 7: Submodule Feedback Package
 
-- [ ] Create `docs/submodule_feedback.md`.
-- [ ] Keep it short, concrete, and evidence-backed.
-- [ ] Include:
+- [x] Create `docs/submodule_feedback.md`.
+- [x] Keep it short, concrete, and evidence-backed.
+- [x] Include:
   - missing structured metadata we need from the recognizer
   - failure and review reasons that should be first-class
   - mode and effective-path metadata we need in results
   - artifact-export capabilities we want upstream
   - any parent workarounds we had to implement because the submodule does not expose enough directly
-- [ ] Link each request to a real parent-side use case or saved report example.
+- [x] Link each request to a real parent-side use case or saved report example.
 
 ## Block 8: Docs And Acceptance Tightening
 

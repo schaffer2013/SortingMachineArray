@@ -60,12 +60,16 @@ The sim camera no longer mutates pile observation state on capture by itself; ob
 - Generate a benchmark summary JSON:
 	- `python scripts/benchmark_recognizer.py --backend sim_truth`
 	- `python scripts/benchmark_recognizer.py --backend fuzzy_enigma`
+	- `python scripts/benchmark_recognizer.py --backend fuzzy_enigma --card-engine-mode small_pool`
 - Compare two saved summaries directly:
 	- `python scripts/compare_recognition_summaries.py --baseline data/recognition_reports/sim_truth_summary.json --candidate data/recognition_reports/fuzzy_enigma_summary.json`
 - The summary JSON is written under `data/recognition_reports/`.
+- Portable success/failure reports are written under `data/recognition_reports/portable/`.
 - For `fuzzy_enigma`, replay and benchmark commands automatically prefer the parent-owned benchmark config unless you override `--card-engine-config`.
 - The summary JSON now includes alternatives, review reasons, confidence-band counts, and debug payloads, not just the final score line.
+- Replay and benchmark commands now accept `--card-engine-mode` so mode requests are explicit and reportable.
 - `fuzzy_enigma` replay and benchmark runs also export inspectable per-case artifacts under `data/recognition_reports/artifacts/` by default, including copied source frames, `ocr_lines.txt`, `debug.json`, and `bbox.json` when available.
+- Portable reports include requested mode, effective mode, submodule SHA, and separate success/failure case lists so they can be handed to the submodule developer directly.
 - Sim runs can now return `REVIEW_REQUIRED` when startup scan or post-move verification exhausts the configured retry budget.
 
 ## Vision dataset ingest

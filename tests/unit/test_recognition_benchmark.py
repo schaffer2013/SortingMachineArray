@@ -7,8 +7,10 @@ import json
 from sorter.application.recognition_benchmark import (
     RecognitionBenchmarkCase,
     RecognitionBenchmarkSummary,
+    default_portable_report_path,
     run_sim_recognition_benchmark,
     write_benchmark_artifacts,
+    write_portable_report,
 )
 from sorter.domain.enums import PileRole
 from sorter.domain.models import MachineSnapshot, PileId, PileState
@@ -46,12 +48,18 @@ def test_run_sim_recognition_benchmark_summarizes_review_reasons_and_confidence_
             card_name="Opt",
             confidence=0.91,
             backend="fuzzy_enigma",
+            requested_mode="greenfield",
+            effective_mode="greenfield",
+            mode_features=("prefer_visual_small_pool",),
             needs_review=False,
         ),
         "frame-b": RecognitionResult(
             card_name=None,
             confidence=0.22,
             backend="fuzzy_enigma",
+            requested_mode="small_pool",
+            effective_mode="greenfield",
+            mode_features=("has_candidate_pool",),
             needs_review=True,
             debug={"policy": {"reason": "missing_prediction_for_visible_card"}},
         ),
@@ -67,7 +75,9 @@ def test_run_sim_recognition_benchmark_summarizes_review_reasons_and_confidence_
         lambda settings: context,
     )
 
-    summary = run_sim_recognition_benchmark(SimpleNamespace(recognizer_backend="fuzzy_enigma"))
+    summary = run_sim_recognition_benchmark(
+        SimpleNamespace(recognizer_backend="fuzzy_enigma", card_engine_mode="greenfield")
+    )
 
     assert summary.scored_cases == 2
     assert summary.review_count == 1
@@ -80,6 +90,10 @@ def test_run_sim_recognition_benchmark_summarizes_review_reasons_and_confidence_
         "085_plus": 1,
     }
     assert summary.review_reason_counts == {"missing_prediction_for_visible_card": 1}
+    assert summary.effective_mode_counts == {"greenfield": 2}
+    assert summary.requested_mode == "greenfield"
+    assert summary.cases[0].requested_mode == "greenfield"
+    assert summary.cases[1].effective_mode == "greenfield"
     assert summary.cases[1].review_reason == "missing_prediction_for_visible_card"
 
 
@@ -87,8 +101,12 @@ def test_write_benchmark_artifacts_exports_case_debug_files(tmp_path):
     frame_path = tmp_path / "source.jpg"
     frame_path.write_bytes(b"fake-image")
     summary = RecognitionBenchmarkSummary(
+        schema_version=1,
+        report_type="benchmark",
+        generated_at_utc="2026-03-28T12:00:00+00:00",
         backend="fuzzy_enigma",
         scenario_name="demo",
+        requested_mode="greenfield",
         total_cases=1,
         scored_cases=1,
         exact_name_matches=1,
@@ -101,6 +119,7 @@ def test_write_benchmark_artifacts_exports_case_debug_files(tmp_path):
         average_confidence=0.88,
         confidence_band_counts={"lt_050": 0, "050_to_069": 0, "070_to_084": 0, "085_plus": 1},
         review_reason_counts={},
+        effective_mode_counts={"greenfield": 1},
         cases=(
             RecognitionBenchmarkCase(
                 pile_key="0,0",
@@ -114,6 +133,9 @@ def test_write_benchmark_artifacts_exports_case_debug_files(tmp_path):
                 predicted_oracle_id="predicted-oracle",
                 confidence=0.88,
                 backend="fuzzy_enigma",
+                requested_mode="greenfield",
+                effective_mode="greenfield",
+                mode_features=("prefer_visual_small_pool",),
                 needs_review=False,
                 review_reason=None,
                 fallback_used=False,
@@ -135,3 +157,92 @@ def test_write_benchmark_artifacts_exports_case_debug_files(tmp_path):
     assert (case_dir / "debug.json").exists()
     assert (case_dir / "ocr_lines.txt").read_text(encoding="utf-8") == "Opt"
     assert json.loads((case_dir / "bbox.json").read_text(encoding="utf-8")) == {"bbox": [1, 2, 3, 4]}
+
+
+def test_write_portable_report_splits_success_and_failure_cases(tmp_path):
+    summary = RecognitionBenchmarkSummary(
+        schema_version=1,
+        report_type="benchmark",
+        generated_at_utc="2026-03-28T12:00:00+00:00",
+        backend="fuzzy_enigma",
+        scenario_name="demo",
+        requested_mode="small_pool",
+        total_cases=2,
+        scored_cases=2,
+        exact_name_matches=1,
+        name_accuracy=0.5,
+        review_count=1,
+        low_confidence_count=1,
+        missing_prediction_count=0,
+        fallback_count=0,
+        missing_image_count=0,
+        average_confidence=0.52,
+        confidence_band_counts={"lt_050": 1, "050_to_069": 0, "070_to_084": 0, "085_plus": 1},
+        review_reason_counts={"confidence_below_threshold": 1},
+        effective_mode_counts={"greenfield": 2},
+        cases=(
+            RecognitionBenchmarkCase(
+                pile_key="0,0",
+                frame_id="frame-ok",
+                frame_path="C:/tmp/ok.jpg",
+                expected_name="Opt",
+                expected_scryfall_id=None,
+                expected_oracle_id=None,
+                predicted_name="Opt",
+                predicted_scryfall_id="opt-id",
+                predicted_oracle_id="oracle-opt",
+                confidence=0.91,
+                backend="fuzzy_enigma",
+                requested_mode="small_pool",
+                effective_mode="greenfield",
+                mode_features=("has_candidate_pool",),
+                needs_review=False,
+                review_reason=None,
+                fallback_used=False,
+                matched_name=True,
+                image_available=True,
+                alternatives=(),
+                debug={},
+            ),
+            RecognitionBenchmarkCase(
+                pile_key="1,0",
+                frame_id="frame-bad",
+                frame_path="C:/tmp/bad.jpg",
+                expected_name="Island",
+                expected_scryfall_id=None,
+                expected_oracle_id=None,
+                predicted_name="Opt",
+                predicted_scryfall_id="opt-id",
+                predicted_oracle_id="oracle-opt",
+                confidence=0.13,
+                backend="fuzzy_enigma",
+                requested_mode="small_pool",
+                effective_mode="greenfield",
+                mode_features=("has_candidate_pool",),
+                needs_review=True,
+                review_reason="confidence_below_threshold",
+                fallback_used=False,
+                matched_name=False,
+                image_available=True,
+                alternatives=(),
+                debug={},
+            ),
+        ),
+    )
+
+    output_path = write_portable_report(
+        summary,
+        default_portable_report_path(tmp_path, "portable-test"),
+        artifact_root=tmp_path / "artifacts",
+        card_engine_config_path="config/card_engine/benchmark.engine.json",
+        project_root=tmp_path,
+    )
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert payload["requested_mode"] == "small_pool"
+    assert payload["summary"]["review_count"] == 1
+    assert payload["summary"]["effective_mode_counts"] == {"greenfield": 2}
+    assert len(payload["success_cases"]) == 1
+    assert len(payload["failure_cases"]) == 1
+    assert payload["failure_cases"][0]["review_reason"] == "confidence_below_threshold"
+    assert payload["failure_cases"][0]["requested_mode"] == "small_pool"

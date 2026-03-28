@@ -78,6 +78,9 @@ def test_fuzzy_enigma_recognizer_uses_frame_path_and_translates_result(monkeypat
     assert result.backend == "fuzzy_enigma"
     assert result.scryfall_id == "opt-scryfall-id"
     assert result.oracle_id == "opt-oracle-id"
+    assert result.requested_mode == "greenfield"
+    assert result.effective_mode == "greenfield"
+    assert result.mode_features == ("prefer_visual_small_pool",)
     assert result.alternatives[0]["set_code"] == "XLN"
     assert result.debug["active_roi"] == "standard"
 
@@ -102,6 +105,8 @@ def test_fuzzy_enigma_recognizer_returns_empty_result_when_frame_has_no_image_or
 
     assert result.card_name is None
     assert result.confidence == 1.0
+    assert result.requested_mode == "greenfield"
+    assert result.effective_mode == "greenfield"
 
 
 def test_fuzzy_enigma_recognizer_requires_image_path_for_non_empty_card(monkeypatch, tmp_path):
@@ -142,3 +147,37 @@ def test_fuzzy_enigma_recognizer_requires_ocr_backend(monkeypatch, tmp_path):
         assert "requires an OCR backend" in str(exc)
     else:
         raise AssertionError("Expected missing OCR backend to raise")
+
+
+def test_fuzzy_enigma_recognizer_returns_review_result_when_small_pool_has_no_tracked_pool(monkeypatch, tmp_path):
+    class FakeRecognizer:
+        def __init__(self, **kwargs):
+            pass
+
+        def recognize_top_card(self, image, **kwargs):
+            raise ValueError("No tracked pool is available for constrained recognition.")
+
+    fake_modules = SimpleNamespace(
+        config=SimpleNamespace(load_engine_config=lambda path=None: {"path": path}),
+        sortingmachine=SimpleNamespace(SortingMachineRecognizer=FakeRecognizer),
+    )
+    monkeypatch.setattr(
+        "sorter.adapters.recognition.fuzzy_enigma_recognizer._load_card_engine_modules",
+        lambda project_root: fake_modules,
+    )
+    monkeypatch.setattr("sorter.adapters.recognition.fuzzy_enigma_recognizer._card_engine_ocr_available", lambda: True)
+
+    adapter = FuzzyEnigmaRecognizerAdapter(project_root=tmp_path, mode="small_pool")
+    frame = Frame(
+        frame_id="frame-4",
+        path=str(tmp_path / "card.jpg"),
+        pile_id=PileId(x_index=0, y_index=0),
+        metadata={"card_name": "Opt"},
+    )
+
+    result = adapter.recognize_top_card(frame)
+
+    assert result.card_name is None
+    assert result.needs_review is True
+    assert result.requested_mode == "small_pool"
+    assert result.debug["engine_error_code"] == "missing_tracked_pool"

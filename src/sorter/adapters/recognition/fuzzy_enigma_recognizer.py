@@ -62,6 +62,22 @@ def _card_engine_ocr_available() -> bool:
     )
 
 
+def _mode_features(raw_debug: dict[str, Any], *, prefer_visual_small_pool: bool) -> tuple[str, ...]:
+    features: list[str] = []
+    raw_mode = raw_debug.get("mode")
+    if isinstance(raw_mode, dict):
+        if raw_mode.get("has_expected_card"):
+            features.append("has_expected_card")
+        if raw_mode.get("has_candidate_pool"):
+            features.append("has_candidate_pool")
+    if prefer_visual_small_pool:
+        features.append("prefer_visual_small_pool")
+    visual_debug = raw_debug.get("small_pool_visual")
+    if isinstance(visual_debug, dict) and visual_debug:
+        features.append("small_pool_visual_debug")
+    return tuple(features)
+
+
 class FuzzyEnigmaRecognizerAdapter:
     def __init__(
         self,
@@ -92,18 +108,45 @@ class FuzzyEnigmaRecognizerAdapter:
     def recognize_top_card(self, frame: Frame) -> RecognitionResult:
         if frame.path is None:
             if frame.metadata.get("card_name") is None:
-                return RecognitionResult(card_name=None, confidence=1.0, backend="fuzzy_enigma")
+                return RecognitionResult(
+                    card_name=None,
+                    confidence=1.0,
+                    backend="fuzzy_enigma",
+                    requested_mode=self._mode,
+                    effective_mode=self._mode,
+                )
             raise RuntimeError(
                 "Fuzzy Enigma recognizer requires a frame image path. "
                 "Ensure the camera adapter persists or exposes the captured image."
             )
 
-        output = self._recognizer.recognize_top_card(
-            frame.path,
-            mode=self._mode,
-            detailed=True,
-            prefer_visual_small_pool=self._prefer_visual_small_pool,
-        )
+        try:
+            output = self._recognizer.recognize_top_card(
+                frame.path,
+                mode=self._mode,
+                detailed=True,
+                prefer_visual_small_pool=self._prefer_visual_small_pool,
+            )
+        except ValueError as exc:
+            if "No tracked pool is available for constrained recognition." not in str(exc):
+                raise
+            return RecognitionResult(
+                card_name=None,
+                confidence=0.0,
+                backend="fuzzy_enigma",
+                requested_mode=self._mode,
+                effective_mode=self._mode,
+                needs_review=True,
+                mode_features=_mode_features({}, prefer_visual_small_pool=self._prefer_visual_small_pool),
+                debug={
+                    "engine_error_code": "missing_tracked_pool",
+                    "engine_error": str(exc),
+                },
+            )
+        raw_debug = dict(output.debug)
+        raw_mode = raw_debug.get("mode") if isinstance(raw_debug.get("mode"), dict) else {}
+        requested_mode = raw_mode.get("requested", self._mode)
+        effective_mode = raw_mode.get("effective", requested_mode)
         alternatives = tuple(
             {
                 "name": candidate.name,
@@ -121,12 +164,15 @@ class FuzzyEnigmaRecognizerAdapter:
             backend="fuzzy_enigma",
             scryfall_id=output.scryfall_id,
             oracle_id=output.oracle_id,
+            requested_mode=str(requested_mode) if requested_mode is not None else self._mode,
+            effective_mode=str(effective_mode) if effective_mode is not None else self._mode,
+            mode_features=_mode_features(raw_debug, prefer_visual_small_pool=self._prefer_visual_small_pool),
             alternatives=alternatives,
             debug={
                 "active_roi": output.active_roi,
                 "tried_rois": list(output.tried_rois),
                 "bbox": output.bbox,
                 "ocr_lines": list(output.ocr_lines),
-                "raw": dict(output.debug),
+                "raw": raw_debug,
             },
         )

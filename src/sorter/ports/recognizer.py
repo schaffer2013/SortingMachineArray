@@ -13,6 +13,9 @@ class RecognitionResult:
     backend: str = "unknown"
     scryfall_id: str | None = None
     oracle_id: str | None = None
+    requested_mode: str | None = None
+    effective_mode: str | None = None
+    mode_features: tuple[str, ...] = field(default_factory=tuple)
     needs_review: bool = False
     fallback_used: bool = False
     alternatives: tuple[dict[str, Any], ...] = field(default_factory=tuple)

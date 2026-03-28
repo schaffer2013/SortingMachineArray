@@ -6,6 +6,9 @@ from typing import Iterable
 def classify_review_reason(frame, result) -> str | None:
     if not result.needs_review:
         return None
+    engine_error_code = result.debug.get("engine_error_code")
+    if isinstance(engine_error_code, str) and engine_error_code:
+        return engine_error_code
     policy = result.debug.get("policy")
     if isinstance(policy, dict):
         reason = policy.get("reason")
