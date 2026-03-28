@@ -97,7 +97,11 @@ def main() -> int:
                 backend=result.backend,
                 requested_mode=result.requested_mode,
                 effective_mode=result.effective_mode,
+                mode_flags=dict(result.mode_flags),
                 mode_features=tuple(result.mode_features),
+                pipeline_summary=dict(result.pipeline_summary),
+                failure_code=result.failure_code,
+                engine_review_reason=result.review_reason,
                 needs_review=result.needs_review,
                 review_reason=review_reason,
                 fallback_used=result.fallback_used,
@@ -177,6 +181,8 @@ def _build_manifest_frame(case: dict, *, frame_index: int) -> Frame:
     pile_id = _pile_id_from_key(pile_key)
     metadata = {
         "card_name": case.get("expected_name"),
+        "scryfall_id": case.get("expected_scryfall_id"),
+        "oracle_id": case.get("expected_oracle_id"),
         "source": "golden_manifest",
         "set_code": _set_code_from_frame_path(raw_path),
     }
@@ -230,6 +236,12 @@ def _apply_mode_request(
     request: dict[str, object] = {"mode": settings.card_engine_mode}
     if use_expected_label and isinstance(frame.metadata.get("card_name"), str):
         expected_card = {"name": str(frame.metadata["card_name"])}
+        scryfall_id = frame.metadata.get("scryfall_id")
+        oracle_id = frame.metadata.get("oracle_id")
+        if isinstance(scryfall_id, str) and scryfall_id.strip():
+            expected_card["scryfall_id"] = scryfall_id.strip()
+        if isinstance(oracle_id, str) and oracle_id.strip():
+            expected_card["oracle_id"] = oracle_id.strip()
         set_code = frame.metadata.get("set_code")
         if isinstance(set_code, str) and set_code.strip():
             expected_card["set_code"] = set_code.strip()

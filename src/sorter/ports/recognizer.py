@@ -15,7 +15,11 @@ class RecognitionResult:
     oracle_id: str | None = None
     requested_mode: str | None = None
     effective_mode: str | None = None
+    mode_flags: dict[str, bool] = field(default_factory=dict)
     mode_features: tuple[str, ...] = field(default_factory=tuple)
+    pipeline_summary: dict[str, Any] = field(default_factory=dict)
+    failure_code: str | None = None
+    review_reason: str | None = None
     needs_review: bool = False
     fallback_used: bool = False
     alternatives: tuple[dict[str, Any], ...] = field(default_factory=tuple)

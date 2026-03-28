@@ -38,6 +38,12 @@ def test_fuzzy_enigma_recognizer_uses_frame_path_and_translates_result(monkeypat
                 ],
                 active_roi="standard",
                 tried_rois=["standard", "set_symbol"],
+                requested_mode="greenfield",
+                effective_mode="greenfield",
+                mode_flags={"has_candidate_pool": False, "used_visual_small_pool": False},
+                pipeline_summary={"resolution_path": "title_only", "branches_fired": ["title_ocr"]},
+                failure_code=None,
+                review_reason=None,
                 debug={"mode": {"effective": "greenfield"}},
             )
 
@@ -83,7 +89,10 @@ def test_fuzzy_enigma_recognizer_uses_frame_path_and_translates_result(monkeypat
     assert result.oracle_id == "opt-oracle-id"
     assert result.requested_mode == "greenfield"
     assert result.effective_mode == "greenfield"
-    assert result.mode_features == ("prefer_visual_small_pool",)
+    assert result.mode_flags == {"has_candidate_pool": False, "used_visual_small_pool": False}
+    assert result.pipeline_summary["resolution_path"] == "title_only"
+    assert "title_ocr" in result.mode_features
+    assert "prefer_visual_small_pool" in result.mode_features
     assert result.alternatives[0]["set_code"] == "XLN"
     assert result.debug["active_roi"] == "standard"
 
@@ -192,6 +201,8 @@ def test_fuzzy_enigma_recognizer_returns_review_result_when_small_pool_has_no_tr
     assert result.card_name is None
     assert result.needs_review is True
     assert result.requested_mode == "small_pool"
+    assert result.failure_code == "missing_tracked_pool"
+    assert result.review_reason == "missing_tracked_pool"
     assert result.debug["engine_error_code"] == "missing_tracked_pool"
 
 
@@ -215,6 +226,12 @@ def test_fuzzy_enigma_recognizer_uses_frame_level_recognition_request(monkeypatc
                 top_k_candidates=[],
                 active_roi=None,
                 tried_rois=[],
+                requested_mode="confirmation",
+                effective_mode="confirmation",
+                mode_flags={"has_expected_card": True, "used_visual_small_pool": False},
+                pipeline_summary={"resolution_path": "title_only", "branches_fired": ["title_ocr", "confirmation_scoring"]},
+                failure_code=None,
+                review_reason=None,
                 debug={"mode": {"requested": "confirmation", "effective": "confirmation", "has_expected_card": True}},
             )
 
@@ -241,6 +258,8 @@ def test_fuzzy_enigma_recognizer_uses_frame_level_recognition_request(monkeypatc
             "recognition_request": {
                 "mode": "confirmation",
                 "expected_card": {
+                    "scryfall_id": "alpha-printing-id",
+                    "oracle_id": "alpha-oracle-id",
                     "name": "Alpha",
                     "set_code": "lea",
                     "collector_number": "1",
@@ -258,6 +277,8 @@ def test_fuzzy_enigma_recognizer_uses_frame_level_recognition_request(monkeypatc
     assert seen["kwargs"]["mode"] == "confirmation"
     assert seen["kwargs"]["expected_card"] == {
         "expected": {
+            "scryfall_id": "alpha-printing-id",
+            "oracle_id": "alpha-oracle-id",
             "name": "Alpha",
             "set_code": "lea",
             "collector_number": "1",
@@ -268,4 +289,6 @@ def test_fuzzy_enigma_recognizer_uses_frame_level_recognition_request(monkeypatc
     assert seen["kwargs"]["prefer_visual_small_pool"] is True
     assert result.requested_mode == "confirmation"
     assert result.effective_mode == "confirmation"
+    assert result.mode_flags["has_expected_card"] is True
+    assert result.pipeline_summary["resolution_path"] == "title_only"
     assert "has_expected_card" in result.mode_features

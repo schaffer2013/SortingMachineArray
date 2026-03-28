@@ -33,14 +33,18 @@ class RecognitionBenchmarkCase:
     backend: str
     requested_mode: str | None
     effective_mode: str | None
-    mode_features: tuple[str, ...]
-    needs_review: bool
-    review_reason: str | None
-    fallback_used: bool
-    matched_name: bool
-    image_available: bool
-    alternatives: tuple[dict, ...]
-    debug: dict
+    mode_flags: dict[str, bool] = field(default_factory=dict)
+    mode_features: tuple[str, ...] = field(default_factory=tuple)
+    pipeline_summary: dict = field(default_factory=dict)
+    failure_code: str | None = None
+    engine_review_reason: str | None = None
+    needs_review: bool = False
+    review_reason: str | None = None
+    fallback_used: bool = False
+    matched_name: bool = False
+    image_available: bool = False
+    alternatives: tuple[dict, ...] = field(default_factory=tuple)
+    debug: dict = field(default_factory=dict)
     mode_request: dict[str, object] = field(default_factory=dict)
 
 
@@ -149,7 +153,11 @@ def run_sim_recognition_benchmark(
                 backend=result.backend,
                 requested_mode=result.requested_mode,
                 effective_mode=result.effective_mode,
+                mode_flags=dict(result.mode_flags),
                 mode_features=tuple(result.mode_features),
+                pipeline_summary=dict(result.pipeline_summary),
+                failure_code=result.failure_code,
+                engine_review_reason=result.review_reason,
                 needs_review=result.needs_review,
                 review_reason=review_reason,
                 fallback_used=result.fallback_used,
@@ -237,7 +245,7 @@ def _frame_with_recognition_request(
 
     request: dict[str, object] = {}
     if settings.card_engine_mode:
-        request["mode"] = settings.card_engine_mode
+            request["mode"] = settings.card_engine_mode
     if use_expected_label:
         expected_card = _expected_card_payload(frame)
         if expected_card:
@@ -260,17 +268,25 @@ def _frame_with_recognition_request(
 
 
 def _expected_card_payload(frame) -> dict[str, str] | None:
+    scryfall_id = frame.metadata.get("scryfall_id")
+    oracle_id = frame.metadata.get("oracle_id")
     name = frame.metadata.get("card_name")
-    if not isinstance(name, str) or not name.strip():
+    if not isinstance(name, str) and not isinstance(scryfall_id, str) and not isinstance(oracle_id, str):
         return None
-    payload: dict[str, str] = {"name": name.strip()}
+    payload: dict[str, str] = {}
+    if isinstance(scryfall_id, str) and scryfall_id.strip():
+        payload["scryfall_id"] = scryfall_id.strip()
+    if isinstance(oracle_id, str) and oracle_id.strip():
+        payload["oracle_id"] = oracle_id.strip()
+    if isinstance(name, str) and name.strip():
+        payload["name"] = name.strip()
     set_code = frame.metadata.get("set_code")
     collector_number = frame.metadata.get("collector_number")
     if isinstance(set_code, str) and set_code.strip():
         payload["set_code"] = set_code.strip()
     if isinstance(collector_number, str) and collector_number.strip():
         payload["collector_number"] = collector_number.strip()
-    return payload
+    return payload or None
 
 
 def _mode_request_options(
@@ -462,7 +478,11 @@ def _portable_case_dict(case: RecognitionBenchmarkCase, *, artifact_root_str: st
         "backend": case.backend,
         "requested_mode": case.requested_mode,
         "effective_mode": case.effective_mode,
+        "mode_flags": dict(case.mode_flags),
         "mode_features": list(case.mode_features),
+        "pipeline_summary": dict(case.pipeline_summary),
+        "failure_code": case.failure_code,
+        "engine_review_reason": case.engine_review_reason,
         "mode_request": dict(case.mode_request),
         "needs_review": case.needs_review,
         "review_reason": case.review_reason,

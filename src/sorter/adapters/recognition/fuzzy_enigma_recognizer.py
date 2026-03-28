@@ -65,19 +65,28 @@ def _card_engine_ocr_available() -> bool:
     )
 
 
-def _mode_features(raw_debug: dict[str, Any], *, prefer_visual_small_pool: bool) -> tuple[str, ...]:
+def _mode_features(
+    *,
+    mode_flags: dict[str, Any] | None,
+    pipeline_summary: dict[str, Any] | None,
+    prefer_visual_small_pool: bool,
+) -> tuple[str, ...]:
     features: list[str] = []
-    raw_mode = raw_debug.get("mode")
-    if isinstance(raw_mode, dict):
-        if raw_mode.get("has_expected_card"):
-            features.append("has_expected_card")
-        if raw_mode.get("has_candidate_pool"):
-            features.append("has_candidate_pool")
+    normalized_mode_flags = mode_flags if isinstance(mode_flags, dict) else {}
+    if normalized_mode_flags.get("has_expected_card"):
+        features.append("has_expected_card")
+    if normalized_mode_flags.get("has_candidate_pool"):
+        features.append("has_candidate_pool")
+    if normalized_mode_flags.get("used_tracked_pool"):
+        features.append("used_tracked_pool")
+    if normalized_mode_flags.get("used_visual_small_pool"):
+        features.append("used_visual_small_pool")
     if prefer_visual_small_pool:
         features.append("prefer_visual_small_pool")
-    visual_debug = raw_debug.get("small_pool_visual")
-    if isinstance(visual_debug, dict) and visual_debug:
-        features.append("small_pool_visual_debug")
+    normalized_pipeline_summary = pipeline_summary if isinstance(pipeline_summary, dict) else {}
+    for branch in normalized_pipeline_summary.get("branches_fired", []):
+        if isinstance(branch, str) and branch.strip():
+            features.append(branch.strip())
     return tuple(features)
 
 
@@ -118,6 +127,7 @@ class FuzzyEnigmaRecognizerAdapter:
                     backend="fuzzy_enigma",
                     requested_mode=self._mode,
                     effective_mode=self._mode,
+                    mode_features=_mode_features(mode_flags=None, pipeline_summary=None, prefer_visual_small_pool=False),
                 )
             raise RuntimeError(
                 "Fuzzy Enigma recognizer requires a frame image path. "
@@ -135,6 +145,8 @@ class FuzzyEnigmaRecognizerAdapter:
         expected_card = None
         if isinstance(expected_card_payload, dict):
             expected_card = self._expected_card_from_values(
+                scryfall_id=expected_card_payload.get("scryfall_id"),
+                oracle_id=expected_card_payload.get("oracle_id"),
                 name=expected_card_payload.get("name"),
                 set_code=expected_card_payload.get("set_code"),
                 collector_number=expected_card_payload.get("collector_number"),
@@ -161,17 +173,25 @@ class FuzzyEnigmaRecognizerAdapter:
                 backend="fuzzy_enigma",
                 requested_mode=requested_mode,
                 effective_mode=requested_mode,
+                failure_code=error_code,
+                review_reason=error_code,
                 needs_review=True,
-                mode_features=_mode_features({}, prefer_visual_small_pool=prefer_visual_small_pool),
+                mode_features=_mode_features(
+                    mode_flags=None,
+                    pipeline_summary={"resolution_path": "precondition_failed"},
+                    prefer_visual_small_pool=prefer_visual_small_pool,
+                ),
+                pipeline_summary={"resolution_path": "precondition_failed"},
                 debug={
                     "engine_error_code": error_code,
                     "engine_error": error_message,
                 },
             )
         raw_debug = dict(output.debug)
-        raw_mode = raw_debug.get("mode") if isinstance(raw_debug.get("mode"), dict) else {}
-        requested_mode = raw_mode.get("requested", requested_mode)
-        effective_mode = raw_mode.get("effective", requested_mode)
+        mode_flags = dict(output.mode_flags) if isinstance(output.mode_flags, dict) else {}
+        pipeline_summary = dict(output.pipeline_summary) if isinstance(output.pipeline_summary, dict) else {}
+        requested_mode = output.requested_mode or requested_mode
+        effective_mode = output.effective_mode or requested_mode
         alternatives = tuple(
             {
                 "name": candidate.name,
@@ -191,7 +211,16 @@ class FuzzyEnigmaRecognizerAdapter:
             oracle_id=output.oracle_id,
             requested_mode=str(requested_mode) if requested_mode is not None else self._mode,
             effective_mode=str(effective_mode) if effective_mode is not None else self._mode,
-            mode_features=_mode_features(raw_debug, prefer_visual_small_pool=prefer_visual_small_pool),
+            mode_flags=mode_flags,
+            mode_features=_mode_features(
+                mode_flags=mode_flags,
+                pipeline_summary=pipeline_summary,
+                prefer_visual_small_pool=prefer_visual_small_pool,
+            ),
+            pipeline_summary=pipeline_summary,
+            failure_code=output.failure_code,
+            review_reason=output.review_reason,
+            needs_review=output.review_reason is not None,
             alternatives=alternatives,
             debug={
                 "active_roi": output.active_roi,

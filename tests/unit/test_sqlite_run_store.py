@@ -27,7 +27,11 @@ def test_sqlite_run_store_persists_rich_frame_and_recognition_fields(tmp_path):
         oracle_id="oracle-opt",
         requested_mode="greenfield",
         effective_mode="greenfield",
+        mode_flags={"has_candidate_pool": False},
         mode_features=("prefer_visual_small_pool",),
+        pipeline_summary={"resolution_path": "title_only"},
+        failure_code=None,
+        review_reason=None,
         needs_review=False,
         fallback_used=False,
         alternatives=({"name": "Opt", "score": 0.91},),
@@ -54,6 +58,10 @@ def test_sqlite_run_store_persists_rich_frame_and_recognition_fields(tmp_path):
                 oracle_id,
                 requested_mode,
                 effective_mode,
+                mode_flags_json,
+                pipeline_summary_json,
+                failure_code,
+                review_reason,
                 needs_review,
                 fallback_used
             FROM frames
@@ -77,6 +85,10 @@ def test_sqlite_run_store_persists_rich_frame_and_recognition_fields(tmp_path):
         "oracle-opt",
         "greenfield",
         "greenfield",
+        '{"has_candidate_pool": false}',
+        '{"resolution_path": "title_only"}',
+        None,
+        None,
         0,
         0,
     )

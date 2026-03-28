@@ -9,62 +9,51 @@ this repo.
 The goal is to hand the submodule developer short, evidence-backed requests
 instead of vague wishes.
 
+## Current Status
+
+Several early parent asks are now resolved upstream and adopted in this repo:
+
+- first-class `requested_mode` and `effective_mode`
+- stable `mode_flags`
+- stable `failure_code` and `review_reason`
+- offline catalog query API
+- engine-side artifact export
+- identifier-first `expected_card` support with `scryfall_id` and `oracle_id`
+
+The remaining asks are now more about completeness and ergonomics than missing
+foundations.
+
 ## Current Parent Needs
 
-### 1. Structured mode metadata should be first-class
+### 1. Structured pipeline summary should remain first-class and stable
 
-The engine already places requested and effective mode information inside debug
-payloads, but parent repos benefit when this is exposed as a stable structured
-result field instead of requiring debug parsing.
-
-Requested upstream improvement:
-
-- return `requested_mode`
-- return `effective_mode`
-- return mode-related flags such as:
-  - expected-card present
-  - candidate-pool present
-  - tracked-pool used
-  - visual-small-pool path used
-
-Why this matters:
-
-- the parent now saves portable success and failure reports
-- mode-aware comparisons are harder when the parent must scrape raw debug blobs
-- the parent is now running explicit mode experiments from replay, benchmark, and
-  fixed golden-frame manifests, so this metadata is no longer "nice to have"
-
-### 2. Constrained-mode precondition failures should return structured results, not exceptions
-
-Observed parent-side case:
-
-- requesting `small_pool` without a tracked pool currently raises
-  `ValueError("No tracked pool is available for constrained recognition.")`
-
-Parent-side workaround:
-
-- the parent now catches that failure and converts it into a reviewable result
-  with `review_reason=missing_tracked_pool`
+The engine now exposes structured mode metadata cleanly. The next high-value
+piece is making sure the pipeline summary remains stable and clearly documented
+for parent repos that need portable evidence.
 
 Requested upstream improvement:
 
-- return a structured failure result with a stable error code such as
-  `missing_tracked_pool`
-- avoid forcing parent repos to catch mode-precondition exceptions around
-  otherwise normal recognition calls
+- keep `pipeline_summary` stable and documented, including:
+  - `resolution_path`
+  - `branches_fired`
+  - title ROI summary
+  - secondary OCR summary
+  - visual-small-pool usage
 
 Why this matters:
 
-- parent benchmarks should be able to compare modes safely
-- hardware-time failures should become evidence, not crashes
+- the parent now saves portable success and failure reports directly from the
+  upstream result shape
+- portable reports are more useful when the resolution path is consistent and
+  versionable
 
-### 3. Parent-facing adapter should eventually accept expected-card and candidate-pool inputs directly
+### 2. Parent-facing adapter support should stay explicit and stable
 
 The parent repo is now driving:
 
-- `small_pool` with expected-label requests
-- `reevaluation` with expected-label requests
-- `confirmation` with expected-label requests
+- `small_pool` with identifier-first expected-card requests
+- `reevaluation` with identifier-first expected-card requests
+- `confirmation` with identifier-first expected-card requests
 
 Requested upstream improvement:
 
@@ -80,36 +69,14 @@ Why this matters:
   - `confirmation` for verification after a move
   - `small_pool` once the local candidate pool is known
 
-### 4. Stable failure and review reason codes would reduce parent guesswork
+### 3. Parent repos still benefit from a structured offline catalog query API
+
+This is now available upstream. The remaining parent need is adoption and
+continued stability as the parent leans harder on local identifier-first flows.
 
 Requested upstream improvement:
 
-- return stable machine-readable reason codes for failures such as:
-  - `missing_tracked_pool`
-  - `deadline_exceeded`
-  - `detection_failed`
-  - `ocr_weak`
-  - `candidate_tie_unresolved`
-  - `expected_card_contradicted`
-
-Why this matters:
-
-- the parent currently infers review reasons from a mix of policy and debug
-  payloads
-- structured reasons would make logs, portable reports, and operator recovery
-  simpler
-
-### 5. Parent repos would benefit from a structured offline catalog query API
-
-The parent currently removed several network-heavy fallbacks in favor of local
-catalog-backed sim data and explicit recognizer use. A richer query surface from
-the submodule would let the parent keep moving in that direction.
-
-Requested upstream improvement:
-
-- expose a stable Python-level query API for the offline catalog, not just CLI
-  helpers
-- make it easy for a parent repo to ask for:
+- keep the query API stable for:
   - card identity by name or IDs
   - exact printing candidates by name
   - set-code or collector-number refinement when available
@@ -120,14 +87,15 @@ Why this matters:
 - sorter-side planning and confirmation flows should become more ID-driven over
   time
 
-### 6. First-class artifact export would be valuable
+### 4. First-class artifact export should stay compatible with parent evidence tooling
 
-The parent now exports its own portable evidence bundles, but it still has to
-reconstruct them from adapter output.
+The parent now consumes engine-side metadata directly and packages its own
+portable evidence bundles around that. Keeping the engine export stable will
+reduce future duplication.
 
 Requested upstream improvement:
 
-- optional engine-side artifact export for:
+- keep engine-side artifact export stable for:
   - normalized image
   - ROI crops
   - OCR text
@@ -160,8 +128,7 @@ Recent concrete result:
   result instead of a crash
 - requested mode: `small_pool`
 - review reason cluster: `missing_tracked_pool`
-- behavior is now safely reportable from the parent side, but it would be
-  better if the engine surfaced that condition directly
+- behavior is now surfaced directly by the engine and preserved by the parent
 
 Recent mode comparison results from the parent repo:
 
@@ -191,8 +158,7 @@ into one handoff bundle with:
 
 ## Current Ask Priority
 
-1. structured failure codes
-2. first-class requested and effective mode fields
-3. stable parent-facing expected-card and candidate-pool controls
-4. offline catalog query API
-5. optional artifact export
+1. stable pipeline summary semantics
+2. stable parent-facing expected-card and candidate-pool controls
+3. stable offline catalog query API
+4. stable artifact export compatibility
