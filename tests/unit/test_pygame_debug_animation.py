@@ -59,12 +59,15 @@ def test_camera_pose_applies_calibration_offset() -> None:
 def test_pile_reference_xy_prefers_calibrated_card_center() -> None:
     ui = PygameDebugUI.__new__(PygameDebugUI)
     any_ui = ui  # type: Any
+    pile = SimpleNamespace(pile_id=SimpleNamespace(as_key=lambda: "1,0"), x_mm=200.0, y_mm=100.0)
+    any_ui.orchestrator = SimpleNamespace(
+        world=SimpleNamespace(snapshot=SimpleNamespace(piles={"1,0": pile}))
+    )
     any_ui.calibration = SimpleNamespace(
         camera_offset_x_mm=12.5,
         camera_offset_y_mm=-4.0,
-        pile_xy_mm={"1,0": (240.0, 160.0)},
+        pile_positions_mm=((240.0, 160.0),),
     )
-    pile = SimpleNamespace(pile_id=SimpleNamespace(as_key=lambda: "1,0"), x_mm=200.0, y_mm=100.0)
 
     assert ui._pile_reference_xy(pile) == (240.0, 160.0)
 
@@ -108,3 +111,71 @@ def test_pile_badge_rect_is_centered_above_card() -> None:
 
     assert badge_rect.centerx == 300
     assert badge_rect.bottom == 210
+
+
+def test_review_lines_explain_what_operator_should_check() -> None:
+    ui = PygameDebugUI.__new__(PygameDebugUI)
+
+    lines = ui._review_lines(
+        {
+            "review": {
+                "pile_number": 1,
+                "phase_label": "post-move verification",
+                "attempts": 3,
+                "recognized_name": "pooit",
+                "confidence": 0.248,
+                "action": "Check pile 1 camera view/top card, then rerun.",
+            }
+        }
+    )
+
+    assert lines[0] == "Review needed: Pile 1 post-move verification failed after 3 attempts."
+    assert lines[1] == "Saw 'pooit' at confidence 0.248."
+    assert lines[2] == "Check pile 1 camera view/top card, then rerun."
+
+
+def test_recognizer_status_lines_show_configured_and_last_scan_backends() -> None:
+    ui = PygameDebugUI.__new__(PygameDebugUI)
+    any_ui = ui  # type: Any
+    recognizer = SimpleNamespace(
+        primary=SimpleNamespace(
+            sorter_backend="fuzzy_enigma",
+            card_engine_requested_backend="moss_machine",
+            card_engine_backend_fallback=True,
+            card_engine_mode="greenfield",
+        ),
+        fallback=SimpleNamespace(sorter_backend="sim_truth"),
+    )
+    any_ui.orchestrator = SimpleNamespace(
+        recognizer=recognizer,
+        last_recognition={
+            "backend": "moss_machine",
+            "effective_mode": "greenfield",
+            "fallback_used": False,
+        },
+    )
+
+    lines = ui._recognizer_status_lines()
+
+    assert lines[0] == "Recognizer: fuzzy_enigma"
+    assert lines[1] == "Card engine: requested=moss_machine mode=greenfield fallback=on"
+    assert lines[2] == "Policy fallback: sim_truth"
+    assert lines[3] == "Last scan: backend=moss_machine mode=greenfield"
+
+
+def test_recognizer_status_lines_show_last_scan_fallback() -> None:
+    ui = PygameDebugUI.__new__(PygameDebugUI)
+    any_ui = ui  # type: Any
+    any_ui.orchestrator = SimpleNamespace(
+        recognizer=SimpleNamespace(sorter_backend="sim_truth"),
+        last_recognition={
+            "backend": "sim_truth",
+            "requested_mode": "greenfield",
+            "fallback_used": True,
+        },
+    )
+
+    lines = ui._recognizer_status_lines()
+
+    assert lines[0] == "Recognizer: sim_truth"
+    assert lines[1] == "Last scan: backend=sim_truth mode=greenfield via fallback"

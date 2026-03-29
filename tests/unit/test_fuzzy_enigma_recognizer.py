@@ -44,7 +44,7 @@ def test_fuzzy_enigma_recognizer_uses_frame_path_and_translates_result(monkeypat
                 pipeline_summary={"resolution_path": "title_only", "branches_fired": ["title_ocr"]},
                 failure_code=None,
                 review_reason=None,
-                debug={"mode": {"effective": "greenfield"}},
+                debug={"mode": {"effective": "greenfield"}, "backend": {"requested": "moss_machine", "effective": "moss_machine"}},
             )
 
     fake_modules = SimpleNamespace(
@@ -84,7 +84,7 @@ def test_fuzzy_enigma_recognizer_uses_frame_path_and_translates_result(monkeypat
     assert seen["kwargs"]["prefer_visual_small_pool"] is True
     assert result.card_name == "Opt"
     assert result.confidence == 0.88
-    assert result.backend == "fuzzy_enigma"
+    assert result.backend == "moss_machine"
     assert result.scryfall_id == "opt-scryfall-id"
     assert result.oracle_id == "opt-oracle-id"
     assert result.requested_mode == "greenfield"
@@ -94,6 +94,7 @@ def test_fuzzy_enigma_recognizer_uses_frame_path_and_translates_result(monkeypat
     assert "title_ocr" in result.mode_features
     assert "prefer_visual_small_pool" in result.mode_features
     assert result.alternatives[0]["set_code"] == "XLN"
+    assert result.debug["backend"]["effective"] == "moss_machine"
     assert result.debug["active_roi"] == "standard"
 
 
@@ -292,3 +293,56 @@ def test_fuzzy_enigma_recognizer_uses_frame_level_recognition_request(monkeypatc
     assert result.mode_flags["has_expected_card"] is True
     assert result.pipeline_summary["resolution_path"] == "title_only"
     assert "has_expected_card" in result.mode_features
+
+
+def test_fuzzy_enigma_recognizer_reports_configured_card_engine_backend(monkeypatch, tmp_path):
+    fake_config = SimpleNamespace(recognition_backend="moss_machine", recognition_backend_fallback=False)
+    fake_modules = SimpleNamespace(
+        config=SimpleNamespace(load_engine_config=lambda path=None: fake_config),
+        sortingmachine=SimpleNamespace(
+            SortingMachineRecognizer=lambda **kwargs: SimpleNamespace(recognize_top_card=lambda *args, **kwargs: None)
+        ),
+        operational_modes=SimpleNamespace(
+            expected_card_from_values=lambda **kwargs: dict(kwargs),
+        ),
+    )
+    monkeypatch.setattr(
+        "sorter.adapters.recognition.fuzzy_enigma_recognizer._load_card_engine_modules",
+        lambda project_root: fake_modules,
+    )
+    monkeypatch.setattr("sorter.adapters.recognition.fuzzy_enigma_recognizer._card_engine_ocr_available", lambda: True)
+
+    adapter = FuzzyEnigmaRecognizerAdapter(project_root=tmp_path, mode="greenfield")
+
+    assert adapter.sorter_backend == "fuzzy_enigma"
+    assert adapter.card_engine_requested_backend == "moss_machine"
+    assert adapter.card_engine_backend_fallback is False
+    assert adapter.card_engine_mode == "greenfield"
+
+
+def test_fuzzy_enigma_recognizer_can_force_card_engine_backend_override(monkeypatch, tmp_path):
+    fake_config = SimpleNamespace(recognition_backend="fuzzy_enigma", recognition_backend_fallback=True)
+    fake_modules = SimpleNamespace(
+        config=SimpleNamespace(load_engine_config=lambda path=None: fake_config),
+        sortingmachine=SimpleNamespace(
+            SortingMachineRecognizer=lambda **kwargs: SimpleNamespace(recognize_top_card=lambda *args, **kwargs: None)
+        ),
+        operational_modes=SimpleNamespace(
+            expected_card_from_values=lambda **kwargs: dict(kwargs),
+        ),
+    )
+    monkeypatch.setattr(
+        "sorter.adapters.recognition.fuzzy_enigma_recognizer._load_card_engine_modules",
+        lambda project_root: fake_modules,
+    )
+    monkeypatch.setattr("sorter.adapters.recognition.fuzzy_enigma_recognizer._card_engine_ocr_available", lambda: True)
+
+    adapter = FuzzyEnigmaRecognizerAdapter(
+        project_root=tmp_path,
+        mode="greenfield",
+        card_engine_backend="moss_machine",
+    )
+
+    assert adapter.sorter_backend == "moss_machine"
+    assert adapter.card_engine_requested_backend == "moss_machine"
+    assert fake_config.recognition_backend == "moss_machine"

@@ -25,6 +25,8 @@ def test_noisy_sim_fixture_escalates_to_review_required(tmp_path):
     result = orchestrator.run_once(calibration)
 
     assert result["status"] == "REVIEW_REQUIRED"
+    assert result["review"]["pile_number"] == 1
+    assert "Check pile 1" in result["review"]["action"]
     assert result["metrics"]["retry_count"] >= 1
     assert result["metrics"]["review_required_count"] == 1
     assert result["metrics"]["review_reason_counts"]
@@ -51,5 +53,6 @@ def test_false_empty_noisy_sim_fixture_reports_false_empty_reason(tmp_path):
     result = orchestrator.run_once(calibration)
 
     assert result["status"] == "REVIEW_REQUIRED"
+    assert result["review"]["pile_number"] == 1
     assert result["metrics"]["review_required_count"] == 1
     assert result["metrics"]["review_reason_counts"].get("recognition_false_empty", 0) >= 1

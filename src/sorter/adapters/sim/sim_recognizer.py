@@ -8,6 +8,7 @@ from sorter.ports.recognizer import RecognitionResult
 
 class SimRecognizerAdapter:
     def __init__(self, world: SimWorld, catalog: CardCatalogPort):
+        self.sorter_backend = "sim_truth"
         self.world = world
         self.catalog = catalog
 

@@ -48,7 +48,7 @@ def test_move_camera_over_pile_uses_camera_offset() -> None:
         place_z_mm=5.0,
         camera_offset_x_mm=14.0,
         camera_offset_y_mm=-6.0,
-        pile_xy_mm={pile_id.as_key(): (240.0, 160.0)},
+        pile_positions_mm=((240.0, 160.0),),
     )
 
     orchestrator._move_camera_over_pile(
@@ -98,7 +98,7 @@ def test_move_picker_over_pile_uses_calibrated_reference_without_camera_offset()
         place_z_mm=5.0,
         camera_offset_x_mm=14.0,
         camera_offset_y_mm=-6.0,
-        pile_xy_mm={pile_id.as_key(): (240.0, 160.0)},
+        pile_positions_mm=((240.0, 160.0),),
     )
 
     orchestrator._move_picker_over_pile(

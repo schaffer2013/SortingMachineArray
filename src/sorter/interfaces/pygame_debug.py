@@ -125,6 +125,8 @@ class PygameDebugUI:
 
         substate_text = self._substate_label()
         self.window.blit(self.font.render(f"Substate: {substate_text}", True, (220, 220, 220)), (520, 62))
+        for index, line in enumerate(self._recognizer_status_lines()):
+            self.window.blit(self.font.render(line, True, (200, 200, 200)), (520, 86 + (index * 22)))
 
         if self.last_result:
             run_id = self.last_result.get("run_id", "-")
@@ -133,6 +135,9 @@ class PygameDebugUI:
             self.window.blit(self.font.render(f"Moves: {seq}", True, (200, 200, 200)), (30, 100))
         if self.last_error:
             self.window.blit(self.font.render(f"Error: {self.last_error}", True, (255, 120, 120)), (30, 124))
+        elif self.last_result and self.last_result.get("status") == "REVIEW_REQUIRED":
+            for index, line in enumerate(self._review_lines(self.last_result)):
+                self.window.blit(self.font.render(line, True, (255, 210, 120)), (30, 124 + (index * 22)))
 
     def _draw_snapshot(self) -> None:
         snapshot = self.orchestrator.world.snapshot
@@ -266,19 +271,100 @@ class PygameDebugUI:
         }
         return labels.get(command_name, command_name)
 
+    def _recognizer_status_lines(self) -> list[str]:
+        recognizer = getattr(self.orchestrator, "recognizer", None)
+        configured = self._configured_recognizer_status(recognizer)
+        lines = [f"Recognizer: {configured['sorter_backend']}"]
+        if configured["card_engine_backend"] is not None:
+            engine_line = (
+                f"Card engine: requested={configured['card_engine_backend']} "
+                f"mode={configured['card_engine_mode']} "
+                f"fallback={'on' if configured['card_engine_fallback'] else 'off'}"
+            )
+            lines.append(engine_line)
+        if configured["policy_fallback_backend"] is not None:
+            lines.append(f"Policy fallback: {configured['policy_fallback_backend']}")
+
+        last_recognition = getattr(self.orchestrator, "last_recognition", None)
+        if isinstance(last_recognition, dict) and last_recognition:
+            backend = last_recognition.get("backend") or "unknown"
+            mode = last_recognition.get("effective_mode") or last_recognition.get("requested_mode") or "-"
+            suffix = " via fallback" if last_recognition.get("fallback_used") else ""
+            lines.append(f"Last scan: backend={backend} mode={mode}{suffix}")
+        else:
+            lines.append("Last scan: none yet")
+        return lines
+
+    def _configured_recognizer_status(self, recognizer) -> dict[str, object]:
+        primary = getattr(recognizer, "primary", recognizer)
+        fallback = getattr(recognizer, "fallback", None)
+        sorter_backend = getattr(primary, "sorter_backend", None)
+        if not isinstance(sorter_backend, str) or not sorter_backend:
+            sorter_backend = type(primary).__name__
+        card_engine_backend = getattr(primary, "card_engine_requested_backend", None)
+        if not isinstance(card_engine_backend, str) or not card_engine_backend:
+            card_engine_backend = None
+        card_engine_mode = getattr(primary, "card_engine_mode", None)
+        if not isinstance(card_engine_mode, str) or not card_engine_mode:
+            card_engine_mode = None
+        return {
+            "sorter_backend": sorter_backend,
+            "card_engine_backend": card_engine_backend,
+            "card_engine_mode": card_engine_mode,
+            "card_engine_fallback": bool(getattr(primary, "card_engine_backend_fallback", False)),
+            "policy_fallback_backend": getattr(fallback, "sorter_backend", None),
+        }
+
     def _end_effector_radius_px(self, layout: dict[str, float] | None = None) -> int:
         width_px = self._card_size_px(layout)[0] if layout is not None else 70
         diameter_px = width_px * (DIME_DIAMETER_MM / MAGIC_CARD_WIDTH_MM)
         return max(4, round(diameter_px / 2))
 
     def _pile_reference_xy(self, pile) -> tuple[float, float]:
-        return self.calibration.pile_xy_mm.get(pile.pile_id.as_key(), (pile.x_mm, pile.y_mm))
+        pile_slot_number = self._pile_slot_number(pile)
+        if pile_slot_number is None:
+            return (pile.x_mm, pile.y_mm)
+        index = pile_slot_number - 1
+        if index < 0 or index >= len(self.calibration.pile_positions_mm):
+            return (pile.x_mm, pile.y_mm)
+        return self.calibration.pile_positions_mm[index]
 
     def _pile_display_numbers(self, piles) -> dict[str, int]:
         return {
             pile.pile_id.as_key(): index + 1
             for index, pile in enumerate(piles)
         }
+
+    def _pile_slot_number(self, target_pile) -> int | None:
+        snapshot = getattr(self.orchestrator.world, "snapshot", None)
+        if snapshot is None:
+            return None
+        ordered_piles = sorted(
+            snapshot.piles.values(),
+            key=lambda pile: (pile.y_mm, pile.x_mm, pile.pile_id.as_key()),
+        )
+        for index, pile in enumerate(ordered_piles, start=1):
+            if pile.pile_id.as_key() == target_pile.pile_id.as_key():
+                return index
+        return None
+
+    def _review_lines(self, result: dict) -> list[str]:
+        review = result.get("review")
+        if not isinstance(review, dict):
+            return ["Review required before continuing."]
+        pile_number = review.get("pile_number")
+        phase_label = review.get("phase_label", "recognition")
+        attempts = review.get("attempts", "?")
+        recognized_name = review.get("recognized_name", "(unknown)")
+        confidence = review.get("confidence")
+        action = review.get("action", "Check the camera view/top card, then rerun.")
+        pile_text = f"Pile {pile_number}" if pile_number is not None else "One pile"
+        confidence_text = f"{float(confidence):.3f}" if isinstance(confidence, (int, float)) else "?"
+        return [
+            f"Review needed: {pile_text} {phase_label} failed after {attempts} attempts.",
+            f"Saw {recognized_name!r} at confidence {confidence_text}.",
+            str(action),
+        ]
 
     def _board_layout(self, board_rect: pygame.Rect) -> dict[str, float]:
         coords = [self._pile_reference_xy(pile) for pile in self.orchestrator.world.snapshot.piles.values()]

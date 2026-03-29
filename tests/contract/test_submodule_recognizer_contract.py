@@ -23,8 +23,6 @@ def _import_vendored_sortingmachine(monkeypatch):
             sys.modules.pop(module_name)
 
     return importlib.import_module("card_engine.adapters.sortingmachine")
-
-
 def test_parent_can_call_vendored_submodule_recognizer(monkeypatch):
     sortingmachine = _import_vendored_sortingmachine(monkeypatch)
     seen: dict[str, object] = {}
@@ -92,3 +90,68 @@ def test_parent_can_call_vendored_submodule_recognizer(monkeypatch):
     parent_result = ParentRecognitionResult(card_name=output.card_name, confidence=output.confidence)
     assert parent_result.card_name == "Opt"
     assert parent_result.confidence == 0.97
+
+
+def test_vendored_submodule_can_route_to_moss_backend(monkeypatch, tmp_path):
+    sortingmachine = _import_vendored_sortingmachine(monkeypatch)
+    config_module = importlib.import_module("card_engine.config")
+    api_module = importlib.import_module("card_engine.api")
+    session_module = importlib.import_module("card_engine.session")
+
+    image_path = tmp_path / "frame-1.jpg"
+    image_path.write_bytes(b"fixture")
+    seen: dict[str, object] = {}
+
+    def fake_run_moss_backend(image, *, mode=None, progress_callback=None, config=None):
+        seen["image"] = image
+        seen["mode"] = mode
+        seen["config"] = config
+        return SimpleNamespace(
+            bbox=None,
+            best_name="Opt",
+            confidence=0.98,
+            ocr_lines=[],
+            top_k_candidates=[
+                SimpleNamespace(
+                    name="Opt",
+                    score=0.98,
+                    scryfall_id=None,
+                    oracle_id=None,
+                    set_code="INV",
+                    collector_number="64",
+                )
+            ],
+            active_roi="moss_machine",
+            tried_rois=["moss_machine"],
+            requested_mode="greenfield",
+            effective_mode="greenfield",
+            mode_flags={},
+            pipeline_summary={"resolution_path": "moss_machine"},
+            failure_code=None,
+            review_reason=None,
+            debug={"backend": {"requested": "moss_machine", "effective": "moss_machine"}},
+        )
+
+    monkeypatch.setattr(api_module, "run_moss_backend", fake_run_moss_backend)
+    monkeypatch.setattr(
+        api_module,
+        "_recognize_card_with_fuzzy_enigma",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("fuzzy backend should not be used")),
+    )
+    monkeypatch.setattr(session_module, "ensure_catalog_ready", lambda db_path: None)
+    monkeypatch.setattr(
+        session_module,
+        "LocalCatalogIndex",
+        SimpleNamespace(from_sqlite=lambda db_path: (_ for _ in ()).throw(AssertionError("catalog should not load for moss"))),
+    )
+
+    config = config_module.EngineConfig(recognition_backend="moss_machine")
+    recognizer = sortingmachine.SortingMachineRecognizer(config=config)
+
+    output = recognizer.recognize_top_card(str(image_path), mode="greenfield", detailed=True)
+
+    assert output.card_name == "Opt"
+    assert output.active_roi == "moss_machine"
+    assert seen["image"] == str(image_path)
+    assert seen["mode"] == "greenfield"
+    assert seen["config"] is config

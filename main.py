@@ -4,7 +4,7 @@ from sorter.bootstrap import build_sim_orchestrator
 from sorter.config.calibration import CalibrationProfile
 from sorter.config.settings import AppSettings
 from sorter.interfaces.logging_setup import configure_app_logging
-from sorter.interfaces.pygame_debug import PygameDebugUI
+from sorter.interfaces.tkinter_debug import TkDebugUI
 
 
 def main() -> int:
@@ -13,7 +13,7 @@ def main() -> int:
     settings = AppSettings.from_env()
     orchestrator = build_sim_orchestrator(settings)
     calibration = CalibrationProfile.from_file(settings.calibration_path)
-    ui = PygameDebugUI(orchestrator, calibration, slow_ms=settings.slow_ms)
+    ui = TkDebugUI(orchestrator, calibration, slow_ms=settings.slow_ms)
     ui.run()
     return 0
 

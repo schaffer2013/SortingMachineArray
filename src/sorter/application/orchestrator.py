@@ -53,6 +53,7 @@ class Orchestrator:
     recognition_min_confidence: float = 0.6
     startup_scan_max_retries: int = 1
     verification_max_retries: int = 2
+    last_recognition: dict[str, Any] | None = None
 
     def _run_id(self) -> str:
         return f"run-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:8]}"
@@ -65,13 +66,57 @@ class Orchestrator:
         snapshot.run_state.active_command = active_command
 
     def _pile_reference_xy(self, pile_id, calibration: CalibrationProfile) -> tuple[float, float]:
-        calibrated_xy = calibration.pile_xy_mm.get(pile_id.as_key())
+        pile_slot_number = self._pile_slot_number(pile_id)
+        calibrated_xy = self._calibrated_pile_xy(calibration, pile_slot_number)
         if calibrated_xy is not None:
             return calibrated_xy
         pile = self.world.snapshot.get_pile(pile_id)
         if pile is not None:
             return (pile.x_mm, pile.y_mm)
         return self.world.coords.get(pile_id.as_key(), (0.0, 0.0))
+
+    def _pile_slot_number(self, pile_id) -> int | None:
+        ordered_piles = sorted(
+            self.world.snapshot.piles.values(),
+            key=lambda pile: (pile.y_mm, pile.x_mm, pile.pile_id.as_key()),
+        )
+        for index, pile in enumerate(ordered_piles, start=1):
+            if pile.pile_id == pile_id:
+                return index
+        return None
+
+    def _calibrated_pile_xy(self, calibration: CalibrationProfile, pile_slot_number: int | None) -> tuple[float, float] | None:
+        if pile_slot_number is None:
+            return None
+        index = pile_slot_number - 1
+        if index < 0 or index >= len(calibration.pile_positions_mm):
+            return None
+        return calibration.pile_positions_mm[index]
+
+    def _review_payload(
+        self,
+        *,
+        pile_id,
+        phase: str,
+        attempts: int,
+        result,
+        reason: str,
+    ) -> dict[str, object]:
+        pile_number = self._pile_slot_number(pile_id)
+        phase_label = "startup discovery" if phase == "startup_scan" else "post-move verification"
+        card_name = result.card_name or "(no confident card)"
+        return {
+            "phase": phase,
+            "phase_label": phase_label,
+            "pile_number": pile_number,
+            "attempts": attempts,
+            "recognized_name": card_name,
+            "confidence": result.confidence,
+            "reason": reason,
+            "action": f"Check pile {pile_number} camera view/top card, then rerun."
+            if pile_number is not None
+            else "Check the camera view/top card, then rerun.",
+        }
 
     def _camera_target_xy(self, pile_id, calibration: CalibrationProfile) -> tuple[float, float]:
         pile_x_mm, pile_y_mm = self._pile_reference_xy(pile_id, calibration)
@@ -143,6 +188,16 @@ class Orchestrator:
             frame = self.camera.capture_top_card(pile_id)
             self._set_run_substate(self.world.snapshot, phase=phase_name, active_command="RecognizeTopCard")
             result = self.recognizer.recognize_top_card(frame)
+            self.last_recognition = {
+                "backend": result.backend,
+                "requested_mode": result.requested_mode,
+                "effective_mode": result.effective_mode,
+                "fallback_used": result.fallback_used,
+                "card_name": result.card_name,
+                "confidence": result.confidence,
+                "failure_code": result.failure_code,
+                "review_reason": result.review_reason,
+            }
             self.world.snapshot.run_state.metrics.scan_count += 1
             increment_counter(
                 self.world.snapshot.run_state.metrics.confidence_band_counts,
@@ -237,6 +292,7 @@ class Orchestrator:
                 "recognizer_backend": getattr(self.recognizer, "__class__", type(self.recognizer)).__name__,
             },
         )
+        self.last_recognition = None
         self._set_run_substate(snapshot, phase="DISCOVERING", active_command="StartupScan")
         self.lights.set_status("running")
         seq = 0
@@ -386,6 +442,13 @@ class Orchestrator:
                     "status": "REVIEW_REQUIRED",
                     "seq": seq,
                     "metrics": self._metrics_payload(snapshot),
+                    "review": self._review_payload(
+                        pile_id=next_move.from_pile,
+                        phase="verification",
+                        attempts=verification.attempts,
+                        result=verification_result,
+                        reason=verification.reason,
+                    ),
                 }
 
         self._set_run_substate(snapshot, phase="COMPLETED", active_command=None)
@@ -499,6 +562,13 @@ class Orchestrator:
                     "status": "REVIEW_REQUIRED",
                     "seq": 0,
                     "metrics": self._metrics_payload(snapshot),
+                    "review": self._review_payload(
+                        pile_id=pile.pile_id,
+                        phase="startup_scan",
+                        attempts=observation.attempts,
+                        result=result,
+                        reason=observation.reason,
+                    ),
                 }
 
         logger.info("startup discovery scan completed: run_id=%s", run_id)

@@ -18,7 +18,7 @@ def test_calibration_profile_reads_optional_probe_fields(tmp_path: Path) -> None
                 "probe_max_contact_z_mm": 7.5,
                 "camera_offset_x_mm": 0.0,
                 "camera_offset_y_mm": 0.0,
-                "pile_xy_mm": {"0,0": [100.0, 200.0]},
+                "pile_positions_mm": [[100.0, 200.0]],
             }
         ),
         encoding="utf-8",
@@ -39,7 +39,7 @@ def test_resolved_place_z_uses_probe_height_when_enabled() -> None:
         place_z_mm=3.0,
         camera_offset_x_mm=0.0,
         camera_offset_y_mm=0.0,
-        pile_xy_mm={},
+        pile_positions_mm=(),
         probe_enabled=True,
         probe_place_clearance_mm=1.25,
     )
@@ -54,7 +54,7 @@ def test_resolved_place_z_falls_back_to_fixed_place_height() -> None:
         place_z_mm=3.0,
         camera_offset_x_mm=0.0,
         camera_offset_y_mm=0.0,
-        pile_xy_mm={},
+        pile_positions_mm=(),
     )
 
     assert profile.resolved_place_z_mm(probed_top_z_mm=6.5) == 3.0

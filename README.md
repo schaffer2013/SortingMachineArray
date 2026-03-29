@@ -39,7 +39,8 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 
 ## Recognition backend toggle
 
-- Default sim backend: `SORTER_RECOGNIZER_BACKEND=fuzzy_enigma`
+- Default recognizer backend: `SORTER_RECOGNIZER_BACKEND=moss_machine`
+- Native fuzzy-enigma backend: `SORTER_RECOGNIZER_BACKEND=fuzzy_enigma`
 - Sim-truth debug backend: `SORTER_RECOGNIZER_BACKEND=sim_truth`
 - Parent-owned live card-engine config: `SORTER_CARD_ENGINE_CONFIG=config/card_engine/engine.json`
 - Optional card-engine mode: `SORTER_CARD_ENGINE_MODE=greenfield`
@@ -50,7 +51,7 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 - Keep external image fetch opt-in: `SORTER_SIM_IMAGE_AUTO_FETCH=0`
 - Keep external ranking enrichment opt-in: `SORTER_ALLOW_EXTERNAL_CARD_ENRICHMENT=0`
 
-When `fuzzy_enigma` is enabled, the sim camera now passes the rendered top-card image path through the parent `Frame` so the real recognizer can operate on the same simulated images the sorter sees.
+When `moss_machine` or `fuzzy_enigma` is enabled, the sim camera now passes the rendered top-card image path through the parent `Frame` so the real recognizer can operate on the same simulated images the sorter sees.
 Startup discovery uses the same recognizer backend as the rest of the run, so the default startup path now exercises the vendored submodule too.
 The parent repo now also owns a benchmark-specific card-engine config at `config/card_engine/benchmark.engine.json` so replay and benchmark runs can use a more realistic measurement budget without changing the live sorter config.
 The sim camera no longer mutates pile observation state on capture by itself; observation now advances when the application processes recognizer results, which makes retries and `REVIEW_REQUIRED` escalation more honest.

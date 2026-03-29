@@ -64,6 +64,24 @@ def test_build_recognizer_selects_fuzzy_enigma_backend(monkeypatch, tmp_path):
     assert seen["mode"] == "greenfield"
     assert seen["auto_track_results"] is True
     assert seen["prefer_visual_small_pool"] is True
+    assert seen["card_engine_backend"] is None
+
+
+def test_build_recognizer_selects_moss_machine_backend(monkeypatch, tmp_path):
+    seen: dict[str, object] = {}
+
+    class FakeRecognizer:
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+
+    monkeypatch.setattr("sorter.bootstrap.FuzzyEnigmaRecognizerAdapter", FakeRecognizer)
+
+    recognizer = _build_recognizer(_settings(tmp_path, recognizer_backend="moss_machine"), world="world", catalog="catalog")
+
+    assert isinstance(recognizer, PolicyRecognizerAdapter)
+    assert isinstance(recognizer.primary, FakeRecognizer)
+    assert recognizer.fallback is None
+    assert seen["card_engine_backend"] == "moss_machine"
 
 
 def test_build_recognizer_can_enable_sim_truth_fallback(monkeypatch, tmp_path):

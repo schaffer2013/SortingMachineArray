@@ -113,7 +113,7 @@ def _build_recognizer(settings: AppSettings, world: SimWorld, catalog: FileCardC
         if recognition_faults:
             return SimFaultingRecognizerAdapter(recognizer, recognition_faults)
         return recognizer
-    if backend == "fuzzy_enigma":
+    if backend in {"fuzzy_enigma", "moss_machine"}:
         root = settings.project_root or settings.scenario_fixture.parents[2]
         primary = FuzzyEnigmaRecognizerAdapter(
             project_root=root,
@@ -121,6 +121,7 @@ def _build_recognizer(settings: AppSettings, world: SimWorld, catalog: FileCardC
             mode=settings.card_engine_mode,
             auto_track_results=settings.card_engine_auto_track_results,
             prefer_visual_small_pool=settings.card_engine_prefer_visual_small_pool,
+            card_engine_backend="moss_machine" if backend == "moss_machine" else None,
         )
         fallback = SimRecognizerAdapter(world, catalog) if settings.fuzzy_enigma_sim_truth_fallback else None
         recognizer = PolicyRecognizerAdapter(

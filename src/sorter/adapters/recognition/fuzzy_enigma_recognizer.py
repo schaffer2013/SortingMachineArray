@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import importlib
 import importlib.util
+import os
 from pathlib import Path
 import sys
 from types import ModuleType
@@ -99,6 +100,7 @@ class FuzzyEnigmaRecognizerAdapter:
         mode: str = "greenfield",
         auto_track_results: bool = False,
         prefer_visual_small_pool: bool = False,
+        card_engine_backend: str | None = None,
     ) -> None:
         if not _card_engine_ocr_available():
             raise RuntimeError(
@@ -110,6 +112,12 @@ class FuzzyEnigmaRecognizerAdapter:
             config = modules.config.load_engine_config(str(config_path))
         else:
             config = modules.config.load_engine_config()
+        if card_engine_backend is not None:
+            config.recognition_backend = card_engine_backend
+        self.sorter_backend = card_engine_backend or "fuzzy_enigma"
+        self.card_engine_requested_backend = _configured_card_engine_backend(config)
+        self.card_engine_backend_fallback = bool(getattr(config, "recognition_backend_fallback", True))
+        self.card_engine_mode = mode
         self._mode = mode
         self._prefer_visual_small_pool = prefer_visual_small_pool
         self._expected_card_from_values = modules.operational_modes.expected_card_from_values
@@ -124,7 +132,7 @@ class FuzzyEnigmaRecognizerAdapter:
                 return RecognitionResult(
                     card_name=None,
                     confidence=1.0,
-                    backend="fuzzy_enigma",
+                    backend=self.card_engine_requested_backend,
                     requested_mode=self._mode,
                     effective_mode=self._mode,
                     mode_features=_mode_features(mode_flags=None, pipeline_summary=None, prefer_visual_small_pool=False),
@@ -139,6 +147,20 @@ class FuzzyEnigmaRecognizerAdapter:
             request = {}
         requested_mode = str(request.get("mode") or self._mode)
         prefer_visual_small_pool = bool(request.get("prefer_visual_small_pool", self._prefer_visual_small_pool))
+        requested_backend = request.get("backend")
+        if isinstance(requested_backend, str):
+            requested_backend = requested_backend.strip().lower()
+            if requested_backend in {"moss", "moss-machine"}:
+                requested_backend = "moss_machine"
+        else:
+            requested_backend = None
+
+        recognizer_config = getattr(self._recognizer, "config", None)
+        if requested_backend and recognizer_config is not None and hasattr(recognizer_config, "recognition_backend"):
+            setattr(recognizer_config, "recognition_backend", requested_backend)
+            self.sorter_backend = requested_backend
+            self.card_engine_requested_backend = requested_backend
+
         use_tracked_pool = request.get("use_tracked_pool")
         track_result = request.get("track_result")
         expected_card_payload = request.get("expected_card")
@@ -170,7 +192,7 @@ class FuzzyEnigmaRecognizerAdapter:
             return RecognitionResult(
                 card_name=None,
                 confidence=0.0,
-                backend="fuzzy_enigma",
+                backend=self.card_engine_requested_backend,
                 requested_mode=requested_mode,
                 effective_mode=requested_mode,
                 failure_code=error_code,
@@ -206,7 +228,7 @@ class FuzzyEnigmaRecognizerAdapter:
         return RecognitionResult(
             card_name=output.card_name,
             confidence=float(output.confidence),
-            backend="fuzzy_enigma",
+            backend=_effective_card_engine_backend(raw_debug, default=self.card_engine_requested_backend),
             scryfall_id=output.scryfall_id,
             oracle_id=output.oracle_id,
             requested_mode=str(requested_mode) if requested_mode is not None else self._mode,
@@ -223,6 +245,7 @@ class FuzzyEnigmaRecognizerAdapter:
             needs_review=output.review_reason is not None,
             alternatives=alternatives,
             debug={
+                "backend": dict(raw_debug.get("backend", {})) if isinstance(raw_debug.get("backend"), dict) else {},
                 "active_roi": output.active_roi,
                 "tried_rois": list(output.tried_rois),
                 "bbox": output.bbox,
@@ -240,3 +263,25 @@ def _engine_error_code(message: str) -> str | None:
     if "No catalog records found for expected card:" in message:
         return "expected_card_not_in_catalog"
     return None
+
+
+def _configured_card_engine_backend(config: Any) -> str:
+    configured = os.getenv("CARD_ENGINE_BACKEND") or getattr(config, "recognition_backend", None) or "fuzzy_enigma"
+    normalized = str(configured).strip().lower()
+    if normalized in {"moss", "moss_machine", "moss-machine"}:
+        return "moss_machine"
+    return "fuzzy_enigma"
+
+
+def _effective_card_engine_backend(raw_debug: dict[str, Any], *, default: str) -> str:
+    backend_debug = raw_debug.get("backend")
+    if isinstance(backend_debug, dict):
+        effective = backend_debug.get("effective")
+        if isinstance(effective, str) and effective.strip():
+            normalized = effective.strip().lower()
+            if normalized in {"moss", "moss_machine", "moss-machine"}:
+                return "moss_machine"
+            if normalized in {"ours", "default", "native"}:
+                return "fuzzy_enigma"
+            return normalized
+    return default

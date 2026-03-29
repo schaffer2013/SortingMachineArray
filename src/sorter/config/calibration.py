@@ -12,7 +12,7 @@ class CalibrationProfile:
     place_z_mm: float
     camera_offset_x_mm: float
     camera_offset_y_mm: float
-    pile_xy_mm: dict[str, tuple[float, float]]
+    pile_positions_mm: tuple[tuple[float, float], ...]
     probe_enabled: bool = False
     probe_retract_z_mm: float = 2.0
     probe_place_clearance_mm: float = 1.0
@@ -26,10 +26,19 @@ class CalibrationProfile:
     @staticmethod
     def from_file(path: Path) -> "CalibrationProfile":
         data = load_json(path)
-        pile_map = {
-            key: (float(value[0]), float(value[1]))
-            for key, value in data.get("pile_xy_mm", {}).items()
-        }
+        raw_positions = data.get("pile_positions_mm", data.get("pile_xy_mm", {}))
+        if isinstance(raw_positions, list):
+            pile_positions = tuple(
+                (float(value[0]), float(value[1]))
+                for value in raw_positions
+            )
+        elif isinstance(raw_positions, dict):
+            ordered_values = []
+            for _, value in raw_positions.items():
+                ordered_values.append((float(value[0]), float(value[1])))
+            pile_positions = tuple(ordered_values)
+        else:
+            pile_positions = ()
         return CalibrationProfile(
             safe_z_mm=float(data["safe_z_mm"]),
             pick_z_mm=float(data["pick_z_mm"]),
@@ -44,5 +53,5 @@ class CalibrationProfile:
             ),
             camera_offset_x_mm=float(data.get("camera_offset_x_mm", 0.0)),
             camera_offset_y_mm=float(data.get("camera_offset_y_mm", 0.0)),
-            pile_xy_mm=pile_map,
+            pile_positions_mm=pile_positions,
         )
