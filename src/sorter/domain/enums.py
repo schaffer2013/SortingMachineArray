@@ -17,18 +17,7 @@ class PileObservationState(str, Enum):
     EMPTY_SUSPECTED = "EMPTY_SUSPECTED"
     EMPTY_CONFIRMED = "EMPTY_CONFIRMED"
 
-
-class RunPhase(str, Enum):
-    IDLE = "IDLE"
-    DISCOVERING = "DISCOVERING"
-    PLANNING = "PLANNING"
-    EXECUTING = "EXECUTING"
-    VERIFYING = "VERIFYING"
-    FAULTED = "FAULTED"
-    COMPLETED = "COMPLETED"
-
-
-class LegacyStep(Enum):
+class WorkflowStep(Enum):
     MOVE_FROM_FEED = 0
     INITIAL_COLLECTION = 1
     SCATTER = 2

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import logging
 
-from sorter.domain.enums import LegacyStep, PileRole
+from sorter.domain.enums import PileRole, WorkflowStep
 from sorter.domain.models import MachineSnapshot, PileId
 
 
@@ -16,16 +16,16 @@ class NextMove:
     to_pile: PileId
 
 
-class LegacyWorkflowState:
+class WorkflowState:
     def __init__(self, snapshot: MachineSnapshot):
         self.snapshot = snapshot
-        self.step = LegacyStep.MOVE_FROM_FEED
+        self.step = WorkflowStep.MOVE_FROM_FEED
         self.priority_feeder_collection_a = None
         self.priority_feeder_collection_b = None
         self.priority_sorting = None
         logger.debug("workflow initialized: step=%s piles=%s", self.step.name, len(snapshot.piles))
 
-    def _set_step(self, new_step: LegacyStep, reason: str) -> None:
+    def _set_step(self, new_step: WorkflowStep, reason: str) -> None:
         if self.step == new_step:
             return
         old_step = self.step
@@ -156,7 +156,7 @@ class LegacyWorkflowState:
             raise RuntimeError("Workflow scatter planning requested before pile priorities were set")
         feeder = [pile for pile in self._piles_by_role(PileRole.FEEDER) if not pile.is_empty()]
         if not feeder:
-            self._set_step(LegacyStep.GATHER, "all feeder piles empty during scatter")
+            self._set_step(WorkflowStep.GATHER, "all feeder piles empty during scatter")
             return None
         from_pile = min(feeder, key=lambda pile: self._top_rank(pile, rank_lookup))
         from_rank = self._top_rank(from_pile, rank_lookup)
@@ -178,7 +178,7 @@ class LegacyWorkflowState:
                 target.pile_id.as_key(),
             )
             return NextMove(from_pile=from_pile.pile_id, to_pile=target.pile_id)
-        self._set_step(LegacyStep.GATHER, "no sorting target available during scatter")
+        self._set_step(WorkflowStep.GATHER, "no sorting target available during scatter")
         logger.debug("no SCATTER move available")
         return None
 
@@ -187,13 +187,13 @@ class LegacyWorkflowState:
             raise RuntimeError("Workflow gather planning requested before pile priorities were set")
         sorting_non_empty = [pile for pile in self._piles_by_role(PileRole.SORTING) if not pile.is_empty()]
         if self._all_sorted(self.snapshot.piles.values(), rank_lookup):
-            self._set_step(LegacyStep.FINISH, "collection piles fully sorted")
+            self._set_step(WorkflowStep.FINISH, "collection piles fully sorted")
             return None
         if not sorting_non_empty:
             feed_empty = all(pile.is_empty() for pile in self._piles_by_role(PileRole.FEEDER))
             if feed_empty:
                 self._swap_collection_and_feeder_roles()
-            self._set_step(LegacyStep.SCATTER, "all sorting piles empty during gather")
+            self._set_step(WorkflowStep.SCATTER, "all sorting piles empty during gather")
             return None
         from_pile = max(sorting_non_empty, key=lambda pile: self._top_rank(pile, rank_lookup))
         # TODO: If we have multiple collection piles, we may want to swap the priority of them to better riffle sort them.
@@ -208,7 +208,7 @@ class LegacyWorkflowState:
             None,
         )
         if to_pile is None:
-            self._set_step(LegacyStep.FINISH, "no collection destination available")
+            self._set_step(WorkflowStep.FINISH, "no collection destination available")
             raise RuntimeError("no collection destination available during gather")
         logger.debug(
             "planned GATHER move: from=%s to=%s",
@@ -254,31 +254,31 @@ class LegacyWorkflowState:
         return True
 
     def plan_next(self, rank_lookup: dict[str, int]) -> NextMove | None:
-        if self.step == LegacyStep.MOVE_FROM_FEED:
+        if self.step == WorkflowStep.MOVE_FROM_FEED:
             return self._find_move_from_feed()
-        if self.step == LegacyStep.INITIAL_COLLECTION:
+        if self.step == WorkflowStep.INITIAL_COLLECTION:
             return self._find_initial_collection()
-        if self.step == LegacyStep.SCATTER:
+        if self.step == WorkflowStep.SCATTER:
             return self._find_scatter(rank_lookup)
-        if self.step == LegacyStep.GATHER:
+        if self.step == WorkflowStep.GATHER:
             return self._find_gather(rank_lookup)
         return None
 
     def update_step(self):
-        if self.step == LegacyStep.MOVE_FROM_FEED:
+        if self.step == WorkflowStep.MOVE_FROM_FEED:
             feeders = self._piles_by_role(PileRole.FEEDER)
             if feeders and all(pile.is_empty_confirmed() for pile in feeders):
-                self._set_step(LegacyStep.INITIAL_COLLECTION, "all feeder piles discovered")
-        elif self.step == LegacyStep.INITIAL_COLLECTION:
+                self._set_step(WorkflowStep.INITIAL_COLLECTION, "all feeder piles discovered")
+        elif self.step == WorkflowStep.INITIAL_COLLECTION:
             sorting = self._piles_by_role(PileRole.SORTING)
             collection = self._piles_by_role(PileRole.COLLECTION)
             if self._all_empty(sorting) and self._all_empty(collection):
                 self._set_pile_priorities()
-                self._set_step(LegacyStep.SCATTER, "sorting and collection piles empty")
-        elif self.step == LegacyStep.SCATTER:
+                self._set_step(WorkflowStep.SCATTER, "sorting and collection piles empty")
+        elif self.step == WorkflowStep.SCATTER:
             if not self._piles_by_role(PileRole.FEEDER):
-                self._set_step(LegacyStep.GATHER, "no feeder piles configured")
-        elif self.step == LegacyStep.GATHER:
+                self._set_step(WorkflowStep.GATHER, "no feeder piles configured")
+        elif self.step == WorkflowStep.GATHER:
             sorting = self._piles_by_role(PileRole.SORTING)
             if self._all_empty(sorting):
-                self._set_step(LegacyStep.FINISH, "sorting piles emptied")
+                self._set_step(WorkflowStep.FINISH, "sorting piles emptied")

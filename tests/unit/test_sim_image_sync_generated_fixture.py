@@ -32,8 +32,6 @@ def test_sync_extracts_cards_from_generated_fixture(tmp_path: Path) -> None:
         fixture_path=fixture_path,
         image_dir=tmp_path / "SimulatedCardImages",
         log_path=tmp_path / "logs" / "simulated_cards.log",
-        pile_manager_path=None,
-        image_piles_path=None,
         sim_card_list_path=None,
         auto_fetch=False,
     )
@@ -72,8 +70,6 @@ def test_sync_uses_set_specific_and_default_paths(tmp_path: Path) -> None:
         fixture_path=fixture_path,
         image_dir=image_dir,
         log_path=tmp_path / "logs" / "simulated_cards.log",
-        pile_manager_path=None,
-        image_piles_path=None,
         sim_card_list_path=None,
         auto_fetch=False,
     )

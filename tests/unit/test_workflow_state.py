@@ -1,5 +1,5 @@
-from sorter.domain.enums import PileRole, LegacyStep
-from sorter.domain.machine_state import LegacyWorkflowState
+from sorter.domain.enums import PileRole, WorkflowStep
+from sorter.domain.machine_state import WorkflowState
 from sorter.domain.models import MachineSnapshot, PileId, PileState
 
 
@@ -14,7 +14,7 @@ def test_swap_collection_and_feeder_roles_only_swaps_target_roles():
             sorting.pile_id.as_key(): sorting,
         }
     )
-    workflow = LegacyWorkflowState(snapshot)
+    workflow = WorkflowState(snapshot)
 
     workflow._swap_collection_and_feeder_roles()
 
@@ -83,7 +83,7 @@ def test_set_pile_priorities_orders_each_role_group_by_distance_heuristic():
             sorting_second.pile_id.as_key(): sorting_second,
         }
     )
-    workflow = LegacyWorkflowState(snapshot)
+    workflow = WorkflowState(snapshot)
 
     workflow._set_pile_priorities()
 
@@ -105,7 +105,7 @@ def test_move_from_feed_selects_expected_piles():
     feeder = PileState(pile_id=PileId(0, 0), role=PileRole.FEEDER, capacity=10, card_stack=["a#1"], discovered=False)
     sorting = PileState(pile_id=PileId(1, 0), role=PileRole.SORTING, capacity=10, card_stack=[], discovered=True)
     snapshot = MachineSnapshot(piles={feeder.pile_id.as_key(): feeder, sorting.pile_id.as_key(): sorting})
-    workflow = LegacyWorkflowState(snapshot)
+    workflow = WorkflowState(snapshot)
 
     move = workflow.plan_next(rank_lookup={"a#1": 1})
     assert move is not None
@@ -117,7 +117,7 @@ def test_move_from_feed_waits_when_only_destination_is_unknown():
     feeder = PileState(pile_id=PileId(0, 0), role=PileRole.FEEDER, capacity=10, card_stack=["a#1"], discovered=False)
     sorting = PileState(pile_id=PileId(1, 0), role=PileRole.SORTING, capacity=10, card_stack=[], discovered=False)
     snapshot = MachineSnapshot(piles={feeder.pile_id.as_key(): feeder, sorting.pile_id.as_key(): sorting})
-    workflow = LegacyWorkflowState(snapshot)
+    workflow = WorkflowState(snapshot)
 
     move = workflow.plan_next(rank_lookup={"a#1": 1})
 
@@ -129,7 +129,7 @@ def test_move_from_feed_waits_when_destination_count_is_unknown():
     sorting = PileState(pile_id=PileId(1, 0), role=PileRole.SORTING, capacity=10, card_stack=["seen-top"], discovered=False)
     sorting.mark_top_card_seen("Seen Top", source="scan", count_known=False)
     snapshot = MachineSnapshot(piles={feeder.pile_id.as_key(): feeder, sorting.pile_id.as_key(): sorting})
-    workflow = LegacyWorkflowState(snapshot)
+    workflow = WorkflowState(snapshot)
 
     move = workflow.plan_next(rank_lookup={"a#1": 1, "seen-top": 2})
 
@@ -140,11 +140,11 @@ def test_step_transitions_to_initial_collection_when_feeders_discovered():
     feeder = PileState(pile_id=PileId(0, 0), role=PileRole.FEEDER, capacity=10, card_stack=["a#1"], discovered=True)
     sorting = PileState(pile_id=PileId(1, 0), role=PileRole.SORTING, capacity=10, card_stack=[], discovered=True)
     snapshot = MachineSnapshot(piles={feeder.pile_id.as_key(): feeder, sorting.pile_id.as_key(): sorting})
-    workflow = LegacyWorkflowState(snapshot)
+    workflow = WorkflowState(snapshot)
 
     feeder.mark_empty_confirmed(source="test")
     workflow.update_step()
-    assert workflow.step == LegacyStep.INITIAL_COLLECTION
+    assert workflow.step == WorkflowStep.INITIAL_COLLECTION
 
 
 def test_step_does_not_transition_to_initial_collection_while_any_feeder_is_unknown():
@@ -158,12 +158,12 @@ def test_step_does_not_transition_to_initial_collection_while_any_feeder_is_unkn
             sorting.pile_id.as_key(): sorting,
         }
     )
-    workflow = LegacyWorkflowState(snapshot)
+    workflow = WorkflowState(snapshot)
 
     feeder_known_empty.mark_empty_confirmed(source="test")
     workflow.update_step()
 
-    assert workflow.step == LegacyStep.MOVE_FROM_FEED
+    assert workflow.step == WorkflowStep.MOVE_FROM_FEED
 
 
 def test_initial_collection_allows_returning_multiple_cards_to_known_feeder():
@@ -187,8 +187,8 @@ def test_initial_collection_allows_returning_multiple_cards_to_known_feeder():
             collection.pile_id.as_key(): collection,
         }
     )
-    workflow = LegacyWorkflowState(snapshot)
-    workflow.step = LegacyStep.INITIAL_COLLECTION
+    workflow = WorkflowState(snapshot)
+    workflow.step = WorkflowStep.INITIAL_COLLECTION
 
     move = workflow.plan_next(rank_lookup={"top": 1})
 
@@ -218,8 +218,8 @@ def test_initial_collection_keeps_using_feeder_after_first_returned_card_updates
             collection.pile_id.as_key(): collection,
         }
     )
-    workflow = LegacyWorkflowState(snapshot)
-    workflow.step = LegacyStep.INITIAL_COLLECTION
+    workflow = WorkflowState(snapshot)
+    workflow.step = WorkflowStep.INITIAL_COLLECTION
 
     feeder.mark_empty_confirmed(source="verification")
     first_move = workflow.plan_next(rank_lookup={"second": 1})
@@ -290,15 +290,15 @@ def test_rank_lookup_drives_scatter_and_gather_top_of_pile_choices():
         "sb-top": 8,
     }
 
-    workflow = LegacyWorkflowState(snapshot)
+    workflow = WorkflowState(snapshot)
     workflow._set_pile_priorities()
-    workflow.step = LegacyStep.SCATTER
+    workflow.step = WorkflowStep.SCATTER
     scatter_move = workflow.plan_next(rank_lookup)
     assert scatter_move is not None
     assert scatter_move.from_pile == feeder_b.pile_id
     assert scatter_move.to_pile == sorting_a.pile_id
 
-    workflow.step = LegacyStep.GATHER
+    workflow.step = WorkflowStep.GATHER
     gather_move = workflow.plan_next(rank_lookup)
     assert gather_move is not None
     assert gather_move.from_pile == sorting_b.pile_id
@@ -335,9 +335,9 @@ def test_scatter_ignores_sorting_destinations_with_unknown_count():
             sorting_known.pile_id.as_key(): sorting_known,
         }
     )
-    workflow = LegacyWorkflowState(snapshot)
+    workflow = WorkflowState(snapshot)
     workflow._set_pile_priorities()
-    workflow.step = LegacyStep.SCATTER
+    workflow.step = WorkflowStep.SCATTER
 
     move = workflow.plan_next(rank_lookup={"feed-top": 1, "unknown-top": 2})
 
@@ -383,9 +383,9 @@ def test_gather_ignores_collection_destinations_with_unknown_count():
             sorting.pile_id.as_key(): sorting,
         }
     )
-    workflow = LegacyWorkflowState(snapshot)
+    workflow = WorkflowState(snapshot)
     workflow._set_pile_priorities()
-    workflow.step = LegacyStep.GATHER
+    workflow.step = WorkflowStep.GATHER
 
     move = workflow.plan_next(rank_lookup={"sort-top": 5, "col-top": 10})
 
@@ -410,6 +410,6 @@ def test_all_sorted_requires_known_counts_before_finishing():
             collection.pile_id.as_key(): collection,
         }
     )
-    workflow = LegacyWorkflowState(snapshot)
+    workflow = WorkflowState(snapshot)
 
     assert workflow._all_sorted(snapshot.piles.values(), rank_lookup={"only-top": 1}) is False

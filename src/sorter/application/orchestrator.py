@@ -16,7 +16,7 @@ from sorter.application.recognition_reporting import (
 )
 from sorter.application.use_cases.execute_move import build_pick_place_sequence
 from sorter.domain.events import DomainEvent
-from sorter.domain.machine_state import LegacyWorkflowState, NextMove
+from sorter.domain.machine_state import NextMove, WorkflowState
 from sorter.domain.models import MachineSnapshot
 from sorter.config.calibration import CalibrationProfile
 from sorter.ports.motion import MotionPort
@@ -197,7 +197,7 @@ class Orchestrator:
         )
         if startup_status is not None:
             return startup_status
-        workflow = LegacyWorkflowState(snapshot)
+        workflow = WorkflowState(snapshot)
 
         while True:
             if should_stop and should_stop():

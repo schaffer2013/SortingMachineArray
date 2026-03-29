@@ -8,9 +8,7 @@ from sorter.adapters.persistence.sim_image_sync import sync_simulated_images
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Log simulated card list and rebuild missing images from catalog metadata when needed.")
-    parser.add_argument("--pile-manager", default="legacy/pile_manager.py")
     parser.add_argument("--fixture", default="scenarios/fixtures/small_stack.json")
-    parser.add_argument("--image-piles", default="image_piles.json")
     parser.add_argument("--image-dir", default="SimulatedCardImages")
     parser.add_argument("--log-file", default="data/logs/simulated_cards.log")
     parser.add_argument("--sim-card-list", default="config/sim_card_lists/default_cards.json")
@@ -18,9 +16,7 @@ def main() -> int:
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parents[1]
-    pile_manager_path = root / args.pile_manager
     fixture_path = root / args.fixture
-    image_piles_path = root / args.image_piles
     image_dir = root / args.image_dir
     log_path = root / args.log_file
     sim_card_list_path = root / args.sim_card_list
@@ -30,8 +26,6 @@ def main() -> int:
         fixture_path=fixture_path,
         image_dir=image_dir,
         log_path=log_path,
-        pile_manager_path=pile_manager_path,
-        image_piles_path=image_piles_path,
         sim_card_list_path=sim_card_list_path,
         auto_fetch=not args.no_fetch,
     )

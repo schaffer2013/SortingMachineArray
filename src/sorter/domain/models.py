@@ -33,13 +33,6 @@ class CardInstance:
 
 
 @dataclass(frozen=True)
-class CardView:
-    pile_id: "PileId"
-    card_name: str | None
-    confidence: float
-
-
-@dataclass(frozen=True)
 class PileId:
     x_index: int
     y_index: int

@@ -2,42 +2,32 @@
 
 ## Purpose
 
-This document defines the first measurable gates for recognition and replay work.
-
-These are provisional Sprint 1 gates, not the final completion gates for the whole sorter.
-
-## Current Focus
-
-The current acceptance focus is:
-
-- parent-side `fuzzy_enigma` integration
-- replayable recognition evidence
-- stable sim-backed benchmark behavior
-- inspectable low-confidence failures
+This document defines the current software acceptance checks for the parent
+repo. It is not a sprint log and it is not a full product-completion spec.
 
 ## Required Commands
 
 Run these from the repo root with the shared `.venv`.
 
-### Baseline tests
+### Test suite
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests
 ```
 
-### Current acceptance envelope command
+### Acceptance envelope
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\check_acceptance.py
 ```
 
-### Sim-truth benchmark baseline
+### Sim benchmark baseline
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\benchmark_recognizer.py --backend sim_truth
 ```
 
-### Real recognizer benchmark baseline
+### Submodule benchmark baseline
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\benchmark_recognizer.py --backend fuzzy_enigma
@@ -53,13 +43,13 @@ Run these from the repo root with the shared `.venv`.
   --portable-out data\recognition_reports\portable\fuzzy_enigma_small_pool.portable.json
 ```
 
-### Real recognizer replay sample
+### Replay sample
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\replay_recognition.py --backend fuzzy_enigma --pile 0,0
 ```
 
-### Fixed golden-frame sample
+### Golden-frame sample
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\run_golden_frames.py `
@@ -68,131 +58,54 @@ Run these from the repo root with the shared `.venv`.
   --use-expected-label
 ```
 
-### Dataset ingest from a saved recognition summary
+## Gate Conditions
 
-```powershell
-.\.venv\Scripts\python.exe scripts\ingest_frames.py `
-  --summary-json data\recognition_reports\fuzzy_enigma_summary.json `
-  --source-mode sim `
-  --split benchmark
-```
+### Gate 1: baseline health
 
-## Sprint 1 Gates
+- parent tests pass
+- the acceptance envelope command completes
+- the selected recognizer backend runs from the parent repo without import or
+  configuration guesswork
 
-### Gate 1: integration health
+### Gate 2: evidence quality
 
-- parent tests must pass
-- `fuzzy_enigma` must run from the parent repo without import or OCR-backend failure
-
-### Gate 2: replay evidence
-
-- replay and benchmark commands must write JSON summaries under `data/recognition_reports/`
-- those summaries must include:
-  - expected card
-  - predicted card
+- replay and benchmark commands write summaries under
+  `data/recognition_reports/`
+- those summaries preserve enough information to inspect bad outcomes:
+  - expected and predicted identity
   - confidence
   - review flag
-  - review reason when applicable
-  - review family when applicable
-  - suggested recovery action when applicable
-  - requested mode
-  - effective mode when available
-  - fallback flag
-  - alternatives
-  - debug payload
-  - confidence-band counts at the summary level
-  - review-family counts at the summary level
-- `fuzzy_enigma` replay and benchmark runs must also emit inspectable per-case artifacts for development-time review
-- portable report outputs must split success and failure cases so the parent can hand the result bundle directly to the submodule developer
+  - review reason or failure code when available
+  - requested and effective mode when available
+  - alternatives and artifact paths when available
+- `fuzzy_enigma` runs emit portable reports and inspectable per-case artifacts
 
-### Gate 3: benchmark truthfulness
+### Gate 3: config ownership
 
-- benchmark runs must use a parent-owned card-engine config
-- benchmark config may differ from live config, especially for recognition deadline budget
-- benchmark output must print which card-engine config file was used
+- replay and benchmark flows use explicit parent-owned config paths
+- the active card-engine config can be identified from the run output or saved
+  report
+- local catalog and submodule query paths remain the default over ambient
+  network lookups
 
-### Gate 4: dataset handoff
+### Gate 4: replayability
 
-- a benchmark or replay summary must be ingestible into `data/vision/`
-- imported manifests must preserve expected and predicted identity plus confidence metadata
+- at least one fixed golden-frame command is rerunnable without depending on
+  mutable runtime regeneration
+- saved summaries remain ingestible by `scripts/ingest_frames.py`
 
-## Provisional Thresholds
+## Failure Conditions
 
-These are current working thresholds, not final product sign-off thresholds.
-
-- `sim_truth` benchmark:
-  - expected `name_accuracy = 1.000`
-- `fuzzy_enigma` benchmark on the current `runtime_small_stack` sim slice:
-  - should complete end-to-end
-  - should produce non-empty predictions for most cards
-  - should clearly outperform the previous timeout-driven `0.167` baseline
-- low-confidence matches are acceptable during Sprint 1 if:
-  - they are marked for review
-  - the evidence needed to inspect them is saved
-
-## Current Known Baseline
-
-Observed during Sprint 1:
-
-- inherited live deadline config produced a weak parent-side `fuzzy_enigma` benchmark around `0.167`
-- a parent-owned benchmark config with a larger deadline improved that same slice to about `0.833`
-
-That means the current acceptance focus is not only "accuracy" but also "correct config ownership."
-
-## What Fails The Gate
+The current gate fails when:
 
 - the parent benchmark cannot run
-- the OCR backend is missing
-- the summary JSON omits the evidence needed to inspect bad cases
-- replay and benchmark do not use a clear parent-owned config path
-- the dataset ingest path requires manual file surgery
+- required evidence is missing from saved summaries
+- replay or benchmark behavior depends on unclear local state
+- local catalog or submodule-backed flows are bypassed by implicit external
+  lookups in the supported path
 
-## Next Gate Expansion
+## Related Docs
 
-The next acceptance expansion after Sprint 1 should add:
-
-- stable golden-frame regression commands
-- noisy-sim recovery scenarios
-- planner behavior under low-confidence reads
-- hardware-facing replay and capture ingestion
-
-## Sprint 2 Additions
-
-- startup scan and move verification now retry before escalating
-- review-worthy runs should return `REVIEW_REQUIRED` instead of silently passing or collapsing into an ambiguous generic failure
-- noisy-sim fixtures now exist to exercise that escalation path
-
-## Sprint 3 Additions
-
-- replay and benchmark outputs now classify review reasons instead of leaving all review cases lumped together
-- replay and benchmark outputs now export inspectable OCR and bbox artifacts for `fuzzy_enigma`
-- planner coverage now includes partial-knowledge cases where unknown piles should block premature transitions or moves
-
-## Sprint 4 Additions
-
-- replay and benchmark outputs now generate portable success/failure reports with submodule SHA and mode metadata
-- parent mode experiments now fail safely when constrained recognition preconditions are missing, instead of crashing the benchmark run
-- the parent repo now tracks concrete upstream asks in `docs/submodule_feedback.md`
-
-## Sprint 5 Additions
-
-- parent replay and benchmark runs now support explicit expected-label mode requests for `small_pool`, `reevaluation`, and `confirmation`
-- parent portable reports now include mode request options, not only requested and effective mode labels
-- fixed golden-frame commands now exercise saved manifests without depending on runtime fixture regeneration
-- external image fetch and Scryfall card enrichment are now opt-in instead of ambient defaults in the supported sim path
-
-## Sprint 6 Additions
-
-- noisy-sim recognition faults now include false-empty, ambiguous-candidate, and confirmation-contradiction shapes in addition to low-confidence and missing-prediction cases
-- noisy-sim integration coverage now proves that false-empty startup scans escalate safely to `REVIEW_REQUIRED` with a specific saved review reason
-
-## Sprint 7 Additions
-
-- the repo now has a single acceptance-envelope command that runs the current test and recognizer checks and emits `data/recognition_reports/acceptance_envelope.json`
-- the acceptance command now acts as the first repo-native answer to "are we inside the current pre-hardware envelope?"
-
-## Sprint 8 Additions
-
-- replay and benchmark outputs now classify review cases into broader families such as `perception` and `policy`
-- replay and benchmark outputs now attach suggested next recovery actions to review cases
-- the repo now has a focused software-side hardware preflight checklist in `docs/hardware_prep_checklist.md`
+- `docs/runtime_reference.md`
+- `docs/hardware_prep.md`
+- `docs/submodule_feedback.md`

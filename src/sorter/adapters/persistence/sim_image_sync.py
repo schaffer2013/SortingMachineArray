@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import json
-import re
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
@@ -45,30 +44,6 @@ def _extract_cards_from_fixture(fixture_path: Path) -> list[CardImageRef]:
         for raw_card in pile.get("cards", []):
             card_id = str(raw_card)
             cards.append(CardImageRef(name=_card_name_from_instance(card_id), set_id=set_map.get(card_id)))
-    return cards
-
-
-def _extract_cards_from_image_piles(image_piles_path: Path) -> list[CardImageRef]:
-    if not image_piles_path.exists():
-        return []
-    image_piles = json.loads(image_piles_path.read_text(encoding="utf-8"))
-    cards: list[CardImageRef] = []
-    for pile in image_piles:
-        for image_name in pile:
-            stem = Path(str(image_name)).stem
-            cards.append(CardImageRef(name=stem.replace("_", " "), set_id=None))
-    return cards
-
-
-def _extract_literal_cards_from_python(py_path: Path) -> list[CardImageRef]:
-    if not py_path.exists():
-        return []
-    text = py_path.read_text(encoding="utf-8")
-    cards: list[CardImageRef] = []
-    for match in re.findall(r"['\"]([^'\"]+\.(?:jpg|jpeg|png))['\"]", text, flags=re.IGNORECASE):
-        cards.append(CardImageRef(name=Path(match).stem.replace("_", " "), set_id=None))
-    for match in re.findall(r"['\"]([^'\"]+#[0-9]+)['\"]", text):
-        cards.append(CardImageRef(name=_card_name_from_instance(match), set_id=None))
     return cards
 
 
@@ -210,18 +185,12 @@ def sync_simulated_images(
     fixture_path: Path,
     image_dir: Path,
     log_path: Path,
-    pile_manager_path: Path | None = None,
-    image_piles_path: Path | None = None,
     sim_card_list_path: Path | None = None,
     auto_fetch: bool = True,
 ) -> SyncSummary:
     cards: list[CardImageRef] = []
     cards.extend(_extract_cards_from_fixture(fixture_path))
     cards.extend(_extract_cards_from_sim_card_list(sim_card_list_path))
-    if image_piles_path is not None:
-        cards.extend(_extract_cards_from_image_piles(image_piles_path))
-    if pile_manager_path is not None:
-        cards.extend(_extract_literal_cards_from_python(pile_manager_path))
     cards = _unique_refs_preserving_order(cards)
 
     index = _existing_image_index(image_dir)

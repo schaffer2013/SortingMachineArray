@@ -15,7 +15,6 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 - `data/card_catalog/cards.json`: local runtime card catalog synced from the vendored offline catalog.
 - `config/sort_policies/*.json`: ranking preference source-of-truth policies.
 - `config/vision/roi_profiles.json`: initial shared ROI ownership scaffold for sim and upcoming hardware captures.
-- `legacy/`: archived pre-refactor root-level files kept for reference only.
 - `tests/unit`, `tests/contract`, `tests/integration`: baseline automated tests.
 
 ## Architecture rules
@@ -101,8 +100,8 @@ If you want to run the real vendored recognizer, make sure the submodule OCR ext
 
 - Hardware smoke entrypoint:
 	- `python scripts/hardware_smoke_test.py`
-- Hardware preflight checklist:
-	- `docs/hardware_prep_checklist.md`
+- Hardware prep reference:
+	- `docs/hardware_prep.md`
 - NeoPixels on BTT SKR 1.4 Turbo:
 	- `src/sorter/adapters/hardware/neopixel_lights.py` maps machine status to Marlin `M150` RGB commands.
 	- Integrate this with your serial transport to the SKR board firmware.
@@ -139,22 +138,21 @@ If you want to run the real vendored recognizer, make sure the submodule OCR ext
 - To disable this flow and use `SORTER_SCENARIO` directly, set:
 	- `SORTER_SIM_CARD_LIST=none`
 
-## Legacy to new module mapping
-
-- `legacy/card.py` -> `src/sorter/domain/models.py` (+ `scripts/build_card_catalog.py`)
-- `pile.py` -> `src/sorter/domain/models.py`
-- `card_sorter.py` -> `src/sorter/domain/ranking_service.py` + `src/sorter/domain/policy_evaluator.py`
-- `legacy/pile_manager.py` -> `src/sorter/domain/machine_state.py` + application use cases
-- `gantry_system.py` -> `src/sorter/ports/motion.py` + `adapters/sim/sim_motion.py` + `adapters/hardware/marlin_motion.py`
-- `camera_system.py` -> `src/sorter/ports/camera.py` + `adapters/sim/sim_camera.py` + `adapters/hardware/picamera2_camera.py`
-- `ui_system.py` -> `src/sorter/interfaces/pygame_debug.py`
-- `main_controller.py` -> `src/sorter/application/orchestrator.py`
-- `config_manager.py` + `legacy/config.json` -> `src/sorter/config/settings.py` + `src/sorter/config/calibration.py` + `config/calibration.json`
-- `generateSimulatedPiles.py` -> `src/sorter/adapters/persistence/scenario_loader.py`
-- `downloadSimulatedImages.py` -> `scripts/build_card_catalog.py`
-
 ## OCR implementation guide
 
 - PaddleOCR integration planning guide:
 	- `docs/paddleocr_path_guide.md`
+
+## Current Docs
+
+- Forward plan from the current repo state:
+	- `PROJECT_ROADMAP.md`
+- Runtime intent and config ownership:
+	- `docs/runtime_reference.md`
+- Acceptance and verification rules:
+	- `docs/acceptance_gates.md`
+- Hardware bring-up preparation:
+	- `docs/hardware_prep.md`
+- Current upstream feedback for the vendored recognizer:
+	- `docs/submodule_feedback.md`
 
