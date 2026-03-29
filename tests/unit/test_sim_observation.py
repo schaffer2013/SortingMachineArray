@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 from sorter.adapters.sim.sim_camera import SimCameraAdapter
 from sorter.adapters.sim.sim_world import SimWorld
+from sorter.domain.ranking_service import RankingService
+from sorter.domain.sort_policy_config import load_sort_policy_file
 from sorter.domain.enums import PileObservationState
 from sorter.domain.models import PileId
 
@@ -11,7 +14,7 @@ from sorter.domain.models import PileId
 def test_sim_camera_capture_does_not_mutate_pile_observation_state_before_recognition():
     root = Path(__file__).resolve().parents[2]
     world = SimWorld.from_fixture(root / "data/generated/runtime_fixture.json")
-    pile_id = PileId(x_index=1, y_index=0)
+    pile_id = PileId(x_index=0, y_index=0)
     camera = SimCameraAdapter(world)
 
     frame = camera.capture_top_card(pile_id)
@@ -74,7 +77,7 @@ def test_capture_reveals_only_top_card_without_leaking_full_hidden_stack():
 def test_pick_marks_source_unknown_until_the_next_scan():
     root = Path(__file__).resolve().parents[2]
     world = SimWorld.from_fixture(root / "data/generated/runtime_fixture.json")
-    pile_id = PileId(x_index=1, y_index=0)
+    pile_id = PileId(x_index=0, y_index=0)
     camera = SimCameraAdapter(world)
     hidden_before = list(world.hidden_piles[pile_id.as_key()])
 
@@ -113,3 +116,78 @@ def test_pick_uses_hidden_stack_even_when_snapshot_stack_is_initially_unknown():
         assert pile.card_stack == []
         assert pile.observation.state == PileObservationState.EMPTY_CONFIRMED
         assert pile.has_known_count() is True
+
+
+def test_discovered_rank_lookup_is_contiguous_for_known_cards_only(tmp_path: Path):
+    root = Path(__file__).resolve().parents[2]
+    fixture_path = tmp_path / "fixture.json"
+    fixture_path.write_text(
+        json.dumps(
+            {
+                "name": "rank_fixture",
+                "seed": 42,
+                "grid": {"cols": 3, "rows": 1},
+                "piles": [
+                    {
+                        "pile_id": {"x_index": 0, "y_index": 0},
+                        "role": "FEEDER",
+                        "cards": ["Future Sight#1"],
+                        "capacity": 85,
+                        "discovered": False,
+                        "x_mm": 100,
+                        "y_mm": 100,
+                    },
+                    {
+                        "pile_id": {"x_index": 1, "y_index": 0},
+                        "role": "FEEDER",
+                        "cards": ["Flood#1"],
+                        "capacity": 85,
+                        "discovered": False,
+                        "x_mm": 200,
+                        "y_mm": 100,
+                    },
+                    {
+                        "pile_id": {"x_index": 2, "y_index": 0},
+                        "role": "FEEDER",
+                        "cards": ["Alpharael, Dreaming Acolyte#1"],
+                        "capacity": 85,
+                        "discovered": False,
+                        "x_mm": 300,
+                        "y_mm": 100,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    world = SimWorld.from_fixture(fixture_path)
+    policy = load_sort_policy_file(root / "config/sort_policies/default_color_then_alpha.json")
+    world.set_compiled_ranking(RankingService(policy).compile(world.card_by_id))
+
+    feeder_a = PileId(x_index=0, y_index=0)
+    feeder_b = PileId(x_index=1, y_index=0)
+    feeder_c = PileId(x_index=2, y_index=0)
+
+    world.apply_recognition_observation(
+        feeder_a,
+        recognized_name=world.peek_top_card_name(feeder_a),
+        confidence=1.0,
+        source="test",
+    )
+    world.apply_recognition_observation(
+        feeder_b,
+        recognized_name=world.peek_top_card_name(feeder_b),
+        confidence=1.0,
+        source="test",
+    )
+    world.apply_recognition_observation(
+        feeder_c,
+        recognized_name=world.peek_top_card_name(feeder_c),
+        confidence=1.0,
+        source="test",
+    )
+
+    discovered_lookup = world.discovered_rank_lookup()
+    discovered_ranks = sorted(discovered_lookup.values())
+
+    assert discovered_ranks == [1, 2, 3]

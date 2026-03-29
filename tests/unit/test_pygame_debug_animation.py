@@ -27,3 +27,22 @@ def test_pose_animation_state_updates_when_machine_pose_changes() -> None:
     assert ui.pose_anim.held_card_id == "Card#1"
     assert ui.pose_anim.end_x_mm == 150.0
     assert ui.pose_anim.end_y_mm == 75.0
+
+
+def test_end_effector_radius_matches_dime_to_magic_card_ratio() -> None:
+    ui = PygameDebugUI.__new__(PygameDebugUI)
+
+    assert ui._end_effector_radius_px() == 10
+
+
+def test_substate_label_humanizes_phase_and_active_command() -> None:
+    run_state = SimpleNamespace(phase="VERIFYING", active_command="VacuumOn")
+    snapshot = SimpleNamespace(run_state=run_state, pose=SimpleNamespace(x_mm=0.0, y_mm=0.0, z_mm=0.0))
+    world = SimpleNamespace(snapshot=snapshot)
+    orchestrator = SimpleNamespace(world=world)
+
+    ui = PygameDebugUI.__new__(PygameDebugUI)
+    any_ui = ui  # type: Any
+    any_ui.orchestrator = orchestrator
+
+    assert ui._substate_label() == "Verifying / pulling vac"

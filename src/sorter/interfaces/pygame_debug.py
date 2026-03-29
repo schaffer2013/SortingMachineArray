@@ -9,6 +9,10 @@ from sorter.application.orchestrator import Orchestrator
 from sorter.config.calibration import CalibrationProfile
 from sorter.domain.enums import PileObservationState, PileRole
 
+MAGIC_CARD_WIDTH_PX = 70
+MAGIC_CARD_WIDTH_MM = 63.0
+DIME_DIAMETER_MM = 17.91
+
 
 @dataclass
 class PoseAnimationSegment:
@@ -111,6 +115,9 @@ class PygameDebugUI:
             state = self.last_result.get("status", "DONE")
         self.window.blit(self.header_font.render(f"State: {state}", True, (220, 220, 220)), (520, 28))
 
+        substate_text = self._substate_label()
+        self.window.blit(self.font.render(f"Substate: {substate_text}", True, (220, 220, 220)), (520, 62))
+
         if self.last_result:
             run_id = self.last_result.get("run_id", "-")
             seq = self.last_result.get("seq", "-")
@@ -125,7 +132,7 @@ class PygameDebugUI:
             return
 
         try:
-            rank_lookup = self.orchestrator.world.rank_lookup()
+            rank_lookup = self.orchestrator.world.discovered_rank_lookup()
         except Exception:
             rank_lookup = {}
 
@@ -178,6 +185,7 @@ class PygameDebugUI:
             self.window.blit(self.font.render(f"Top: {top_name[:22]}", True, (240, 240, 240)), (px + 10, py + 82))
 
         self._draw_held_card(anim_x_mm, anim_y_mm, anim_z_mm, area_left, area_top, area_width, area_height)
+        self._draw_end_effector(anim_x_mm, anim_y_mm, area_left, area_top, area_width, area_height)
 
         pose = snapshot.pose
         pose_text = (
@@ -214,6 +222,40 @@ class PygameDebugUI:
             return "-"
         rank_value = rank_lookup.get(top_id)
         return str(rank_value) if rank_value is not None else "-"
+
+    def _substate_label(self) -> str:
+        run_state = self.orchestrator.world.snapshot.run_state
+        phase = str(run_state.phase).title()
+        command = self._friendly_command_label(run_state.active_command)
+        if command is None:
+            return phase
+        return f"{phase} / {command}"
+
+    def _friendly_command_label(self, command_name: str | None) -> str | None:
+        if not command_name:
+            return None
+        labels = {
+            "StartupScan": "startup scan",
+            "PlanNextMove": "planning next move",
+            "NoMoveAvailable": "no move available",
+            "MoveToDiscoveryXY": "moving to discovery",
+            "CaptureDiscovery": "imaging discovery pile",
+            "CaptureFrame": "imaging",
+            "RecognizeTopCard": "recognizing",
+            "MoveToSourceXY": "moving to source",
+            "MoveToDestXY": "moving to destination",
+            "MoveZ": "moving z",
+            "VacuumOn": "pulling vac",
+            "VacuumOff": "releasing vac",
+            "CaptureVerification": "imaging verification pile",
+            "ReviewRequired": "review required",
+            "StartupReviewRequired": "startup review required",
+        }
+        return labels.get(command_name, command_name)
+
+    def _end_effector_radius_px(self) -> int:
+        diameter_px = MAGIC_CARD_WIDTH_PX * (DIME_DIAMETER_MM / MAGIC_CARD_WIDTH_MM)
+        return max(4, round(diameter_px / 2))
 
     def _draw_unknown_card_preview(self, px: int, py: int, rect_width: int) -> None:
         preview_rect = pygame.Rect(px + rect_width - 82, py + 10, 70, 98)
@@ -302,6 +344,25 @@ class PygameDebugUI:
         h = int(98 * z_factor)
         card_surface = pygame.transform.smoothscale(surface, (w, h))
         self.window.blit(card_surface, (int(screen_x - (w / 2)), int(screen_y - h - 8)))
+
+    def _draw_end_effector(
+        self,
+        x_mm: float,
+        y_mm: float,
+        area_left: int,
+        area_top: int,
+        area_width: int,
+        area_height: int,
+    ) -> None:
+        screen_x, screen_y = self._pose_to_screen(x_mm, y_mm, area_left, area_top, area_width, area_height)
+        pose = self.orchestrator.world.snapshot.pose
+        radius = self._end_effector_radius_px()
+        center = (int(screen_x), int(screen_y))
+        fill_color = (220, 40, 40) if pose.vacuum_on else (255, 255, 255)
+        border_color = (0, 0, 0) if pose.vacuum_on else (255, 255, 255)
+
+        pygame.draw.circle(self.window, fill_color, center, radius)
+        pygame.draw.circle(self.window, border_color, center, radius, width=2)
 
     def _pose_to_screen(
         self,

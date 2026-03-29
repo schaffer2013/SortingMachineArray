@@ -60,6 +60,10 @@ class Orchestrator:
     def _metrics_payload(self, snapshot: MachineSnapshot) -> dict:
         return asdict(snapshot.run_state.metrics)
 
+    def _set_run_substate(self, snapshot: MachineSnapshot, *, phase: str, active_command: str | None = None) -> None:
+        snapshot.run_state.phase = phase
+        snapshot.run_state.active_command = active_command
+
     def _recognition_decision(self, frame, result) -> tuple[bool, str]:
         if result.needs_review:
             return False, "needs_review"
@@ -83,9 +87,12 @@ class Orchestrator:
         max_retries: int,
     ) -> ObservationCycle:
         attempts = 0
+        phase_name = "VERIFYING" if phase == "verification" else "DISCOVERING"
         while True:
             attempts += 1
+            self._set_run_substate(self.world.snapshot, phase=phase_name, active_command="CaptureFrame")
             frame = self.camera.capture_top_card(pile_id)
+            self._set_run_substate(self.world.snapshot, phase=phase_name, active_command="RecognizeTopCard")
             result = self.recognizer.recognize_top_card(frame)
             self.world.snapshot.run_state.metrics.scan_count += 1
             increment_counter(
@@ -181,6 +188,7 @@ class Orchestrator:
                 "recognizer_backend": getattr(self.recognizer, "__class__", type(self.recognizer)).__name__,
             },
         )
+        self._set_run_substate(snapshot, phase="DISCOVERING", active_command="StartupScan")
         self.lights.set_status("running")
         seq = 0
         logger.info(
@@ -201,11 +209,13 @@ class Orchestrator:
 
         while True:
             if should_stop and should_stop():
+                self._set_run_substate(snapshot, phase="IDLE", active_command=None)
                 self.lights.set_status("idle")
                 self._finish_run(run_id, "STOPPED", snapshot)
                 logger.info("run stopped: run_id=%s seq=%s", run_id, seq)
                 return {"run_id": run_id, "status": "STOPPED", "seq": seq, "metrics": self._metrics_payload(snapshot)}
 
+            self._set_run_substate(snapshot, phase="PLANNING", active_command="PlanNextMove")
             next_move = workflow.plan_next(rank_lookup)
             while next_move is None:
                 previous_step = workflow.step
@@ -222,6 +232,7 @@ class Orchestrator:
                         workflow.step.name,
                         seq,
                     )
+                    self._set_run_substate(snapshot, phase="FAULTED", active_command="NoMoveAvailable")
                     self.lights.set_status("fault")
                     snapshot.run_state.metrics.failures += 1
                     self._finish_run(run_id, "FAULTED", snapshot)
@@ -252,6 +263,7 @@ class Orchestrator:
                 next_move,
                 per_command_delay_s=per_command_delay_s,
             )
+            self._set_run_substate(snapshot, phase="VERIFYING", active_command="CaptureVerification")
             verification = self._observe_pile_with_retries(
                 run_id,
                 seq,
@@ -292,6 +304,7 @@ class Orchestrator:
                 verification.reason,
             )
             if not verified:
+                self._set_run_substate(snapshot, phase="FAULTED", active_command="ReviewRequired")
                 self.lights.set_status("fault")
                 snapshot.run_state.metrics.failures += 1
                 self._finish_run(run_id, "REVIEW_REQUIRED", snapshot)
@@ -312,6 +325,7 @@ class Orchestrator:
                     "metrics": self._metrics_payload(snapshot),
                 }
 
+        self._set_run_substate(snapshot, phase="COMPLETED", active_command=None)
         self.lights.set_status("idle")
         self._finish_run(run_id, "COMPLETED", snapshot)
         logger.info("run completed: run_id=%s seq=%s", run_id, seq)
@@ -324,9 +338,11 @@ class Orchestrator:
         should_stop: Callable[[], bool] | None = None,
         per_command_delay_s: float = 0.0,
     ) -> dict | None:
+        self._set_run_substate(snapshot, phase="DISCOVERING", active_command="StartupScan")
         logger.info("startup discovery scan started: run_id=%s piles=%s", run_id, len(snapshot.piles))
         for pile in snapshot.piles.values():
             if should_stop and should_stop():
+                self._set_run_substate(snapshot, phase="IDLE", active_command=None)
                 self.lights.set_status("idle")
                 self._finish_run(run_id, "STOPPED", snapshot)
                 logger.info("run stopped during startup scan: run_id=%s pile=%s", run_id, pile.pile_id.as_key())
@@ -337,6 +353,7 @@ class Orchestrator:
                 0,
                 DomainEvent.now("command", {"name": "MoveToDiscoveryXY", "payload": {"pile": pile.pile_id.as_key()}}),
             )
+            self._set_run_substate(snapshot, phase="DISCOVERING", active_command="MoveToDiscoveryXY")
             logger.debug(
                 "startup discovery move: run_id=%s pile=%s",
                 run_id,
@@ -353,6 +370,7 @@ class Orchestrator:
                 0,
                 DomainEvent.now("command", {"name": "CaptureDiscovery", "payload": {"pile": pile.pile_id.as_key()}}),
             )
+            self._set_run_substate(snapshot, phase="DISCOVERING", active_command="CaptureDiscovery")
             observation = self._observe_pile_with_retries(
                 run_id,
                 0,
@@ -397,6 +415,7 @@ class Orchestrator:
                 result.fallback_used,
             )
             if not observation.accepted:
+                self._set_run_substate(snapshot, phase="FAULTED", active_command="StartupReviewRequired")
                 self.lights.set_status("fault")
                 snapshot.run_state.metrics.failures += 1
                 self._finish_run(run_id, "REVIEW_REQUIRED", snapshot)
@@ -428,6 +447,7 @@ class Orchestrator:
     ) -> None:
         commands = build_pick_place_sequence(next_move, calibration)
         for command in commands:
+            self._set_run_substate(snapshot, phase="EXECUTING", active_command=command.name)
             self.run_store.append_event(run_id, seq, DomainEvent.now("command", {"name": command.name, "payload": command.payload}))
             logger.debug(
                 "command: run_id=%s seq=%s name=%s payload=%s",

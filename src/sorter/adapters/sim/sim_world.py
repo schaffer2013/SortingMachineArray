@@ -117,6 +117,35 @@ class SimWorld:
             raise RuntimeError("SimWorld rank lookup requested before compiled ranking was injected")
         return self.compiled_ranking.card_id_to_rank
 
+    def discovered_rank_lookup(self) -> dict[str, int]:
+        if self.compiled_ranking is None:
+            raise RuntimeError("SimWorld discovered rank lookup requested before compiled ranking was injected")
+
+        known_ids: list[str] = []
+        for pile in self.snapshot.piles.values():
+            for card_id in pile.card_stack:
+                if card_id in self.compiled_ranking.card_id_to_sort_key:
+                    known_ids.append(card_id)
+
+        ordered_ids = sorted(
+            dict.fromkeys(known_ids),
+            key=lambda card_id: (
+                self.compiled_ranking.card_id_to_sort_key[card_id],
+                card_id,
+            ),
+        )
+
+        discovered_ranks: dict[str, int] = {}
+        current_rank = 0
+        last_sort_key: tuple | None = None
+        for card_id in ordered_ids:
+            sort_key = self.compiled_ranking.card_id_to_sort_key[card_id]
+            if sort_key != last_sort_key:
+                current_rank += 1
+                last_sort_key = sort_key
+            discovered_ranks[card_id] = current_rank
+        return discovered_ranks
+
     def set_compiled_ranking(self, compiled_ranking: CompiledRanking) -> None:
         self.compiled_ranking = compiled_ranking
 
