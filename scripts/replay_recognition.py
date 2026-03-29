@@ -27,7 +27,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Replay the configured recognizer over simulated top-card captures.")
     parser.add_argument("--backend", choices=["sim_truth", "fuzzy_enigma"], default=None)
     parser.add_argument("--include-empty", action="store_true")
-    parser.add_argument("--pile", action="append", dest="piles", help="Replay one or more pile keys like 0,0")
+    parser.add_argument("--pile", action="append", dest="piles", help="Replay one or more piles by display number.")
     parser.add_argument("--card-engine-config", default=None, help="Optional parent-owned card-engine config path.")
     parser.add_argument("--card-engine-mode", choices=["greenfield", "small_pool", "reevaluation", "confirmation"], default=None)
     parser.add_argument("--use-expected-label", action="store_true", help="Pass the simulated expected top-card label into the recognition request.")
@@ -86,8 +86,9 @@ def main() -> int:
     )
 
     for case in summary.cases:
+        pile_prefix = case.pile_label or (f"Pile {case.pile_number}" if case.pile_number is not None else case.pile_key)
         print(
-            f"{case.pile_key}: expected={case.expected_name!r} predicted={case.predicted_name!r} "
+            f"{pile_prefix}: expected={case.expected_name!r} predicted={case.predicted_name!r} "
             f"confidence={case.confidence:.3f} mode={case.requested_mode!r}->{case.effective_mode!r} "
             f"review={case.needs_review} reason={case.review_reason!r} "
             f"fallback={case.fallback_used} "

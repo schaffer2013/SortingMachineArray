@@ -51,6 +51,8 @@ class RecognitionBenchmarkCase:
     alternatives: tuple[dict, ...] = field(default_factory=tuple)
     debug: dict = field(default_factory=dict)
     mode_request: dict[str, object] = field(default_factory=dict)
+    pile_number: int | None = None
+    pile_label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -127,9 +129,13 @@ def run_sim_recognition_benchmark(
         prefer_visual_small_pool=prefer_visual_small_pool,
     )
 
-    for pile in context.world.snapshot.piles.values():
+    ordered_piles = sorted(
+        context.world.snapshot.piles.values(),
+        key=lambda pile: (pile.y_mm, pile.x_mm, pile.pile_id.as_key()),
+    )
+    for index, pile in enumerate(ordered_piles, start=1):
         pile_key = pile.pile_id.as_key()
-        if selected_piles is not None and pile_key not in selected_piles:
+        if selected_piles is not None and pile_key not in selected_piles and str(index) not in selected_piles:
             continue
         frame = context.camera.capture_top_card(pile.pile_id)
         frame = _frame_with_recognition_request(
@@ -150,6 +156,8 @@ def run_sim_recognition_benchmark(
         cases.append(
             RecognitionBenchmarkCase(
                 pile_key=pile_key,
+                pile_number=index,
+                pile_label=f"Pile {index}",
                 frame_id=frame.frame_id,
                 frame_path=frame.path,
                 expected_name=expected_name,
@@ -365,7 +373,8 @@ def write_benchmark_artifacts(
     artifact_root.mkdir(parents=True, exist_ok=True)
     manifest_payload = summary.to_dict()
     for case in summary.cases:
-        case_dir = artifact_root / f"{case.pile_key.replace(',', '_')}__{case.frame_id}"
+        case_prefix = f"pile_{case.pile_number}" if case.pile_number is not None else case.pile_key.replace(",", "_")
+        case_dir = artifact_root / f"{case_prefix}__{case.frame_id}"
         case_dir.mkdir(parents=True, exist_ok=True)
         case_payload = asdict(case)
         (case_dir / "case.json").write_text(
@@ -476,9 +485,12 @@ def detect_submodule_sha(project_root: Path) -> str | None:
 def _portable_case_dict(case: RecognitionBenchmarkCase, *, artifact_root_str: str | None) -> dict:
     artifact_dir = None
     if artifact_root_str is not None:
-        artifact_dir = str(Path(artifact_root_str) / f"{case.pile_key.replace(',', '_')}__{case.frame_id}")
+        case_prefix = f"pile_{case.pile_number}" if case.pile_number is not None else case.pile_key.replace(",", "_")
+        artifact_dir = str(Path(artifact_root_str) / f"{case_prefix}__{case.frame_id}")
     return {
         "pile_key": case.pile_key,
+        "pile_number": case.pile_number,
+        "pile_label": case.pile_label,
         "frame_id": case.frame_id,
         "frame_path": case.frame_path,
         "artifact_dir": artifact_dir,

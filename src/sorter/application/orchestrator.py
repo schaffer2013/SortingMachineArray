@@ -64,6 +64,55 @@ class Orchestrator:
         snapshot.run_state.phase = phase
         snapshot.run_state.active_command = active_command
 
+    def _pile_reference_xy(self, pile_id, calibration: CalibrationProfile) -> tuple[float, float]:
+        calibrated_xy = calibration.pile_xy_mm.get(pile_id.as_key())
+        if calibrated_xy is not None:
+            return calibrated_xy
+        pile = self.world.snapshot.get_pile(pile_id)
+        if pile is not None:
+            return (pile.x_mm, pile.y_mm)
+        return self.world.coords.get(pile_id.as_key(), (0.0, 0.0))
+
+    def _camera_target_xy(self, pile_id, calibration: CalibrationProfile) -> tuple[float, float]:
+        pile_x_mm, pile_y_mm = self._pile_reference_xy(pile_id, calibration)
+        return (
+            pile_x_mm - calibration.camera_offset_x_mm,
+            pile_y_mm - calibration.camera_offset_y_mm,
+        )
+
+    def _picker_target_xy(self, pile_id, calibration: CalibrationProfile) -> tuple[float, float]:
+        return self._pile_reference_xy(pile_id, calibration)
+
+    def _move_camera_over_pile(
+        self,
+        snapshot: MachineSnapshot,
+        pile_id,
+        calibration: CalibrationProfile,
+        *,
+        phase: str,
+        active_command: str,
+    ) -> None:
+        target_x_mm, target_y_mm = self._camera_target_xy(pile_id, calibration)
+        self._set_run_substate(snapshot, phase=phase, active_command=active_command)
+        self.motion.move_xy(target_x_mm, target_y_mm)
+        snapshot.pose.x_mm = target_x_mm
+        snapshot.pose.y_mm = target_y_mm
+
+    def _move_picker_over_pile(
+        self,
+        snapshot: MachineSnapshot,
+        pile_id,
+        calibration: CalibrationProfile,
+        *,
+        phase: str,
+        active_command: str,
+    ) -> None:
+        target_x_mm, target_y_mm = self._picker_target_xy(pile_id, calibration)
+        self._set_run_substate(snapshot, phase=phase, active_command=active_command)
+        self.motion.move_xy(target_x_mm, target_y_mm)
+        snapshot.pose.x_mm = target_x_mm
+        snapshot.pose.y_mm = target_y_mm
+
     def _recognition_decision(self, frame, result) -> tuple[bool, str]:
         if result.needs_review:
             return False, "needs_review"
@@ -200,6 +249,7 @@ class Orchestrator:
         startup_status = self._perform_startup_discovery_scan(
             run_id,
             snapshot,
+            calibration,
             should_stop=should_stop,
             per_command_delay_s=per_command_delay_s,
         )
@@ -263,7 +313,20 @@ class Orchestrator:
                 next_move,
                 per_command_delay_s=per_command_delay_s,
             )
-            self._set_run_substate(snapshot, phase="VERIFYING", active_command="CaptureVerification")
+            self.run_store.append_event(
+                run_id,
+                seq,
+                DomainEvent.now("command", {"name": "MoveToVerificationXY", "payload": {"pile": next_move.from_pile.as_key()}}),
+            )
+            self._move_camera_over_pile(
+                snapshot,
+                next_move.from_pile,
+                calibration,
+                phase="VERIFYING",
+                active_command="MoveToVerificationXY",
+            )
+            if per_command_delay_s > 0:
+                time.sleep(per_command_delay_s)
             verification = self._observe_pile_with_retries(
                 run_id,
                 seq,
@@ -335,6 +398,7 @@ class Orchestrator:
         self,
         run_id: str,
         snapshot: MachineSnapshot,
+        calibration: CalibrationProfile,
         should_stop: Callable[[], bool] | None = None,
         per_command_delay_s: float = 0.0,
     ) -> dict | None:
@@ -359,9 +423,13 @@ class Orchestrator:
                 run_id,
                 pile.pile_id.as_key(),
             )
-            self.world.move_to_pile(pile.pile_id)
-            pose = self.motion.get_pose()
-            self.motion.move_xy(pose.x_mm, pose.y_mm)
+            self._move_camera_over_pile(
+                snapshot,
+                pile.pile_id,
+                calibration,
+                phase="DISCOVERING",
+                active_command="MoveToDiscoveryXY",
+            )
             if per_command_delay_s > 0:
                 time.sleep(per_command_delay_s)
 
@@ -457,13 +525,21 @@ class Orchestrator:
                 command.payload,
             )
             if command.name == "MoveToSourceXY":
-                self.world.move_to_pile(next_move.from_pile)
-                pose = self.motion.get_pose()
-                self.motion.move_xy(pose.x_mm, pose.y_mm)
+                self._move_picker_over_pile(
+                    snapshot,
+                    next_move.from_pile,
+                    calibration,
+                    phase="EXECUTING",
+                    active_command=command.name,
+                )
             elif command.name == "MoveToDestXY":
-                self.world.move_to_pile(next_move.to_pile)
-                pose = self.motion.get_pose()
-                self.motion.move_xy(pose.x_mm, pose.y_mm)
+                self._move_picker_over_pile(
+                    snapshot,
+                    next_move.to_pile,
+                    calibration,
+                    phase="EXECUTING",
+                    active_command=command.name,
+                )
             elif command.name == "MoveZ":
                 self.motion.move_z(float(command.payload["z_mm"]))
             elif command.name == "VacuumOn":

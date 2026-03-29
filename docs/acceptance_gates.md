@@ -46,7 +46,7 @@ Run these from the repo root with the shared `.venv`.
 ### Replay sample
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\replay_recognition.py --backend fuzzy_enigma --pile 0,0
+.\.venv\Scripts\python.exe scripts\replay_recognition.py --backend fuzzy_enigma --pile 1
 ```
 
 ### Golden-frame sample

@@ -27,7 +27,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Benchmark the configured recognizer against simulated captures.")
     parser.add_argument("--backend", choices=["sim_truth", "fuzzy_enigma"], default=None)
     parser.add_argument("--include-empty", action="store_true")
-    parser.add_argument("--pile", action="append", dest="piles", help="Limit benchmarking to one or more pile keys like 0,0")
+    parser.add_argument("--pile", action="append", dest="piles", help="Limit benchmarking to one or more piles by display number.")
     parser.add_argument("--card-engine-config", default=None, help="Optional parent-owned card-engine config path.")
     parser.add_argument("--card-engine-mode", choices=["greenfield", "small_pool", "reevaluation", "confirmation"], default=None)
     parser.add_argument("--use-expected-label", action="store_true", help="Pass the simulated expected top-card label into the recognition request.")

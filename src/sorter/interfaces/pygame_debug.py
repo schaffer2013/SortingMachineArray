@@ -9,9 +9,17 @@ from sorter.application.orchestrator import Orchestrator
 from sorter.config.calibration import CalibrationProfile
 from sorter.domain.enums import PileObservationState, PileRole
 
-MAGIC_CARD_WIDTH_PX = 70
 MAGIC_CARD_WIDTH_MM = 63.0
 DIME_DIAMETER_MM = 17.91
+MAGIC_CARD_HEIGHT_MM = 88.0
+DASHBOARD_BG = (24, 26, 32)
+BOARD_BG = (34, 38, 46)
+BOARD_GRID = (58, 64, 74)
+LABEL_BG = (22, 24, 30)
+SUMMARY_BG = (28, 31, 38)
+SUMMARY_BORDER = (88, 94, 104)
+PILE_BADGE_GAP_PX = 10
+BOARD_TOP_PADDING_PX = 58
 
 
 @dataclass
@@ -67,7 +75,7 @@ class PygameDebugUI:
                     elif self.slow_btn.collidepoint(event.pos):
                         self.slow_enabled = not self.slow_enabled
 
-            self.window.fill((30, 30, 30))
+            self.window.fill(DASHBOARD_BG)
             self._draw_controls()
             self._draw_snapshot()
             pygame.display.flip()
@@ -139,14 +147,14 @@ class PygameDebugUI:
         self._update_animation_from_pose()
         anim_x_mm, anim_y_mm, anim_z_mm = self._animated_pose_xyz()
 
-        area_left, area_top = 30, 160
-        area_width, area_height = 1020, 510
+        board_rect = pygame.Rect(24, 150, 744, 500)
+        summary_rect = pygame.Rect(board_rect.right + 16, board_rect.top, 292, board_rect.height)
+        pygame.draw.rect(self.window, BOARD_BG, board_rect, border_radius=18)
+        pygame.draw.rect(self.window, BOARD_GRID, board_rect, width=2, border_radius=18)
+        pygame.draw.rect(self.window, SUMMARY_BG, summary_rect, border_radius=14)
+        pygame.draw.rect(self.window, SUMMARY_BORDER, summary_rect, width=1, border_radius=14)
 
-        pile_ids = [pile.pile_id for pile in snapshot.piles.values()]
-        max_x = max(p.x_index for p in pile_ids)
-        max_y = max(p.y_index for p in pile_ids)
-        cell_w = max(120, area_width // (max_x + 1))
-        cell_h = max(100, area_height // (max_y + 1))
+        layout = self._board_layout(board_rect)
 
         role_color = {
             "FEEDER": (60, 120, 220),
@@ -156,13 +164,17 @@ class PygameDebugUI:
             "BLACKHOLE": (110, 40, 110),
         }
 
-        for pile in snapshot.piles.values():
-            px = area_left + pile.pile_id.x_index * cell_w + 8
-            py = area_top + pile.pile_id.y_index * cell_h + 8
-            rect = pygame.Rect(px, py, cell_w - 16, cell_h - 16)
+        ordered_piles = sorted(
+            snapshot.piles.values(),
+            key=lambda pile: (*self._pile_reference_xy(pile), pile.pile_id.as_key()),
+        )
+        display_numbers = self._pile_display_numbers(ordered_piles)
+        for pile in ordered_piles:
+            rect = self._pile_card_rect(pile, layout)
             color = role_color.get(pile.role.value, (100, 100, 100))
-            pygame.draw.rect(self.window, color, rect, border_radius=8)
-            pygame.draw.rect(self.window, (220, 220, 220), rect, width=2, border_radius=8)
+            fill_color = tuple(min(255, channel + 18) for channel in color)
+            pygame.draw.rect(self.window, fill_color, rect, border_radius=10)
+            pygame.draw.rect(self.window, (230, 230, 230), rect, width=2, border_radius=10)
 
             top_id = pile.top_card_id() if pile.has_observed_top_card() else None
             top_name = self._top_label(pile)
@@ -172,27 +184,27 @@ class PygameDebugUI:
             if pile.has_observed_top_card() and image_path:
                 surface = self._get_image_surface(image_path)
                 if surface is not None:
-                    scaled = pygame.transform.smoothscale(surface, (70, 98))
-                    self.window.blit(scaled, (px + rect.width - 82, py + 10))
+                    scaled = pygame.transform.smoothscale(surface, (rect.width, rect.height))
+                    self.window.blit(scaled, rect.topleft)
+                    pygame.draw.rect(self.window, (230, 230, 230), rect, width=2, border_radius=10)
                 else:
-                    self._draw_unknown_card_preview(px, py, rect.width)
+                    self._draw_unknown_card_preview(rect)
             else:
-                self._draw_unknown_card_preview(px, py, rect.width)
+                self._draw_unknown_card_preview(rect)
 
-            self.window.blit(self.font.render(f"Pile {pile.pile_id.as_key()}", True, (255, 255, 255)), (px + 10, py + 10))
-            self.window.blit(self.font.render(pile.role.value, True, (240, 240, 240)), (px + 10, py + 34))
-            self.window.blit(self.font.render(f"Count: {count_text}  Rank: {top_rank_text}", True, (240, 240, 240)), (px + 10, py + 58))
-            self.window.blit(self.font.render(f"Top: {top_name[:22]}", True, (240, 240, 240)), (px + 10, py + 82))
+            self._draw_pile_badge(pile, rect, display_numbers)
 
-        self._draw_held_card(anim_x_mm, anim_y_mm, anim_z_mm, area_left, area_top, area_width, area_height)
-        self._draw_end_effector(anim_x_mm, anim_y_mm, area_left, area_top, area_width, area_height)
+        self._draw_held_card(anim_x_mm, anim_y_mm, anim_z_mm, layout)
+        self._draw_end_effector(anim_x_mm, anim_y_mm, layout)
+        self._draw_camera_reticle(anim_x_mm, anim_y_mm, layout)
+        self._draw_pile_summary_panel(ordered_piles, rank_lookup, summary_rect, display_numbers)
 
         pose = snapshot.pose
         pose_text = (
             f"Pose x={anim_x_mm:.1f} y={anim_y_mm:.1f} z={anim_z_mm:.1f} "
             f"vacuum={pose.vacuum_on}"
         )
-        self.window.blit(self.font.render(pose_text, True, (220, 220, 220)), (30, 640))
+        self.window.blit(self.font.render(pose_text, True, (220, 220, 220)), (30, 668))
 
     def _get_image_surface(self, image_path: str) -> pygame.Surface | None:
         cached = self.image_cache.get(image_path)
@@ -239,6 +251,7 @@ class PygameDebugUI:
             "PlanNextMove": "planning next move",
             "NoMoveAvailable": "no move available",
             "MoveToDiscoveryXY": "moving to discovery",
+            "MoveToVerificationXY": "moving to verification",
             "CaptureDiscovery": "imaging discovery pile",
             "CaptureFrame": "imaging",
             "RecognizeTopCard": "recognizing",
@@ -253,15 +266,143 @@ class PygameDebugUI:
         }
         return labels.get(command_name, command_name)
 
-    def _end_effector_radius_px(self) -> int:
-        diameter_px = MAGIC_CARD_WIDTH_PX * (DIME_DIAMETER_MM / MAGIC_CARD_WIDTH_MM)
+    def _end_effector_radius_px(self, layout: dict[str, float] | None = None) -> int:
+        width_px = self._card_size_px(layout)[0] if layout is not None else 70
+        diameter_px = width_px * (DIME_DIAMETER_MM / MAGIC_CARD_WIDTH_MM)
         return max(4, round(diameter_px / 2))
 
-    def _draw_unknown_card_preview(self, px: int, py: int, rect_width: int) -> None:
-        preview_rect = pygame.Rect(px + rect_width - 82, py + 10, 70, 98)
-        pygame.draw.rect(self.window, (70, 70, 78), preview_rect, border_radius=6)
-        pygame.draw.rect(self.window, (150, 150, 158), preview_rect, width=2, border_radius=6)
-        self.window.blit(self.font.render("?", True, (220, 220, 220)), (preview_rect.x + 28, preview_rect.y + 38))
+    def _pile_reference_xy(self, pile) -> tuple[float, float]:
+        return self.calibration.pile_xy_mm.get(pile.pile_id.as_key(), (pile.x_mm, pile.y_mm))
+
+    def _pile_display_numbers(self, piles) -> dict[str, int]:
+        return {
+            pile.pile_id.as_key(): index + 1
+            for index, pile in enumerate(piles)
+        }
+
+    def _board_layout(self, board_rect: pygame.Rect) -> dict[str, float]:
+        coords = [self._pile_reference_xy(pile) for pile in self.orchestrator.world.snapshot.piles.values()]
+        if not coords:
+            return {
+                "board_left": float(board_rect.left),
+                "board_top": float(board_rect.top),
+                "board_width": float(board_rect.width),
+                "board_height": float(board_rect.height),
+                "draw_left": float(board_rect.left + 20),
+                "draw_top": float(board_rect.top + 30),
+                "draw_width": float(board_rect.width - 40),
+                "draw_height": float(board_rect.height - 60),
+                "scale": 1.0,
+            }
+
+        x_values = [xy[0] for xy in coords]
+        y_values = [xy[1] for xy in coords]
+        min_x, max_x = min(x_values), max(x_values)
+        min_y, max_y = min(y_values), max(y_values)
+
+        margin_x_mm = MAGIC_CARD_WIDTH_MM * 0.28
+        margin_y_mm = MAGIC_CARD_HEIGHT_MM * 0.28
+        world_width_mm = max(1.0, (max_x - min_x) + (margin_x_mm * 2))
+        world_height_mm = max(1.0, (max_y - min_y) + (margin_y_mm * 2))
+
+        draw_left = board_rect.left + 20
+        draw_top = board_rect.top + BOARD_TOP_PADDING_PX
+        draw_width = board_rect.width - 40
+        draw_height = board_rect.height - (BOARD_TOP_PADDING_PX + 22)
+        scale = min(draw_width / world_width_mm, draw_height / world_height_mm)
+
+        return {
+            "board_left": float(board_rect.left),
+            "board_top": float(board_rect.top),
+            "board_width": float(board_rect.width),
+            "board_height": float(board_rect.height),
+            "draw_left": float(draw_left),
+            "draw_top": float(draw_top),
+            "draw_width": float(draw_width),
+            "draw_height": float(draw_height),
+            "min_x": float(min_x),
+            "max_x": float(max_x),
+            "min_y": float(min_y),
+            "max_y": float(max_y),
+            "margin_x_mm": float(margin_x_mm),
+            "margin_y_mm": float(margin_y_mm),
+            "scale": float(scale),
+        }
+
+    def _card_size_px(self, layout: dict[str, float] | None) -> tuple[int, int]:
+        if layout is None:
+            return 70, round(70 * (MAGIC_CARD_HEIGHT_MM / MAGIC_CARD_WIDTH_MM))
+        width_px = max(32, round(MAGIC_CARD_WIDTH_MM * layout["scale"]))
+        height_px = max(44, round(MAGIC_CARD_HEIGHT_MM * layout["scale"]))
+        return width_px, height_px
+
+    def _pile_center_to_screen(self, x_mm: float, y_mm: float, layout: dict[str, float]) -> tuple[float, float]:
+        world_x = (x_mm - layout["min_x"]) + layout["margin_x_mm"]
+        world_y = (y_mm - layout["min_y"]) + layout["margin_y_mm"]
+        screen_x = layout["draw_left"] + (world_x * layout["scale"])
+        screen_y = layout["draw_top"] + (world_y * layout["scale"])
+        return screen_x, screen_y
+
+    def _pile_card_rect(self, pile, layout: dict[str, float]) -> pygame.Rect:
+        width_px, height_px = self._card_size_px(layout)
+        ref_x_mm, ref_y_mm = self._pile_reference_xy(pile)
+        screen_x, screen_y = self._pile_center_to_screen(ref_x_mm, ref_y_mm, layout)
+        return pygame.Rect(
+            int(screen_x - (width_px / 2)),
+            int(screen_y - (height_px / 2)),
+            width_px,
+            height_px,
+        )
+
+    def _draw_unknown_card_preview(self, rect: pygame.Rect) -> None:
+        pygame.draw.rect(self.window, (70, 70, 78), rect, border_radius=10)
+        pygame.draw.rect(self.window, (150, 150, 158), rect, width=2, border_radius=10)
+        question = self.header_font.render("?", True, (220, 220, 220))
+        self.window.blit(question, (rect.centerx - (question.get_width() / 2), rect.centery - (question.get_height() / 2)))
+
+    def _pile_badge_rect(self, pile, rect: pygame.Rect, display_numbers: dict[str, int]) -> pygame.Rect:
+        pile_number = display_numbers.get(pile.pile_id.as_key(), 0)
+        label = self.font.render(f"Pile {pile_number} {pile.role.value}", True, (245, 245, 245))
+        badge_rect = pygame.Rect(0, 0, label.get_width() + 10, label.get_height() + 6)
+        badge_rect.centerx = rect.centerx
+        badge_rect.bottom = rect.top - PILE_BADGE_GAP_PX
+        return badge_rect
+
+    def _draw_pile_badge(self, pile, rect: pygame.Rect, display_numbers: dict[str, int]) -> None:
+        pile_number = display_numbers.get(pile.pile_id.as_key(), 0)
+        label = self.font.render(f"Pile {pile_number} {pile.role.value}", True, (245, 245, 245))
+        badge_rect = self._pile_badge_rect(pile, rect, display_numbers)
+        pygame.draw.rect(self.window, LABEL_BG, badge_rect, border_radius=7)
+        pygame.draw.rect(self.window, (110, 116, 126), badge_rect, width=1, border_radius=7)
+        self.window.blit(label, (badge_rect.left + 5, badge_rect.top + 3))
+
+    def _draw_pile_summary_panel(
+        self,
+        piles,
+        rank_lookup: dict[str, int],
+        summary_rect: pygame.Rect,
+        display_numbers: dict[str, int],
+    ) -> None:
+        self.window.blit(self.font.render("Pile summary", True, (220, 220, 220)), (summary_rect.left + 12, summary_rect.top + 10))
+        if not piles:
+            return
+        row_height = max(68, (summary_rect.height - 40) // len(piles))
+        for index, pile in enumerate(piles):
+            top = summary_rect.top + 36 + (index * row_height)
+            row_rect = pygame.Rect(summary_rect.left + 10, top, summary_rect.width - 20, row_height - 8)
+            pygame.draw.rect(self.window, LABEL_BG, row_rect, border_radius=10)
+            pygame.draw.rect(self.window, (94, 100, 110), row_rect, width=1, border_radius=10)
+            top_id = pile.top_card_id() if pile.has_observed_top_card() else None
+            top_name = self._top_label(pile)
+            top_rank_text = self._top_rank_label(pile, top_id, rank_lookup)
+            count_text = self._count_label(pile)
+            pile_number = display_numbers.get(pile.pile_id.as_key(), index + 1)
+            line1 = self.font.render(f"Pile {pile_number}  {pile.role.value}", True, (240, 240, 240))
+            line2 = self.font.render(f"Count {count_text}   Rank {top_rank_text}", True, (210, 210, 210))
+            line3 = self.font.render(f"Top {top_name[:24]}", True, (210, 210, 210))
+            self.window.blit(line1, (row_rect.left + 10, row_rect.top + 8))
+            self.window.blit(line2, (row_rect.left + 10, row_rect.top + 28))
+            self.window.blit(line3, (row_rect.left + 10, row_rect.top + 48))
 
     def _update_animation_from_pose(self) -> None:
         pose = self.orchestrator.world.snapshot.pose
@@ -320,10 +461,7 @@ class PygameDebugUI:
         x_mm: float,
         y_mm: float,
         z_mm: float,
-        area_left: int,
-        area_top: int,
-        area_width: int,
-        area_height: int,
+        layout: dict[str, float],
     ) -> None:
         pose = self.orchestrator.world.snapshot.pose
         held_card_id = pose.holding_card_id or self.pose_anim.held_card_id
@@ -338,25 +476,20 @@ class PygameDebugUI:
         if surface is None:
             return
 
-        screen_x, screen_y = self._pose_to_screen(x_mm, y_mm, area_left, area_top, area_width, area_height)
         z_factor = max(0.82, min(1.0, 1.0 - (z_mm / 220.0)))
-        w = int(70 * z_factor)
-        h = int(98 * z_factor)
-        card_surface = pygame.transform.smoothscale(surface, (w, h))
-        self.window.blit(card_surface, (int(screen_x - (w / 2)), int(screen_y - h - 8)))
+        rect = self._held_card_rect(x_mm, y_mm, z_factor, layout)
+        card_surface = pygame.transform.smoothscale(surface, rect.size)
+        self.window.blit(card_surface, rect.topleft)
 
     def _draw_end_effector(
         self,
         x_mm: float,
         y_mm: float,
-        area_left: int,
-        area_top: int,
-        area_width: int,
-        area_height: int,
+        layout: dict[str, float],
     ) -> None:
-        screen_x, screen_y = self._pose_to_screen(x_mm, y_mm, area_left, area_top, area_width, area_height)
+        screen_x, screen_y = self._pose_to_screen(x_mm, y_mm, layout)
         pose = self.orchestrator.world.snapshot.pose
-        radius = self._end_effector_radius_px()
+        radius = self._end_effector_radius_px(layout)
         center = (int(screen_x), int(screen_y))
         fill_color = (220, 40, 40) if pose.vacuum_on else (255, 255, 255)
         border_color = (0, 0, 0) if pose.vacuum_on else (255, 255, 255)
@@ -364,32 +497,63 @@ class PygameDebugUI:
         pygame.draw.circle(self.window, fill_color, center, radius)
         pygame.draw.circle(self.window, border_color, center, radius, width=2)
 
+    def _held_card_rect(
+        self,
+        x_mm: float,
+        y_mm: float,
+        z_factor: float,
+        layout: dict[str, float],
+    ) -> pygame.Rect:
+        screen_x, screen_y = self._pose_to_screen(x_mm, y_mm, layout)
+        width_px, height_px = self._card_size_px(layout)
+        w = max(20, int(width_px * z_factor))
+        h = max(28, int(height_px * z_factor))
+        return pygame.Rect(
+            int(screen_x - (w / 2)),
+            int(screen_y - (h / 2)),
+            w,
+            h,
+        )
+
+    def _camera_pose_mm(self, x_mm: float, y_mm: float) -> tuple[float, float]:
+        return (
+            x_mm + self.calibration.camera_offset_x_mm,
+            y_mm + self.calibration.camera_offset_y_mm,
+        )
+
+    def _is_imaging_substate(self) -> bool:
+        active_command = self.orchestrator.world.snapshot.run_state.active_command
+        return active_command in {
+            "CaptureDiscovery",
+            "CaptureFrame",
+            "CaptureVerification",
+            "RecognizeTopCard",
+        }
+
+    def _draw_camera_reticle(
+        self,
+        x_mm: float,
+        y_mm: float,
+        layout: dict[str, float],
+    ) -> None:
+        camera_x_mm, camera_y_mm = self._camera_pose_mm(x_mm, y_mm)
+        screen_x, screen_y = self._pose_to_screen(camera_x_mm, camera_y_mm, layout)
+        center = (int(screen_x), int(screen_y))
+        radius = max(6, self._end_effector_radius_px(layout) - 2)
+        color = (90, 220, 255) if self._is_imaging_substate() else (120, 180, 210)
+        pygame.draw.circle(self.window, color, center, radius, width=2)
+        pygame.draw.line(self.window, color, (center[0] - radius - 4, center[1]), (center[0] + radius + 4, center[1]), width=1)
+        pygame.draw.line(self.window, color, (center[0], center[1] - radius - 4), (center[0], center[1] + radius + 4), width=1)
+
     def _pose_to_screen(
         self,
         x_mm: float,
         y_mm: float,
-        area_left: int,
-        area_top: int,
-        area_width: int,
-        area_height: int,
+        layout: dict[str, float],
     ) -> tuple[float, float]:
-        coords = list(self.orchestrator.world.coords.values())
-        if not coords:
-            return (area_left + area_width / 2, area_top + area_height / 2)
-
-        x_values = [xy[0] for xy in coords]
-        y_values = [xy[1] for xy in coords]
-        min_x, max_x = min(x_values), max(x_values)
-        min_y, max_y = min(y_values), max(y_values)
-        span_x = max(1.0, max_x - min_x)
-        span_y = max(1.0, max_y - min_y)
-
-        norm_x = (x_mm - min_x) / span_x
-        norm_y = (y_mm - min_y) / span_y
-
-        pad = 20
-        draw_w = max(1, area_width - (pad * 2))
-        draw_h = max(1, area_height - (pad * 2))
-        screen_x = area_left + pad + norm_x * draw_w
-        screen_y = area_top + pad + norm_y * draw_h
-        return (screen_x, screen_y)
+        if "min_x" not in layout:
+            return (
+                layout["board_left"] + (layout["board_width"] / 2),
+                layout["board_top"] + (layout["board_height"] / 2),
+            )
+        return self._pile_center_to_screen(x_mm, y_mm, layout)

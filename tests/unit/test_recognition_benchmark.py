@@ -94,10 +94,56 @@ def test_run_sim_recognition_benchmark_summarizes_review_reasons_and_confidence_
     assert summary.effective_mode_counts == {"greenfield": 2}
     assert summary.requested_mode == "greenfield"
     assert summary.mode_request_options == {"mode": "greenfield", "use_expected_label": False}
+    assert summary.cases[0].pile_number == 1
+    assert summary.cases[0].pile_label == "Pile 1"
     assert summary.cases[0].requested_mode == "greenfield"
     assert summary.cases[1].effective_mode == "greenfield"
     assert summary.cases[1].review_reason == "missing_prediction_for_visible_card"
     assert summary.cases[0].mode_request == {"mode": "greenfield"}
+
+
+def test_run_sim_recognition_benchmark_accepts_display_pile_numbers(monkeypatch, tmp_path):
+    pile_a = PileState(pile_id=PileId(0, 0), role=PileRole.FEEDER, capacity=10, x_mm=100.0, y_mm=100.0)
+    pile_b = PileState(pile_id=PileId(1, 0), role=PileRole.SORTING, capacity=10, x_mm=200.0, y_mm=100.0)
+    snapshot = MachineSnapshot(
+        piles={
+            pile_a.pile_id.as_key(): pile_a,
+            pile_b.pile_id.as_key(): pile_b,
+        }
+    )
+    frame_path = tmp_path / "card.jpg"
+    frame_path.write_bytes(b"fake-image")
+    frames = {
+        "0,0": Frame(frame_id="frame-a", path=str(frame_path), pile_id=pile_a.pile_id, metadata={"card_name": "Opt"}),
+        "1,0": Frame(frame_id="frame-b", path=str(frame_path), pile_id=pile_b.pile_id, metadata={"card_name": "Island"}),
+    }
+    context = SimpleNamespace(
+        world=SimpleNamespace(snapshot=snapshot, scenario_name="demo"),
+        camera=SimpleNamespace(capture_top_card=lambda pile_id: frames[pile_id.as_key()]),
+        recognizer=SimpleNamespace(
+            recognize_top_card=lambda frame: RecognitionResult(
+                card_name=frame.metadata["card_name"],
+                confidence=0.91,
+                backend="fuzzy_enigma",
+                requested_mode="greenfield",
+                effective_mode="greenfield",
+                needs_review=False,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        "sorter.application.recognition_benchmark.build_sim_runtime_context",
+        lambda settings: context,
+    )
+
+    summary = run_sim_recognition_benchmark(
+        SimpleNamespace(recognizer_backend="fuzzy_enigma", card_engine_mode="greenfield"),
+        pile_keys=["2"],
+    )
+
+    assert len(summary.cases) == 1
+    assert summary.cases[0].pile_key == "1,0"
+    assert summary.cases[0].pile_number == 2
 
 
 def test_run_sim_recognition_benchmark_can_attach_expected_card_requests(monkeypatch, tmp_path):
@@ -220,12 +266,14 @@ def test_write_benchmark_artifacts_exports_case_debug_files(tmp_path):
                 alternatives=({"name": "Opt", "score": 0.88},),
                 mode_request={"mode": "greenfield"},
                 debug={"ocr_lines": ["Opt"], "bbox": [1, 2, 3, 4], "active_roi": "title"},
+                pile_number=1,
+                pile_label="Pile 1",
             ),
         ),
     )
 
     artifact_root = write_benchmark_artifacts(summary, tmp_path / "artifacts")
-    case_dir = artifact_root / "0_0__frame-1"
+    case_dir = artifact_root / "pile_1__frame-1"
 
     assert json.loads((artifact_root / "manifest.json").read_text(encoding="utf-8"))["backend"] == "fuzzy_enigma"
     assert (case_dir / "frame.jpg").exists()
@@ -283,6 +331,8 @@ def test_write_portable_report_splits_success_and_failure_cases(tmp_path):
                 alternatives=(),
                 mode_request={"mode": "small_pool"},
                 debug={},
+                pile_number=1,
+                pile_label="Pile 1",
             ),
             RecognitionBenchmarkCase(
                 pile_key="1,0",
@@ -309,6 +359,8 @@ def test_write_portable_report_splits_success_and_failure_cases(tmp_path):
                 alternatives=(),
                 mode_request={"mode": "small_pool"},
                 debug={},
+                pile_number=2,
+                pile_label="Pile 2",
             ),
         ),
     )
@@ -334,3 +386,4 @@ def test_write_portable_report_splits_success_and_failure_cases(tmp_path):
     assert payload["failure_cases"][0]["recovery_action"] == "retry_or_operator_review"
     assert payload["failure_cases"][0]["requested_mode"] == "small_pool"
     assert payload["failure_cases"][0]["mode_request"] == {"mode": "small_pool"}
+    assert payload["failure_cases"][0]["pile_label"] == "Pile 2"

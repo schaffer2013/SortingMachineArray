@@ -60,7 +60,7 @@ The sim camera no longer mutates pile observation state on capture by itself; ob
 - Replay the configured backend over simulated top-card captures:
 	- `python scripts/replay_recognition.py --backend sim_truth`
 - Replay the vendored recognizer with the parent benchmark config:
-	- `python scripts/replay_recognition.py --backend fuzzy_enigma --pile 0,0`
+	- `python scripts/replay_recognition.py --backend fuzzy_enigma --pile 1`
 - Generate a benchmark summary JSON:
 	- `python scripts/benchmark_recognizer.py --backend sim_truth`
 	- `python scripts/benchmark_recognizer.py --backend fuzzy_enigma`

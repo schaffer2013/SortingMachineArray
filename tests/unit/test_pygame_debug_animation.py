@@ -46,3 +46,65 @@ def test_substate_label_humanizes_phase_and_active_command() -> None:
     any_ui.orchestrator = orchestrator
 
     assert ui._substate_label() == "Verifying / pulling vac"
+
+
+def test_camera_pose_applies_calibration_offset() -> None:
+    ui = PygameDebugUI.__new__(PygameDebugUI)
+    any_ui = ui  # type: Any
+    any_ui.calibration = SimpleNamespace(camera_offset_x_mm=12.5, camera_offset_y_mm=-4.0)
+
+    assert ui._camera_pose_mm(100.0, 80.0) == (112.5, 76.0)
+
+
+def test_pile_reference_xy_prefers_calibrated_card_center() -> None:
+    ui = PygameDebugUI.__new__(PygameDebugUI)
+    any_ui = ui  # type: Any
+    any_ui.calibration = SimpleNamespace(
+        camera_offset_x_mm=12.5,
+        camera_offset_y_mm=-4.0,
+        pile_xy_mm={"1,0": (240.0, 160.0)},
+    )
+    pile = SimpleNamespace(pile_id=SimpleNamespace(as_key=lambda: "1,0"), x_mm=200.0, y_mm=100.0)
+
+    assert ui._pile_reference_xy(pile) == (240.0, 160.0)
+
+
+def test_held_card_rect_stays_centered_on_picker_pose() -> None:
+    ui = PygameDebugUI.__new__(PygameDebugUI)
+    any_ui = ui  # type: Any
+    any_ui.orchestrator = SimpleNamespace(world=SimpleNamespace(coords={}))
+    layout = {"scale": 1.0}
+    any_ui._card_size_px = lambda layout: (70, 98)
+    any_ui._pose_to_screen = lambda x_mm, y_mm, layout: (300.0, 220.0)
+
+    rect = ui._held_card_rect(100.0, 80.0, 1.0, layout)
+
+    assert rect.center == (300, 220)
+
+
+def test_pile_display_numbers_follow_physical_order() -> None:
+    ui = PygameDebugUI.__new__(PygameDebugUI)
+    piles = [
+        SimpleNamespace(pile_id=SimpleNamespace(as_key=lambda: "0,1")),
+        SimpleNamespace(pile_id=SimpleNamespace(as_key=lambda: "2,0")),
+        SimpleNamespace(pile_id=SimpleNamespace(as_key=lambda: "5,9")),
+    ]
+
+    display_numbers = ui._pile_display_numbers(piles)
+
+    assert display_numbers == {"0,1": 1, "2,0": 2, "5,9": 3}
+
+
+def test_pile_badge_rect_is_centered_above_card() -> None:
+    ui = PygameDebugUI.__new__(PygameDebugUI)
+    any_ui = ui  # type: Any
+    any_ui.font = SimpleNamespace(
+        render=lambda text, antialias, color: SimpleNamespace(get_width=lambda: 80, get_height=lambda: 18)
+    )
+    pile = SimpleNamespace(pile_id=SimpleNamespace(as_key=lambda: "1,0"), role=SimpleNamespace(value="FEEDER"))
+    rect = SimpleNamespace(centerx=300, top=220)
+
+    badge_rect = ui._pile_badge_rect(pile, rect, {"1,0": 2})
+
+    assert badge_rect.centerx == 300
+    assert badge_rect.bottom == 210
