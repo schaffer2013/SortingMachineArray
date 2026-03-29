@@ -21,8 +21,9 @@ should optimize for.
   not a general-purpose CLI flow yet.
 - The recognizer boundary is owned by `RecognizerPort`.
 - The parent repo currently supports:
+  - `fuzzy_enigma` as the default sim/runtime backend
   - `sim_truth`
-  - `fuzzy_enigma`
+    for controlled debugging and comparison runs
 
 ## Recognition And Review Policy
 
@@ -54,8 +55,33 @@ should optimize for.
 - Coarse pile coordinates and machine calibration belong in the parent config.
 - Fine tuning and ROI adjustments should be explicit operator actions, not
   hidden side effects of normal startup.
+- Fixed `place_z_mm` remains the current fallback placement height, but the
+  hardware path should be able to derive a safer pile-specific placement height
+  from a probe measurement when a BLTouch-style or equivalent probing method is
+  available.
 - Hardware-facing assumptions should stay visible in docs and config rather than
   being buried in adapter-specific code.
+
+## Camera-Driven Micro-Calibration Contract
+
+- The hardware target uses six piles arranged as three columns by two rows.
+- Coarse pile coordinates still come from `config/calibration.json`, but they
+  are treated as a starting guess for hardware runs, not a guaranteed final
+  pick location.
+- Before normal sorting, the machine should support a micro-calibration pass
+  that uses the end-effector camera to align each pile to a shared visual
+  reference: the back of a Magic card framed at a consistent pixel location.
+- During this pass, the end effector may move in XY and Z to center and scale
+  the card-back reference so each pile produces the same camera-space target.
+- Per-pile XY (and, when needed, effective Z contact/approach) offsets from the
+  camera alignment should be persisted as calibration-owned data so picks and
+  places are repeatable across runs.
+- The goal is to prevent accumulated pick/place drift: suction contact should
+  happen at the same relative location on cards in every pile, including after
+  many repeated transfers.
+- BLTouch-style probing remains complementary to this flow: probing handles
+  pile-height safety and placement clearance, while camera micro-calibration
+  handles lateral centering and card-face alignment.
 
 ## Documentation Set
 

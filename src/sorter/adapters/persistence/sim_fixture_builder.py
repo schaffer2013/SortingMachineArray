@@ -4,6 +4,7 @@ from pathlib import Path
 import json
 
 _CLEAR_ROLES = {"FEEDER", "SORTING", "COLLECTION"}
+_FEEDER_ROLE = "FEEDER"
 
 
 def build_runtime_fixture(
@@ -20,12 +21,17 @@ def build_runtime_fixture(
     if not isinstance(piles, list):
         raise ValueError("Fixture payload must include a 'piles' list")
 
-    target_indexes: list[int] = []
+    feeder_indexes: list[int] = []
+    fallback_indexes: list[int] = []
     for index, pile in enumerate(piles):
         role = str(pile.get("role", "SORTING"))
         if role in _CLEAR_ROLES:
             pile["cards"] = []
-        target_indexes.append(index)
+        fallback_indexes.append(index)
+        if role == _FEEDER_ROLE:
+            feeder_indexes.append(index)
+
+    target_indexes = feeder_indexes or fallback_indexes
 
     if not target_indexes:
         raise ValueError("Fixture must include at least one pile")

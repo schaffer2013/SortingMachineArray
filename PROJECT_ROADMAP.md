@@ -101,6 +101,9 @@ Current focus:
   status without custom local surgery
 - wire camera, motion, vacuum, and lighting into one supervised startup path
 - make calibration data explicit, versioned, and recoverable through config
+- support a probe-aware placement path so hardware can discover a safe drop
+  height from the measured pile top when probing hardware is available, while
+  keeping fixed placement height as the fallback
 - save real captures in a form that replay and benchmark tools can consume
 
 Done when:

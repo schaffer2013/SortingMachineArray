@@ -2,11 +2,30 @@
 
 This directory holds stable perception regression slices.
 
+## Terms
+
+A `frame` in this repo is one saved recognition input: the image the
+recognizer sees for a single observation, plus the identifying metadata needed
+to evaluate the result. In practice that usually means one top-card image path
+and its expected card identity.
+
+A `golden frame` is a frame that has been intentionally checked in as a stable
+regression case. It is "golden" because we want to rerun it over time and
+notice when recognition behavior changes, not because it is guaranteed to be an
+easy or perfect example.
+
+A `golden-frame manifest` is the checked-in list of those cases. Each manifest
+entry points at one saved frame and the expected label we want the runner to
+compare against.
+
 The current slice is sim-backed, but it is now exercised through a fixed manifest
 instead of depending on whatever runtime fixture regeneration happened most
 recently.
 
-The goal is not to claim these are final hardware-quality benchmarks. The goal is to establish a repeatable parent-owned regression target that can be expanded later.
+The current golden frames are sim-backed, not hardware captures. The goal is
+not to claim these are final hardware-quality benchmarks. The goal is to
+establish a repeatable parent-owned regression target that can be expanded
+later with more difficult sim cases and future real-world captures.
 
 ## Current Command
 

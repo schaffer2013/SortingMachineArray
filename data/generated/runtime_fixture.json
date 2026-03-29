@@ -13,7 +13,12 @@
       },
       "role": "FEEDER",
       "cards": [
-        "Future Sight#639cb483-ffe2-4abc-a050-5cdc8aebd5a2"
+        "Future Sight#639cb483-ffe2-4abc-a050-5cdc8aebd5a2",
+        "Furious Forebear#a4f247b6-8212-4e78-a452-d2d3be228d8e",
+        "Flood#2aefbeae-ac72-4a13-8898-8d1e42a633a6",
+        "Alpharael, Dreaming Acolyte#349a2211-2b23-418d-a1ef-1c72ad2e171d",
+        "Elspeth, Storm Slayer#73a065e3-b530-4e62-ab3c-4f6f908184ec",
+        "Garenbrig Carver // Shield's Might#194b7a1c-291a-470e-9a40-61b72a46793b"
       ],
       "capacity": 85,
       "discovered": false,
@@ -26,9 +31,7 @@
         "y_index": 0
       },
       "role": "COLLECTION",
-      "cards": [
-        "Furious Forebear#a4f247b6-8212-4e78-a452-d2d3be228d8e"
-      ],
+      "cards": [],
       "capacity": 85,
       "discovered": true,
       "x_mm": 200,
@@ -40,9 +43,7 @@
         "y_index": 1
       },
       "role": "SORTING",
-      "cards": [
-        "Flood#2aefbeae-ac72-4a13-8898-8d1e42a633a6"
-      ],
+      "cards": [],
       "capacity": 85,
       "discovered": true,
       "x_mm": 100,
@@ -54,9 +55,7 @@
         "y_index": 1
       },
       "role": "SORTING",
-      "cards": [
-        "Alpharael, Dreaming Acolyte#349a2211-2b23-418d-a1ef-1c72ad2e171d"
-      ],
+      "cards": [],
       "capacity": 85,
       "discovered": true,
       "x_mm": 200,
@@ -68,9 +67,7 @@
         "y_index": 0
       },
       "role": "SORTING",
-      "cards": [
-        "Elspeth, Storm Slayer#73a065e3-b530-4e62-ab3c-4f6f908184ec"
-      ],
+      "cards": [],
       "capacity": 85,
       "discovered": true,
       "x_mm": 300,
@@ -82,9 +79,7 @@
         "y_index": 1
       },
       "role": "SORTING",
-      "cards": [
-        "Garenbrig Carver // Shield's Might#194b7a1c-291a-470e-9a40-61b72a46793b"
-      ],
+      "cards": [],
       "capacity": 85,
       "discovered": true,
       "x_mm": 300,

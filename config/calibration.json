@@ -2,6 +2,10 @@
   "safe_z_mm": 0.0,
   "pick_z_mm": 5.0,
   "place_z_mm": 5.0,
+  "probe_enabled": false,
+  "probe_retract_z_mm": 2.0,
+  "probe_place_clearance_mm": 1.0,
+  "probe_max_contact_z_mm": null,
   "camera_offset_x_mm": 0.0,
   "camera_offset_y_mm": 0.0,
   "pile_xy_mm": {

@@ -37,10 +37,12 @@ def test_app_settings_defaults_card_engine_config_to_parent_owned_file(monkeypat
     config_path = tmp_path / "config" / "card_engine" / "engine.json"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text("{}", encoding="utf-8")
+    monkeypatch.delenv("SORTER_RECOGNIZER_BACKEND", raising=False)
     monkeypatch.delenv("SORTER_CARD_ENGINE_CONFIG", raising=False)
 
     settings = AppSettings.from_env(project_root=tmp_path)
 
+    assert settings.recognizer_backend == "fuzzy_enigma"
     assert settings.card_engine_config_path == config_path
 
 

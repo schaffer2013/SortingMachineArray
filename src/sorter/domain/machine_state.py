@@ -50,6 +50,13 @@ class WorkflowState:
     def _all_empty(self, piles) -> bool:
         return all(pile.is_empty() for pile in piles)
 
+    def _can_accept_move_from_feed(self, pile) -> bool:
+        if pile.role == PileRole.FEEDER:
+            return False
+        if not pile.has_known_count():
+            return True
+        return not pile.is_full()
+
     def _all_sorted(self, piles, rank_lookup: dict[str, int]) -> bool:
         # If all piles are discovered. 
         # If all feeder piles are empty. 
@@ -104,7 +111,7 @@ class WorkflowState:
             (
                 pile
                 for pile in self.snapshot.piles.values()
-                if pile.role != PileRole.FEEDER and pile.has_known_count() and not pile.is_full()
+                if self._can_accept_move_from_feed(pile)
             ),
             None,
         )

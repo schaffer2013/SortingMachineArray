@@ -25,7 +25,7 @@ class AppSettings:
     sim_image_auto_fetch: bool = False
     allow_external_card_enrichment: bool = False
     project_root: Path | None = None
-    recognizer_backend: str = "sim_truth"
+    recognizer_backend: str = "fuzzy_enigma"
     card_engine_config_path: Path | None = None
     card_engine_mode: str = "greenfield"
     card_engine_auto_track_results: bool = False
@@ -65,7 +65,7 @@ class AppSettings:
             "config/vision/recognition_thresholds.json",
         )
         recognition_policy = RecognitionPolicyConfig.from_file(recognition_thresholds_path)
-        recognizer_backend = _setting("SORTER_RECOGNIZER_BACKEND", "sim_truth").strip().lower()
+        recognizer_backend = _setting("SORTER_RECOGNIZER_BACKEND", "fuzzy_enigma").strip().lower()
         card_engine_config_raw = _setting("SORTER_CARD_ENGINE_CONFIG", str(DEFAULT_CARD_ENGINE_CONFIG))
         card_engine_config_path = (
             None

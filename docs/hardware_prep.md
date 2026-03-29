@@ -30,6 +30,8 @@ Pick one primary goal for the session:
 ## Config Checklist
 
 - [ ] verify `config/calibration.json`
+  - confirm whether this session is using fixed `place_z_mm` or a probe-aware
+    placement experiment
 - [ ] verify `config/card_engine/engine.json`
 - [ ] verify `config/card_engine/benchmark.engine.json`
 - [ ] verify `config/vision/recognition_thresholds.json`
@@ -91,6 +93,14 @@ them.
 
 - [ ] confirm the session's startup path and operator station are ready
 - [ ] confirm a capture location exists for any new real-world frames
+- [ ] if this session includes pile calibration, run camera-driven
+      micro-calibration over all six piles (3x2) before throughput testing
+- [ ] during micro-calibration, align each pile so the card-back reference
+      appears at the same camera-space position and scale
+- [ ] save any resulting per-pile calibration offsets to config-owned data
+      instead of ad-hoc operator notes
+- [ ] confirm how safe placement height will be chosen for this session:
+      fixed placement height or probe-derived pile-top measurement
 - [ ] confirm you will save enough context to replay failures later
 - [ ] confirm the session avoids throughput tuning unless correctness is already
       stable
@@ -111,5 +121,9 @@ them.
 - [ ] lighting notes tied to saved captures
 - [ ] at least one replayable batch of real frames
 - [ ] any calibration changes captured in config instead of scratch notes
+- [ ] evidence that camera micro-calibration was performed across all six piles
+      and produced a consistent card-back alignment reference
+- [ ] if probing is used, a record of the measured pile-top heights or the
+      resulting safe placement rule
 - [ ] a short record of what blocked progress and whether it belongs in
       `docs/submodule_feedback.md`, `docs/acceptance_gates.md`, or code
