@@ -120,6 +120,7 @@ def resolve_catalog_card(query, request: CardEngineCatalogSyncRequest) -> dict[s
         "oracle_id": printing.oracle_id.lower(),
         "set_code": printing.set_code.lower() if printing.set_code else None,
         "collector_number": printing.collector_number,
+        "image_url": _extract_image_url(printing),
         "rarity": printing.rarity.lower() if isinstance(printing.rarity, str) and printing.rarity else None,
         "colors": colors,
         "color_identity": color_identity,
@@ -167,6 +168,54 @@ def _collector_sort_key(value: str | None) -> tuple[int, str]:
     if digits:
         return (int(digits), str(value))
     return (10**9, str(value))
+
+
+def _extract_image_url(printing: object) -> str | None:
+    for attr in ("image_uri", "image_url", "scryfall_image_url"):
+        value = getattr(printing, attr, None)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    image_uris = getattr(printing, "image_uris", None)
+    if callable(image_uris):
+        try:
+            image_uris = image_uris()
+        except Exception:
+            image_uris = None
+    if isinstance(image_uris, dict):
+        image_url = image_uris.get("normal") or image_uris.get("large")
+        if isinstance(image_url, str) and image_url.strip():
+            return image_url.strip()
+
+    raw_payload = (
+        getattr(printing, "_scryfall_data", None)
+        or getattr(printing, "scryfallJson", None)
+        or getattr(printing, "scryfall_json", None)
+        or getattr(printing, "_json", None)
+    )
+    if callable(raw_payload):
+        try:
+            raw_payload = raw_payload()
+        except Exception:
+            raw_payload = None
+    if isinstance(raw_payload, dict):
+        image_uris = raw_payload.get("image_uris")
+        if isinstance(image_uris, dict):
+            image_url = image_uris.get("normal") or image_uris.get("large")
+            if isinstance(image_url, str) and image_url.strip():
+                return image_url.strip()
+        faces = raw_payload.get("card_faces")
+        if isinstance(faces, list):
+            for face in faces:
+                if not isinstance(face, dict):
+                    continue
+                face_uris = face.get("image_uris")
+                if not isinstance(face_uris, dict):
+                    continue
+                image_url = face_uris.get("normal") or face_uris.get("large")
+                if isinstance(image_url, str) and image_url.strip():
+                    return image_url.strip()
+    return None
 
 
 def _normalize_symbols(values: tuple[str, ...] | list[str] | None) -> list[str]:

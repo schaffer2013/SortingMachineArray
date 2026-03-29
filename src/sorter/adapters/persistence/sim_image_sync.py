@@ -10,6 +10,7 @@ from urllib.request import urlopen
 from sorter.adapters.persistence.card_engine_catalog_sync import (
     CardEngineCatalogSyncRequest,
     load_offline_catalog_query,
+    resolve_catalog_card,
 )
 from sorter.adapters.persistence.sim_card_list_loader import load_sim_card_list
 
@@ -141,29 +142,8 @@ def _download_missing_cards(
     for card_ref in card_refs:
         card_name = card_ref.name
         try:
-            request = CardEngineCatalogSyncRequest(
-                name=card_name,
-                set_code=card_ref.set_id,
-            )
-            identity = query.resolve_card_identity(
-                name_query=request.name,
-                oracle_id=request.oracle_id,
-                scryfall_id=request.scryfall_id,
-                set_code=request.set_code,
-                collector_number=request.collector_number,
-            )
-            if identity is None:
-                failed += 1
-                continue
-            printing = identity.get("printing")
-            if printing is None:
-                printings = identity.get("printings")
-                if isinstance(printings, list) and printings:
-                    printing = printings[0]
-            if printing is None:
-                failed += 1
-                continue
-            image_url = _extract_image_url(printing)
+            card_data = _resolve_catalog_card_for_image(query, card_name=card_name, set_id=card_ref.set_id)
+            image_url = card_data.get("image_url")
             if image_url is None:
                 failed += 1
                 continue
@@ -171,10 +151,7 @@ def _download_missing_cards(
             with urlopen(image_url, timeout=30) as response:
                 content = response.read()
 
-            set_id = (
-                str(getattr(printing, "set_code", "")).strip().lower()
-                or (card_ref.set_id or "default").lower()
-            )
+            set_id = str(card_data.get("set_code", "")).strip().lower() or (card_ref.set_id or "default").lower()
             target_dir = image_dir / set_id
             target_dir.mkdir(parents=True, exist_ok=True)
             file_path = target_dir / f"{_safe_filename(card_name)}.jpg"
@@ -188,85 +165,17 @@ def _download_missing_cards(
     return downloaded, failed
 
 
-def _extract_image_url(card_data: object) -> str | None:
-    for attr in ("image_uri", "image_url", "scryfall_image_url"):
-        value = getattr(card_data, attr, None)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-
-    get_image_url = getattr(card_data, "get_image_url", None)
-    if callable(get_image_url):
-        try:
-            image_url = get_image_url()
-            if image_url:
-                return str(image_url)
-        except Exception:
-            pass
-
-    # Image URIs can be exposed as properties or callables depending on upstream adapter versions.
-    image_uris_attr = getattr(card_data, "image_uris", None)
-    if callable(image_uris_attr):
-        try:
-            image_uris_attr = image_uris_attr()
-        except Exception:
-            image_uris_attr = None
-
-    if isinstance(image_uris_attr, dict):
-        image_url = image_uris_attr.get("normal") or image_uris_attr.get("large")
-        if image_url:
-            return str(image_url)
-
-    # Try common raw payload attribute names used by different adapter versions.
-    raw_payload = (
-        getattr(card_data, "_scryfall_data", None)
-        or getattr(card_data, "scryfallJson", None)
-        or getattr(card_data, "scryfall_json", None)
-        or getattr(card_data, "_json", None)
+def _resolve_catalog_card_for_image(query, *, card_name: str, set_id: str | None) -> dict[str, object]:
+    request = CardEngineCatalogSyncRequest(
+        name=card_name,
+        set_code=set_id,
     )
-    if callable(raw_payload):
-        try:
-            raw_payload = raw_payload()
-        except Exception:
-            raw_payload = None
-    if isinstance(raw_payload, dict):
-        root_uris = raw_payload.get("image_uris")
-        if isinstance(root_uris, dict):
-            image_url = root_uris.get("normal") or root_uris.get("large")
-            if image_url:
-                return str(image_url)
-
-        faces = raw_payload.get("card_faces")
-        if isinstance(faces, list):
-            for face in faces:
-                if not isinstance(face, dict):
-                    continue
-                face_uris = face.get("image_uris")
-                if not isinstance(face_uris, dict):
-                    continue
-                image_url = face_uris.get("normal") or face_uris.get("large")
-                if image_url:
-                    return str(image_url)
-
-    # Fallback: look for card_faces directly on the object.
-    faces_attr = getattr(card_data, "card_faces", None)
-    if isinstance(faces_attr, list):
-        for face in faces_attr:
-            face_uris = None
-            if isinstance(face, dict):
-                face_uris = face.get("image_uris")
-            else:
-                face_uris = getattr(face, "image_uris", None)
-                if callable(face_uris):
-                    try:
-                        face_uris = face_uris()
-                    except Exception:
-                        face_uris = None
-            if not isinstance(face_uris, dict):
-                continue
-            image_url = face_uris.get("normal") or face_uris.get("large")
-            if image_url:
-                return str(image_url)
-    return None
+    try:
+        return resolve_catalog_card(query, request)
+    except LookupError:
+        if not set_id:
+            raise
+    return resolve_catalog_card(query, CardEngineCatalogSyncRequest(name=card_name))
 
 
 def _write_log(log_path: Path, cards: list[str], missing: list[str]) -> None:

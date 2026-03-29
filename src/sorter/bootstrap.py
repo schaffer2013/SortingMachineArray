@@ -64,7 +64,7 @@ def build_sim_runtime_context(settings: AppSettings) -> SimRuntimeContext:
             fixture_path=runtime_fixture_path,
             image_dir=root / "SimulatedCardImages",
             log_path=root / "data" / "logs" / "simulated_cards.log",
-            pile_manager_path=root / "pile_manager.py",
+            pile_manager_path=root / "legacy" / "pile_manager.py",
             image_piles_path=root / "image_piles.json",
             sim_card_list_path=settings.sim_card_list_path,
             auto_fetch=settings.sim_image_auto_fetch,

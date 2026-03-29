@@ -37,6 +37,7 @@ def test_resolve_catalog_card_prefers_identifier_first_printing():
         name="Elspeth, Storm Slayer",
         set_code="TDM",
         collector_number="11",
+        image_url="https://cards.example/elspeth.jpg",
         rarity="Mythic",
         colors=("W",),
         color_identity=("W",),
@@ -59,6 +60,7 @@ def test_resolve_catalog_card_prefers_identifier_first_printing():
     assert card["scryfall_id"] == "73a065e3-b530-4e62-ab3c-4f6f908184ec"
     assert card["oracle_id"] == "f78af825-023a-42e9-8374-5c52303a1417"
     assert card["rarity"] == "mythic"
+    assert card["image_url"] == "https://cards.example/elspeth.jpg"
     assert card["card_types"] == ["planeswalker"]
     assert card["supertypes"] == ["legendary"]
     assert card["colors"] == ["w"]
@@ -110,3 +112,37 @@ def test_resolve_catalog_card_selects_lowest_collector_when_multiple_printings_m
     assert card["scryfall_id"] == "194b7a1c-291a-470e-9a40-61b72a46793b"
     assert card["set_code"] == "eld"
     assert card["card_types"] == ["creature", "instant"]
+
+
+def test_resolve_catalog_card_extracts_image_url_from_raw_payload_faces():
+    oracle = SimpleNamespace(
+        oracle_id="oracle-double-face",
+        type_line="Sorcery",
+        colors=("U",),
+        color_identity=("U",),
+    )
+    printing = SimpleNamespace(
+        scryfall_id="5d9c1372-df08-4c4d-85b4-ccad9e88e6df",
+        oracle_id="oracle-double-face",
+        name="Commit // Memory",
+        set_code="AKH",
+        collector_number="211",
+        rarity="Rare",
+        colors=("U",),
+        color_identity=("U",),
+        type_line="Sorcery",
+        _json={
+            "card_faces": [
+                {"image_uris": {"normal": "https://cards.example/commit-memory-front.jpg"}},
+            ]
+        },
+    )
+    query = FakeQuery(
+        identity={"oracle": oracle, "printing": printing},
+        printed_by_id={printing.scryfall_id: printing},
+        oracle_by_id={printing.oracle_id: oracle},
+    )
+
+    card = resolve_catalog_card(query, CardEngineCatalogSyncRequest(name="Commit // Memory"))
+
+    assert card["image_url"] == "https://cards.example/commit-memory-front.jpg"

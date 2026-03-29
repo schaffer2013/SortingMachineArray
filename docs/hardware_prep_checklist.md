@@ -27,8 +27,10 @@ The goal is to make the first real hardware session diagnose camera, lighting, c
 
 ## Configs To Verify
 
-- Parent runtime config:
-  - `config.json`
+- Parent runtime env defaults:
+  - `.env.example`
+- Parent calibration config:
+  - `config/calibration.json`
 - Parent card-engine live config:
   - `config/card_engine/engine.json`
 - Parent card-engine benchmark config:

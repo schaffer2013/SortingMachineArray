@@ -40,7 +40,7 @@ When we reach a conclusion later, add:
 - The active architecture lives under `src/sorter/...`.
 - The repo already has a hexagonal split across domain, application, ports, sim adapters, hardware adapters, persistence, CLI, and debug UI.
 - The current roadmap says the supported future path is observation-driven, shared between sim and hardware, and increasingly centered on richer perception and recognition.
-- The repo still contains root-level legacy files from the older flow, and not all of them have been formally archived yet.
+- The repo still carries some legacy material from the older flow, but the remaining root-level pieces have now been formally archived under `legacy/`.
 - Static review in this session used in-repo symbol searches and import-graph style checks.
 - Runtime coverage in this session was partial because this environment does not currently have `coverage`, `ruff`, `mypy`, or `vulture` installed.
 - A partial `pytest` run produced useful signal, but sandbox permission issues around pytest temp/cache paths interfered with a clean full run in this environment.
@@ -58,9 +58,9 @@ When we reach a conclusion later, add:
   - `src/sorter/domain/commands.py` command dataclasses
   - `src/sorter/domain/enums.py:RunPhase`
   - `src/sorter/domain/models.py:CardView`
-- The old root-level legacy flow still exists, especially:
-  - `card.py`
-  - `pile_manager.py`
+- The old root-level legacy flow is now archived under `legacy/`, especially:
+  - `legacy/card.py`
+  - `legacy/pile_manager.py`
 - The README already describes a migration from the old root-level flow into the `src/sorter/...` architecture.
 - Low-coverage but likely live modules from this session included:
   - `src/sorter/bootstrap.py`
@@ -261,8 +261,8 @@ The goal is to classify correctly, not to maximize deletions.
 
 **Candidates**
 
-- [card.py](C:/Users/Pullo/OneDrive/Desktop/Python/SortingMachineArray/card.py)
-- [pile_manager.py](C:/Users/Pullo/OneDrive/Desktop/Python/SortingMachineArray/pile_manager.py)
+- [legacy/card.py](C:/Users/Pullo/OneDrive/Desktop/Python/SortingMachineArray/legacy/card.py)
+- [legacy/pile_manager.py](C:/Users/Pullo/OneDrive/Desktop/Python/SortingMachineArray/legacy/pile_manager.py)
 
 **Evidence**
 
@@ -277,18 +277,19 @@ The goal is to classify correctly, not to maximize deletions.
 
 - [ ] Is any real workflow still using these files?
 - [ ] Is there knowledge here that has not yet been migrated into the new architecture?
-- [ ] Would moving them into `legacy/` reduce confusion immediately?
+- [x] Would moving them into `legacy/` reduce confusion immediately?
 - [ ] Are they still helping, or just making the repo feel split-brain?
 
 **Decision**
 
 - [ ] `KEEP-COMPAT`
-- [ ] `ARCHIVE`
+- [x] `ARCHIVE`
 - [ ] `DELETE`
 
 **Notes**
 
-- 
+- 2026-03-28: archived the remaining root-level legacy flow into `legacy/` to reduce confusion in the repo root while preserving historical reference material.
+- `src/sorter/bootstrap.py` and `scripts/sync_simulated_images.py` now point at `legacy/pile_manager.py` for the one remaining read-only compatibility use: mining literal card/image names during sim image sync.
 - Current status:
 - Future-session context:
 
@@ -431,7 +432,7 @@ The goal is to classify correctly, not to maximize deletions.
 
 - [ ] Start with the likely easiest deletes: `api.py`, `run_cycle.py`, `discover_layout.py`
 - [ ] Then decide whether recognition prototypes are future tools or abandoned experiments
-- [ ] Then decide whether root-level legacy files should move to `legacy/` now or stay put a bit longer
+- [x] Root-level legacy files were moved to `legacy/`
 - [ ] Then review the unused domain abstractions for partial pruning
 
 ## Session Log

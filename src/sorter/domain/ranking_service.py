@@ -130,11 +130,11 @@ def _maybe_enrich_missing_metadata(
 ) -> dict[str, CardMeta]:
     if not allow_external_enrichment:
         return card_by_id
-    return _enrich_missing_metadata_with_scrython(card_by_id)
+    return _enrich_missing_metadata_from_external_source(card_by_id)
 
 
-def _enrich_missing_metadata_with_scrython(card_by_id: dict[str, CardMeta]) -> dict[str, CardMeta]:
-    # Only query Scryfall for cards with insufficient metadata for color/type ranking.
+def _enrich_missing_metadata_from_external_source(card_by_id: dict[str, CardMeta]) -> dict[str, CardMeta]:
+    # This is the one opt-in live-data path. The normal runtime stays on cached/local metadata.
     names_to_fetch: set[str] = set()
     for card_meta in card_by_id.values():
         if _needs_enrichment(card_meta):
@@ -146,19 +146,19 @@ def _enrich_missing_metadata_with_scrython(card_by_id: dict[str, CardMeta]) -> d
     try:
         import scrython
     except Exception:
-        logger.warning("Scrython unavailable; using existing catalog metadata for ranking")
+        logger.warning("Live card lookup unavailable; using existing catalog metadata for ranking")
         return card_by_id
 
     fetched_by_name: dict[str, CardMeta] = {}
     for card_name in sorted(names_to_fetch):
         try:
             card_data = scrython.cards.Named(fuzzy=card_name)
-            payload = _extract_scryfall_payload(card_data)
+            payload = _extract_external_payload(card_data)
             if payload is None:
                 continue
-            fetched_by_name[card_name] = _meta_from_scryfall_payload(card_name, payload)
+            fetched_by_name[card_name] = _meta_from_external_payload(card_name, payload)
         except Exception as exc:
-            logger.debug("scrython enrichment failed: card=%s err=%s", card_name, exc)
+            logger.debug("live card lookup failed: card=%s err=%s", card_name, exc)
 
     enriched: dict[str, CardMeta] = {}
     for card_id, card_meta in card_by_id.items():
@@ -174,7 +174,7 @@ def _needs_enrichment(card_meta: CardMeta) -> bool:
     return not card_meta.colors and not card_meta.color_identity and not card_meta.card_types
 
 
-def _extract_scryfall_payload(card_data: object) -> dict[str, Any] | None:
+def _extract_external_payload(card_data: object) -> dict[str, Any] | None:
     payload = getattr(card_data, "_scryfall_data", None)
     if isinstance(payload, dict):
         return payload
@@ -190,7 +190,7 @@ def _extract_scryfall_payload(card_data: object) -> dict[str, Any] | None:
     return None
 
 
-def _meta_from_scryfall_payload(name: str, payload: dict[str, Any]) -> CardMeta:
+def _meta_from_external_payload(name: str, payload: dict[str, Any]) -> CardMeta:
     colors = _normalize_text_list(payload.get("colors"))
     color_identity = _normalize_text_list(payload.get("color_identity"))
     rarity_raw = payload.get("rarity")
@@ -254,7 +254,7 @@ def _parse_type_line(type_line: object) -> tuple[list[str], list[str]]:
     if not isinstance(type_line, str) or not type_line.strip():
         return [], []
 
-    left = type_line.split("—", 1)[0]
+    left = _type_line_prefix(type_line)
     tokens = [token.strip().lower() for token in left.split() if token.strip()]
     known_supertypes = {"basic", "legendary", "snow", "world", "ongoing"}
 
@@ -267,3 +267,10 @@ def _parse_type_line(type_line: object) -> tuple[list[str], list[str]]:
             card_types.append(token)
 
     return sorted(set(supertypes)), sorted(set(card_types))
+
+
+def _type_line_prefix(type_line: str) -> str:
+    for separator in (chr(8212), "â€”", "Ã¢â‚¬â€"):
+        if separator in type_line:
+            return type_line.split(separator, 1)[0]
+    return type_line

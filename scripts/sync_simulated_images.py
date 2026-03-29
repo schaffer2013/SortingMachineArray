@@ -7,8 +7,8 @@ from sorter.adapters.persistence.sim_image_sync import sync_simulated_images
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Log simulated card list and rebuild missing images via Scrython when needed.")
-    parser.add_argument("--pile-manager", default="pile_manager.py")
+    parser = argparse.ArgumentParser(description="Log simulated card list and rebuild missing images from catalog metadata when needed.")
+    parser.add_argument("--pile-manager", default="legacy/pile_manager.py")
     parser.add_argument("--fixture", default="scenarios/fixtures/small_stack.json")
     parser.add_argument("--image-piles", default="image_piles.json")
     parser.add_argument("--image-dir", default="SimulatedCardImages")

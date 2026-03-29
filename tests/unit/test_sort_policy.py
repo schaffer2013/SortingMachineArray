@@ -111,7 +111,7 @@ def test_ranking_service_does_not_call_external_enrichment_by_default(monkeypatc
     def _boom(card_by_id):
         raise AssertionError("External enrichment should not run by default")
 
-    monkeypatch.setattr("sorter.domain.ranking_service._enrich_missing_metadata_with_scrython", _boom)
+    monkeypatch.setattr("sorter.domain.ranking_service._enrich_missing_metadata_from_external_source", _boom)
 
     ranking = RankingService(policy).compile(
         {
