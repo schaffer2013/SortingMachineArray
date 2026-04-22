@@ -1,38 +1,108 @@
 {
   "version": 1,
   "list_name": "default_demo_cards",
-  "description": "Stable local-only demo list backed by checked-in simulated images",
+  "description": "Stable local demo list backed by the vendored offline catalog and synced sim images",
   "random_seed": 42,
   "shuffle": true,
   "entries": [
     {
-      "name": "Elspeth, Storm Slayer",
-      "set": "TDM",
+      "name": "Appeal to Eirdu",
+      "set": "ECL",
       "count": 1
     },
     {
-      "name": "Furious Forebear",
-      "set": "TDM",
+      "name": "Aquitect's Defenses",
+      "set": "ECL",
       "count": 1
     },
     {
-      "name": "Flood",
-      "set": "5ED",
+      "name": "Ashling, the Limitless",
+      "set": "ECC",
       "count": 1
     },
     {
-      "name": "Future Sight",
-      "set": "MH1",
+      "name": "Assert Perfection",
+      "set": "ECL",
       "count": 1
     },
     {
-      "name": "Alpharael, Dreaming Acolyte",
-      "set": "EOE",
+      "name": "Auntie Ool, Cursewretch",
+      "set": "ECC",
       "count": 1
     },
     {
-      "name": "Garenbrig Carver // Shield's Might",
-      "set": "ELD",
+      "name": "Auntie's Sentence",
+      "set": "ECL",
+      "count": 1
+    },
+    {
+      "name": "Barbed Bloodletter",
+      "set": "ECL",
+      "count": 1
+    },
+    {
+      "name": "Bark of Doran",
+      "set": "ECL",
+      "count": 1
+    },
+    {
+      "name": "Bile-Vial Boggart",
+      "set": "ECL",
+      "count": 1
+    },
+    {
+      "name": "Blight Rot",
+      "set": "ECL",
+      "count": 1
+    },
+    {
+      "name": "Blighted Blackthorn",
+      "set": "ECL",
+      "count": 1
+    },
+    {
+      "name": "Blossombind",
+      "set": "ECL",
+      "count": 1
+    },
+    {
+      "name": "Boggart Mischief",
+      "set": "ECL",
+      "count": 1
+    },
+    {
+      "name": "Boggart Prankster",
+      "set": "ECL",
+      "count": 1
+    },
+    {
+      "name": "Bogslither's Embrace",
+      "set": "ECL",
+      "count": 1
+    },
+    {
+      "name": "Boldwyr Aggressor",
+      "set": "ECL",
+      "count": 1
+    },
+    {
+      "name": "Boneclub Berserker",
+      "set": "ECL",
+      "count": 1
+    },
+    {
+      "name": "Boulder Dash",
+      "set": "ECL",
+      "count": 1
+    },
+    {
+      "name": "Brambleback Brute",
+      "set": "ECL",
+      "count": 1
+    },
+    {
+      "name": "Bristlebane Outrider",
+      "set": "ECL",
       "count": 1
     }
   ]

@@ -43,6 +43,14 @@ class PoseAnimationSegment:
     duration_s: float = 0.12
 
 
+class _RecognitionProgressSink:
+    def __init__(self, ui: "TkDebugUI") -> None:
+        self._ui = ui
+
+    def update(self, message: str) -> None:
+        self._ui._record_recognition_progress(message)
+
+
 class TkDebugUI:
     def __init__(self, orchestrator: Orchestrator, calibration: CalibrationProfile, slow_ms: int = 0):
         self.orchestrator = orchestrator
@@ -62,6 +70,7 @@ class TkDebugUI:
         self._scaled_image_cache: dict[tuple[str, int, int], ImageTk.PhotoImage] = {}
         self._canvas_image_refs: list[ImageTk.PhotoImage] = []
         self._alarm_events: list[str] = []
+        self._recognition_progress_messages: list[str] = []
 
         self.root = tk.Tk()
         self.root.title("Sorter Control Console")
@@ -925,6 +934,7 @@ class TkDebugUI:
 
     def _run_single_recognition(self) -> None:
         image_path = self.recognition_image_var.get().strip()
+        self._recognition_progress_messages = []
         if not image_path:
             self._set_recognition_output("Choose an image first.")
             return
@@ -940,6 +950,7 @@ class TkDebugUI:
             "use_tracked_pool": bool(self.use_tracked_pool_var.get()),
             "track_result": bool(self.track_result_var.get()),
             "backend": self.engine_var.get().strip().lower() or None,
+            "progress_callback": _RecognitionProgressSink(self),
         }
 
         expected_name = self.expected_name_var.get().strip()
@@ -968,7 +979,11 @@ class TkDebugUI:
         try:
             result = recognizer.recognize_top_card(frame)
         except Exception as exc:
-            self._set_recognition_output(f"Recognition failed: {exc}")
+            lines = [f"Recognition failed: {exc}"]
+            if self._recognition_progress_messages:
+                lines.extend(["", "Progress:"])
+                lines.extend(self._recognition_progress_messages)
+            self._set_recognition_output("\n".join(lines))
             self._add_alarm("ERROR", f"Recognition failed: {exc}")
             return
 
@@ -979,7 +994,13 @@ class TkDebugUI:
             "fallback_used": result.fallback_used,
         }
 
-        lines = [
+        lines: list[str] = []
+        if self._recognition_progress_messages:
+            lines.extend(["Progress:"])
+            lines.extend(self._recognition_progress_messages)
+            lines.append("")
+
+        lines.extend([
             f"Name: {result.card_name}",
             f"Confidence: {result.confidence:.4f}",
             f"Backend: {result.backend}",
@@ -990,7 +1011,7 @@ class TkDebugUI:
             f"Failure code: {result.failure_code}",
             "",
             "Alternatives:",
-        ]
+        ])
         if result.alternatives:
             for candidate in result.alternatives:
                 lines.append(
@@ -1001,6 +1022,13 @@ class TkDebugUI:
 
         self._set_recognition_output("\n".join(lines))
         self._add_alarm("INFO", "Single image recognition executed")
+
+    def _record_recognition_progress(self, message: str) -> None:
+        if not message:
+            return
+        self._recognition_progress_messages.append(message)
+        self._set_recognition_output("Progress:\n" + "\n".join(self._recognition_progress_messages))
+        self.root.update_idletasks()
 
     def _set_recognition_output(self, content: str) -> None:
         self.recognition_output.delete("1.0", tk.END)

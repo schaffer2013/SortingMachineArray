@@ -147,6 +147,7 @@ class FuzzyEnigmaRecognizerAdapter:
             request = {}
         requested_mode = str(request.get("mode") or self._mode)
         prefer_visual_small_pool = bool(request.get("prefer_visual_small_pool", self._prefer_visual_small_pool))
+        progress_callback = _progress_callback_from_value(request.get("progress_callback"))
         requested_backend = request.get("backend")
         if isinstance(requested_backend, str):
             requested_backend = requested_backend.strip().lower()
@@ -175,14 +176,15 @@ class FuzzyEnigmaRecognizerAdapter:
             )
 
         try:
-            output = self._recognizer.recognize_top_card(
+            output = _recognize_card_engine_detailed(
+                self._recognizer,
                 frame.path,
                 mode=requested_mode,
                 expected_card=expected_card,
                 use_tracked_pool=use_tracked_pool,
                 track_result=track_result,
-                detailed=True,
                 prefer_visual_small_pool=prefer_visual_small_pool,
+                progress_callback=progress_callback,
             )
         except ValueError as exc:
             error_message = str(exc)
@@ -192,7 +194,7 @@ class FuzzyEnigmaRecognizerAdapter:
             return RecognitionResult(
                 card_name=None,
                 confidence=0.0,
-                backend=self.card_engine_requested_backend,
+                backend=requested_backend or self.card_engine_requested_backend,
                 requested_mode=requested_mode,
                 effective_mode=requested_mode,
                 failure_code=error_code,
@@ -209,11 +211,12 @@ class FuzzyEnigmaRecognizerAdapter:
                     "engine_error": error_message,
                 },
             )
-        raw_debug = dict(output.debug)
-        mode_flags = dict(output.mode_flags) if isinstance(output.mode_flags, dict) else {}
-        pipeline_summary = dict(output.pipeline_summary) if isinstance(output.pipeline_summary, dict) else {}
-        requested_mode = output.requested_mode or requested_mode
-        effective_mode = output.effective_mode or requested_mode
+        raw_debug = dict(_output_attr(output, "debug", {}))
+        mode_flags = dict(_output_attr(output, "mode_flags", {}))
+        pipeline_summary = dict(_output_attr(output, "pipeline_summary", {}))
+        requested_mode = _output_attr(output, "requested_mode", requested_mode) or requested_mode
+        effective_mode = _output_attr(output, "effective_mode", requested_mode) or requested_mode
+        top_k_candidates = list(_output_attr(output, "top_k_candidates", []))
         alternatives = tuple(
             {
                 "name": candidate.name,
@@ -223,14 +226,15 @@ class FuzzyEnigmaRecognizerAdapter:
                 "set_code": candidate.set_code,
                 "collector_number": candidate.collector_number,
             }
-            for candidate in output.top_k_candidates
+            for candidate in top_k_candidates
         )
+        best_candidate = top_k_candidates[0] if top_k_candidates else None
         return RecognitionResult(
-            card_name=output.card_name,
-            confidence=float(output.confidence),
+            card_name=_output_attr(output, "card_name", _output_attr(output, "best_name")),
+            confidence=float(_output_attr(output, "confidence", 0.0)),
             backend=_effective_card_engine_backend(raw_debug, default=self.card_engine_requested_backend),
-            scryfall_id=output.scryfall_id,
-            oracle_id=output.oracle_id,
+            scryfall_id=_output_attr(output, "scryfall_id", getattr(best_candidate, "scryfall_id", None)),
+            oracle_id=_output_attr(output, "oracle_id", getattr(best_candidate, "oracle_id", None)),
             requested_mode=str(requested_mode) if requested_mode is not None else self._mode,
             effective_mode=str(effective_mode) if effective_mode is not None else self._mode,
             mode_flags=mode_flags,
@@ -240,19 +244,76 @@ class FuzzyEnigmaRecognizerAdapter:
                 prefer_visual_small_pool=prefer_visual_small_pool,
             ),
             pipeline_summary=pipeline_summary,
-            failure_code=output.failure_code,
-            review_reason=output.review_reason,
-            needs_review=output.review_reason is not None,
+            failure_code=_output_attr(output, "failure_code"),
+            review_reason=_output_attr(output, "review_reason"),
+            needs_review=_output_attr(output, "review_reason") is not None,
             alternatives=alternatives,
             debug={
                 "backend": dict(raw_debug.get("backend", {})) if isinstance(raw_debug.get("backend"), dict) else {},
-                "active_roi": output.active_roi,
-                "tried_rois": list(output.tried_rois),
-                "bbox": output.bbox,
-                "ocr_lines": list(output.ocr_lines),
+                "active_roi": _output_attr(output, "active_roi"),
+                "tried_rois": list(_output_attr(output, "tried_rois", [])),
+                "bbox": _output_attr(output, "bbox"),
+                "ocr_lines": list(_output_attr(output, "ocr_lines", [])),
                 "raw": raw_debug,
             },
         )
+
+
+def _progress_callback_from_value(value: Any):
+    if callable(value):
+        return value
+    update = getattr(value, "update", None)
+    if callable(update):
+        return update
+    return None
+
+
+def _recognize_card_engine_detailed(
+    recognizer: Any,
+    image_path: str,
+    *,
+    mode: str,
+    expected_card: Any,
+    use_tracked_pool: Any,
+    track_result: Any,
+    prefer_visual_small_pool: bool,
+    progress_callback,
+):
+    session = getattr(recognizer, "session", None)
+    if session is not None and hasattr(session, "recognize"):
+        return session.recognize(
+            image_path,
+            mode=mode,
+            expected_card=expected_card,
+            use_tracked_pool=use_tracked_pool,
+            track_result=track_result,
+            progress_callback=progress_callback,
+            prefer_visual_small_pool=prefer_visual_small_pool,
+        )
+
+    kwargs = {
+        "mode": mode,
+        "expected_card": expected_card,
+        "use_tracked_pool": use_tracked_pool,
+        "track_result": track_result,
+        "detailed": True,
+        "prefer_visual_small_pool": prefer_visual_small_pool,
+    }
+    if progress_callback is not None:
+        try:
+            return recognizer.recognize_top_card(
+                image_path,
+                progress_callback=progress_callback,
+                **kwargs,
+            )
+        except TypeError as exc:
+            if "progress_callback" not in str(exc):
+                raise
+    return recognizer.recognize_top_card(image_path, **kwargs)
+
+
+def _output_attr(output: Any, name: str, default: Any = None) -> Any:
+    return getattr(output, name, default)
 
 
 def _engine_error_code(message: str) -> str | None:

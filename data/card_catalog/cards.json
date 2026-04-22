@@ -4,20 +4,71 @@
   "source_sim_card_list": "config/sim_card_lists/default_cards.json",
   "cards": [
     {
-      "name": "Elspeth, Storm Slayer",
-      "scryfall_id": "73a065e3-b530-4e62-ab3c-4f6f908184ec",
-      "oracle_id": "f78af825-023a-42e9-8374-5c52303a1417",
-      "set_code": "tdm",
-      "collector_number": "11",
+      "name": "Appeal to Eirdu",
+      "scryfall_id": "68ce9752-21f9-48e9-bf48-7f76f1cecbc5",
+      "oracle_id": "cea09261-41a2-43e5-bf43-c4097e6615c6",
+      "set_code": "ecl",
+      "collector_number": "5",
+      "image_url": "https://cards.scryfall.io/png/front/6/8/68ce9752-21f9-48e9-bf48-7f76f1cecbc5.png?1767692118",
+      "rarity": "common",
+      "colors": [
+        "w"
+      ],
+      "color_identity": [
+        "w"
+      ],
+      "card_types": [
+        "instant"
+      ],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null
+    },
+    {
+      "name": "Aquitect's Defenses",
+      "scryfall_id": "9af9a907-fd2e-4ae0-ac7b-529074b79a14",
+      "oracle_id": "b9dee727-8ad8-42e0-93c6-5ef91d3f7309",
+      "set_code": "ecl",
+      "collector_number": "44",
+      "image_url": "https://cards.scryfall.io/png/front/9/a/9af9a907-fd2e-4ae0-ac7b-529074b79a14.png?1767871750",
+      "rarity": "common",
+      "colors": [
+        "u"
+      ],
+      "color_identity": [
+        "u"
+      ],
+      "card_types": [
+        "enchantment"
+      ],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null
+    },
+    {
+      "name": "Ashling, the Limitless",
+      "scryfall_id": "5924c01f-2815-4e37-b700-3ba6cc81e0e4",
+      "oracle_id": "77a9e7cf-76e9-4323-8504-a5b831de00be",
+      "set_code": "ecc",
+      "collector_number": "1",
+      "image_url": "https://cards.scryfall.io/png/front/5/9/5924c01f-2815-4e37-b700-3ba6cc81e0e4.png?1768940591",
       "rarity": "mythic",
       "colors": [
-        "w"
+        "r"
       ],
       "color_identity": [
+        "b",
+        "g",
+        "r",
+        "u",
         "w"
       ],
       "card_types": [
-        "planeswalker"
+        "creature"
       ],
       "supertypes": [
         "legendary"
@@ -28,20 +79,21 @@
       "market_price_usd": null
     },
     {
-      "name": "Furious Forebear",
-      "scryfall_id": "a4f247b6-8212-4e78-a452-d2d3be228d8e",
-      "oracle_id": "4fb1d33f-a87d-46cf-a73e-882c3dbcb26f",
-      "set_code": "tdm",
-      "collector_number": "13",
-      "rarity": "uncommon",
+      "name": "Assert Perfection",
+      "scryfall_id": "6995b308-5582-4ca1-ab10-a536d5ca0a6d",
+      "oracle_id": "ecf574a5-6410-466d-a726-732134f904b2",
+      "set_code": "ecl",
+      "collector_number": "164",
+      "image_url": "https://cards.scryfall.io/png/front/6/9/6995b308-5582-4ca1-ab10-a536d5ca0a6d.png?1767732784",
+      "rarity": "common",
       "colors": [
-        "w"
+        "g"
       ],
       "color_identity": [
-        "w"
+        "g"
       ],
       "card_types": [
-        "creature"
+        "sorcery"
       ],
       "supertypes": [],
       "is_land": false,
@@ -50,82 +102,365 @@
       "market_price_usd": null
     },
     {
-      "name": "Flood",
-      "scryfall_id": "2aefbeae-ac72-4a13-8898-8d1e42a633a6",
-      "oracle_id": "e8eb2abb-daf9-43e0-b909-d96b679f71c2",
-      "set_code": "5ed",
+      "name": "Auntie Ool, Cursewretch",
+      "scryfall_id": "9a2e4252-9fbc-4d43-8935-db2cafaa7b5f",
+      "oracle_id": "e3cd53c1-86bd-4177-adb0-a1fa693b44c6",
+      "set_code": "ecc",
+      "collector_number": "2",
+      "image_url": "https://cards.scryfall.io/png/front/9/a/9a2e4252-9fbc-4d43-8935-db2cafaa7b5f.png?1768940605",
+      "rarity": "mythic",
+      "colors": [
+        "b",
+        "g",
+        "r"
+      ],
+      "color_identity": [
+        "b",
+        "g",
+        "r"
+      ],
+      "card_types": [
+        "creature"
+      ],
+      "supertypes": [
+        "legendary"
+      ],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null
+    },
+    {
+      "name": "Auntie's Sentence",
+      "scryfall_id": "e64bfe16-7362-4982-9136-1f4e0d335441",
+      "oracle_id": "406e6db7-6e31-44b9-a793-57ee10688f71",
+      "set_code": "ecl",
+      "collector_number": "85",
+      "image_url": "https://cards.scryfall.io/png/front/e/6/e64bfe16-7362-4982-9136-1f4e0d335441.png?1767871817",
+      "rarity": "common",
+      "colors": [
+        "b"
+      ],
+      "color_identity": [
+        "b"
+      ],
+      "card_types": [
+        "sorcery"
+      ],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null
+    },
+    {
+      "name": "Barbed Bloodletter",
+      "scryfall_id": "8ff1a13c-e338-42e9-8eb3-b303fabd67de",
+      "oracle_id": "15febce7-8320-4591-9535-ef11c8adecc2",
+      "set_code": "ecl",
+      "collector_number": "86",
+      "image_url": "https://cards.scryfall.io/png/front/8/f/8ff1a13c-e338-42e9-8eb3-b303fabd67de.png?1767957075",
+      "rarity": "common",
+      "colors": [
+        "b"
+      ],
+      "color_identity": [
+        "b"
+      ],
+      "card_types": [
+        "artifact"
+      ],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null
+    },
+    {
+      "name": "Bark of Doran",
+      "scryfall_id": "98210276-1b85-4db5-8ab4-ecb08f5d2ee2",
+      "oracle_id": "db3ba239-2239-4e9d-ad70-cff32ed24578",
+      "set_code": "ecl",
+      "collector_number": "6",
+      "image_url": "https://cards.scryfall.io/png/front/9/8/98210276-1b85-4db5-8ab4-ecb08f5d2ee2.png?1767862363",
+      "rarity": "uncommon",
+      "colors": [
+        "w"
+      ],
+      "color_identity": [
+        "w"
+      ],
+      "card_types": [
+        "artifact"
+      ],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null
+    },
+    {
+      "name": "Bile-Vial Boggart",
+      "scryfall_id": "2c0fcf98-1f3c-4cff-9234-7f3d0c8b22e9",
+      "oracle_id": "5a651557-ce08-46ba-aecd-0e4fbfdef3c0",
+      "set_code": "ecl",
       "collector_number": "87",
+      "image_url": "https://cards.scryfall.io/png/front/2/c/2c0fcf98-1f3c-4cff-9234-7f3d0c8b22e9.png?1767732575",
       "rarity": "common",
       "colors": [
-        "u"
+        "b"
       ],
       "color_identity": [
-        "u"
-      ],
-      "card_types": [
-        "enchantment"
-      ],
-      "supertypes": [],
-      "is_land": false,
-      "is_basic_land": false,
-      "mana_value": null,
-      "market_price_usd": null
-    },
-    {
-      "name": "Future Sight",
-      "scryfall_id": "639cb483-ffe2-4abc-a050-5cdc8aebd5a2",
-      "oracle_id": "93a0e938-b916-47ec-9803-369e885e253c",
-      "set_code": "mh1",
-      "collector_number": "53",
-      "rarity": "rare",
-      "colors": [
-        "u"
-      ],
-      "color_identity": [
-        "u"
-      ],
-      "card_types": [
-        "enchantment"
-      ],
-      "supertypes": [],
-      "is_land": false,
-      "is_basic_land": false,
-      "mana_value": null,
-      "market_price_usd": null
-    },
-    {
-      "name": "Alpharael, Dreaming Acolyte",
-      "scryfall_id": "349a2211-2b23-418d-a1ef-1c72ad2e171d",
-      "oracle_id": "e4be4071-7910-460f-90f3-6c4d8cc9db65",
-      "set_code": "eoe",
-      "collector_number": "212",
-      "rarity": "uncommon",
-      "colors": [
-        "b",
-        "u"
-      ],
-      "color_identity": [
-        "b",
-        "u"
+        "b"
       ],
       "card_types": [
         "creature"
       ],
-      "supertypes": [
-        "legendary"
-      ],
+      "supertypes": [],
       "is_land": false,
       "is_basic_land": false,
       "mana_value": null,
       "market_price_usd": null
     },
     {
-      "name": "Garenbrig Carver // Shield's Might",
-      "scryfall_id": "194b7a1c-291a-470e-9a40-61b72a46793b",
-      "oracle_id": "496c9633-ff17-48df-9b24-1d8cbfd06126",
-      "set_code": "eld",
-      "collector_number": "156",
+      "name": "Blight Rot",
+      "scryfall_id": "5201bdeb-ba47-459b-ac0d-603367914578",
+      "oracle_id": "cf5b1cf9-dcd3-44d1-b8b2-338651ebb2a1",
+      "set_code": "ecl",
+      "collector_number": "89",
+      "image_url": "https://cards.scryfall.io/png/front/5/2/5201bdeb-ba47-459b-ac0d-603367914578.png?1767952066",
       "rarity": "common",
+      "colors": [
+        "b"
+      ],
+      "color_identity": [
+        "b"
+      ],
+      "card_types": [
+        "instant"
+      ],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null
+    },
+    {
+      "name": "Blighted Blackthorn",
+      "scryfall_id": "3515531a-45d6-4fe0-96a3-7ca1ce545068",
+      "oracle_id": "a294968e-9a7f-4d66-bde0-e775ae5f8197",
+      "set_code": "ecl",
+      "collector_number": "90",
+      "image_url": "https://cards.scryfall.io/png/front/3/5/3515531a-45d6-4fe0-96a3-7ca1ce545068.png?1767871828",
+      "rarity": "common",
+      "colors": [
+        "b"
+      ],
+      "color_identity": [
+        "b"
+      ],
+      "card_types": [
+        "creature"
+      ],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null
+    },
+    {
+      "name": "Blossombind",
+      "scryfall_id": "382b83c0-bbbc-4db8-bc04-cfea79aed1b3",
+      "oracle_id": "0ecb35b3-5bd1-4467-a4a3-ce468023ced2",
+      "set_code": "ecl",
+      "collector_number": "45",
+      "image_url": "https://cards.scryfall.io/png/front/3/8/382b83c0-bbbc-4db8-bc04-cfea79aed1b3.png?1767732510",
+      "rarity": "common",
+      "colors": [
+        "u"
+      ],
+      "color_identity": [
+        "u"
+      ],
+      "card_types": [
+        "enchantment"
+      ],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null
+    },
+    {
+      "name": "Boggart Mischief",
+      "scryfall_id": "aaeb9c9c-0f15-49dc-ae6d-2a958680f327",
+      "oracle_id": "ac65ed8c-abe8-4044-9ce5-70b1370d0e19",
+      "set_code": "ecl",
+      "collector_number": "92",
+      "image_url": "https://cards.scryfall.io/png/front/a/a/aaeb9c9c-0f15-49dc-ae6d-2a958680f327.png?1767659614",
+      "rarity": "uncommon",
+      "colors": [
+        "b"
+      ],
+      "color_identity": [
+        "b"
+      ],
+      "card_types": [
+        "enchantment",
+        "kindred"
+      ],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null
+    },
+    {
+      "name": "Boggart Prankster",
+      "scryfall_id": "eb228ea6-9235-4093-aea7-708e743b1b44",
+      "oracle_id": "1bcac664-835a-4474-8ca4-263801bde08e",
+      "set_code": "ecl",
+      "collector_number": "93",
+      "image_url": "https://cards.scryfall.io/png/front/e/b/eb228ea6-9235-4093-aea7-708e743b1b44.png?1767957110",
+      "rarity": "common",
+      "colors": [
+        "b"
+      ],
+      "color_identity": [
+        "b"
+      ],
+      "card_types": [
+        "creature"
+      ],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null
+    },
+    {
+      "name": "Bogslither's Embrace",
+      "scryfall_id": "4beca2e7-9c6d-493b-b15f-69e483a8dfff",
+      "oracle_id": "21695c70-f746-4d77-b6d3-e2713a5c929e",
+      "set_code": "ecl",
+      "collector_number": "94",
+      "image_url": "https://cards.scryfall.io/png/front/4/b/4beca2e7-9c6d-493b-b15f-69e483a8dfff.png?1767957120",
+      "rarity": "common",
+      "colors": [
+        "b"
+      ],
+      "color_identity": [
+        "b"
+      ],
+      "card_types": [
+        "sorcery"
+      ],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null
+    },
+    {
+      "name": "Boldwyr Aggressor",
+      "scryfall_id": "76bbccd2-8a90-49a7-921a-6565b495efdf",
+      "oracle_id": "ab32c671-7686-435b-a987-14a08f6790eb",
+      "set_code": "ecl",
+      "collector_number": "125",
+      "image_url": "https://cards.scryfall.io/png/front/7/6/76bbccd2-8a90-49a7-921a-6565b495efdf.png?1767871989",
+      "rarity": "uncommon",
+      "colors": [
+        "r"
+      ],
+      "color_identity": [
+        "r"
+      ],
+      "card_types": [
+        "creature"
+      ],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null
+    },
+    {
+      "name": "Boneclub Berserker",
+      "scryfall_id": "b3dbbe30-3d6e-46f8-92c1-caee995cba1a",
+      "oracle_id": "a08f69f9-de48-46d6-8b75-31886159cf45",
+      "set_code": "ecl",
+      "collector_number": "126",
+      "image_url": "https://cards.scryfall.io/png/front/b/3/b3dbbe30-3d6e-46f8-92c1-caee995cba1a.png?1767732716",
+      "rarity": "common",
+      "colors": [
+        "r"
+      ],
+      "color_identity": [
+        "r"
+      ],
+      "card_types": [
+        "creature"
+      ],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null
+    },
+    {
+      "name": "Boulder Dash",
+      "scryfall_id": "657a2a24-22d1-4bc2-9f22-ed361ae487e3",
+      "oracle_id": "30a9ad0e-1b23-41ce-bacc-3b27f78ef628",
+      "set_code": "ecl",
+      "collector_number": "127",
+      "image_url": "https://cards.scryfall.io/png/front/6/5/657a2a24-22d1-4bc2-9f22-ed361ae487e3.png?1767952124",
+      "rarity": "uncommon",
+      "colors": [
+        "r"
+      ],
+      "color_identity": [
+        "r"
+      ],
+      "card_types": [
+        "sorcery"
+      ],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null
+    },
+    {
+      "name": "Brambleback Brute",
+      "scryfall_id": "5ebb8365-c6e1-46e8-a242-6aa27b21e68a",
+      "oracle_id": "eb25920a-3162-4838-b092-09cbd43332fd",
+      "set_code": "ecl",
+      "collector_number": "128",
+      "image_url": "https://cards.scryfall.io/png/front/5/e/5ebb8365-c6e1-46e8-a242-6aa27b21e68a.png?1767952109",
+      "rarity": "common",
+      "colors": [
+        "r"
+      ],
+      "color_identity": [
+        "r"
+      ],
+      "card_types": [
+        "creature"
+      ],
+      "supertypes": [],
+      "is_land": false,
+      "is_basic_land": false,
+      "mana_value": null,
+      "market_price_usd": null
+    },
+    {
+      "name": "Bristlebane Outrider",
+      "scryfall_id": "38b17a3c-4457-47e3-986e-ff0b94c41b1a",
+      "oracle_id": "48f7217e-ae11-44bd-ac42-7c8d9dd5dc36",
+      "set_code": "ecl",
+      "collector_number": "169",
+      "image_url": "https://cards.scryfall.io/png/front/3/8/38b17a3c-4457-47e3-986e-ff0b94c41b1a.png?1767862561",
+      "rarity": "uncommon",
       "colors": [
         "g"
       ],
@@ -133,8 +468,7 @@
         "g"
       ],
       "card_types": [
-        "creature",
-        "instant"
+        "creature"
       ],
       "supertypes": [],
       "is_land": false,

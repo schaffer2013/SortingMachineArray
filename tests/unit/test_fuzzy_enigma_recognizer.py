@@ -295,6 +295,86 @@ def test_fuzzy_enigma_recognizer_uses_frame_level_recognition_request(monkeypatc
     assert "has_expected_card" in result.mode_features
 
 
+def test_fuzzy_enigma_recognizer_uses_progress_object_update_from_request(monkeypatch, tmp_path):
+    seen: dict[str, object] = {}
+    updates: list[str] = []
+
+    class ProgressSink:
+        def update(self, message: str) -> None:
+            updates.append(message)
+
+    class FakeSession:
+        def recognize(self, image, **kwargs):
+            seen["image"] = image
+            seen["kwargs"] = kwargs
+            progress_callback = kwargs.get("progress_callback")
+            if progress_callback is not None:
+                progress_callback("Preparing recognition...")
+            return SimpleNamespace(
+                best_name="Alpha",
+                confidence=0.73,
+                bbox=None,
+                ocr_lines=[],
+                top_k_candidates=[
+                    SimpleNamespace(
+                        name="Alpha",
+                        score=0.73,
+                        scryfall_id="alpha-id",
+                        oracle_id="alpha-oracle",
+                        set_code="LEA",
+                        collector_number="1",
+                    )
+                ],
+                active_roi=None,
+                tried_rois=[],
+                requested_mode="greenfield",
+                effective_mode="greenfield",
+                mode_flags={"has_candidate_pool": False},
+                pipeline_summary={"resolution_path": "title_only", "branches_fired": ["title_ocr"]},
+                failure_code=None,
+                review_reason=None,
+                debug={"backend": {"requested": "fuzzy_enigma", "effective": "fuzzy_enigma"}},
+            )
+
+    class FakeRecognizer:
+        def __init__(self, **kwargs):
+            self.session = FakeSession()
+
+    fake_modules = SimpleNamespace(
+        config=SimpleNamespace(load_engine_config=lambda path=None: {"path": path}),
+        sortingmachine=SimpleNamespace(SortingMachineRecognizer=FakeRecognizer),
+        operational_modes=SimpleNamespace(
+            expected_card_from_values=lambda **kwargs: {"expected": kwargs},
+        ),
+    )
+    monkeypatch.setattr(
+        "sorter.adapters.recognition.fuzzy_enigma_recognizer._load_card_engine_modules",
+        lambda project_root: fake_modules,
+    )
+    monkeypatch.setattr("sorter.adapters.recognition.fuzzy_enigma_recognizer._card_engine_ocr_available", lambda: True)
+
+    adapter = FuzzyEnigmaRecognizerAdapter(project_root=tmp_path, mode="greenfield")
+    frame = Frame(
+        frame_id="frame-progress",
+        path=str(tmp_path / "card.jpg"),
+        pile_id=PileId(x_index=0, y_index=0),
+        metadata={
+            "recognition_request": {
+                "progress_callback": ProgressSink(),
+            },
+        },
+    )
+
+    result = adapter.recognize_top_card(frame)
+
+    assert seen["image"] == str(tmp_path / "card.jpg")
+    assert callable(seen["kwargs"]["progress_callback"])
+    assert updates == ["Preparing recognition..."]
+    assert result.card_name == "Alpha"
+    assert result.scryfall_id == "alpha-id"
+    assert result.oracle_id == "alpha-oracle"
+
+
 def test_fuzzy_enigma_recognizer_reports_configured_card_engine_backend(monkeypatch, tmp_path):
     fake_config = SimpleNamespace(recognition_backend="moss_machine", recognition_backend_fallback=False)
     fake_modules = SimpleNamespace(
