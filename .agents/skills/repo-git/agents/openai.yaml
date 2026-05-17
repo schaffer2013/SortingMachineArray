@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repo Git"
+  short_description: "Handle safe Git workflows in this repository"
+  default_prompt: "Use this skill to inspect repo status, create branches, stage intentionally, commit scoped changes, and push safely."

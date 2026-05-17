@@ -52,6 +52,7 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 
 The current web console is immediately useful in `sim` mode. The camera stream endpoint is already exposed, but the present `PiCamera2Adapter` is still a hardware stub, so true live Pi-camera frames require the hardware capture path to be completed.
 
+
 ## Recognition backend toggle
 
 - Default recognizer backend: `SORTER_RECOGNIZER_BACKEND=moss_machine`
