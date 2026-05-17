@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Sorter Console{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">SortingMachineArray</p>
+          <h1>Sorter Console</h1>
+        </div>
+        <nav>
+          <a class="{{ 'active' if request.path == '/' else '' }}" href="/">Dashboard</a>
+          <a class="{{ 'active' if request.path == '/machine' else '' }}" href="/machine">Machine</a>
+          <a class="{{ 'active' if request.path == '/recognition' else '' }}" href="/recognition">Recognition</a>
+          <a class="{{ 'active' if request.path == '/runs' else '' }}" href="/runs">Runs</a>
+          <a class="{{ 'active' if request.path == '/about' else '' }}" href="/about">Capabilities</a>
+        </nav>
+      </header>
+      <main>{% block content %}{% endblock %}</main>
+    </div>
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

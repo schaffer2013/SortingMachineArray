@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Recognition · Sorter Console{% endblock %}
+{% block content %}
+<section class="two-column">
+  <article class="panel">
+    <p class="eyebrow">Catalog</p>
+    <h2>Card validation</h2>
+    <label>Card name<input id="card-query" placeholder="Lightning Bolt"></label>
+    <div id="card-validation" class="stacked-copy muted">Start typing to validate against the local catalog.</div>
+  </article>
+  <article class="panel">
+    <p class="eyebrow">Manual review</p>
+    <h2>Recognize an image</h2>
+    <form id="recognition-form">
+      <label>Image<input name="image" type="file" accept="image/*" required></label>
+      <div class="form-grid">
+        <label>Backend<input name="backend" placeholder="moss_machine"></label>
+        <label>Mode
+          <select name="mode">
+            <option>greenfield</option>
+            <option>tracked_pool</option>
+            <option>expected_card</option>
+          </select>
+        </label>
+        <label>Expected name<input name="expected_name"></label>
+        <label>Expected set<input name="expected_set"></label>
+        <label>Collector #<input name="expected_collector"></label>
+      </div>
+      <div class="checkbox-row">
+        <label><input type="checkbox" name="prefer_visual_small_pool"> Prefer visual small pool</label>
+        <label><input type="checkbox" name="use_tracked_pool"> Use tracked pool</label>
+        <label><input type="checkbox" name="track_result"> Track result</label>
+      </div>
+      <button>Run recognition</button>
+    </form>
+  </article>
+</section>
+<section class="panel">
+  <p class="eyebrow">Output</p>
+  <h2>Recognition result</h2>
+  <pre id="recognition-result" class="code-block">No manual recognition yet.</pre>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>window.SorterPages.recognition();</script>
+{% endblock %}

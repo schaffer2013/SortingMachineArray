@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · Sorter Console{% endblock %}
+{% block content %}
+<section class="hero-grid">
+  <article class="panel live-feed">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">Vision</p>
+        <h2>Live camera feed</h2>
+      </div>
+      <span class="pill" id="lifecycle-pill">IDLE</span>
+    </div>
+    <img class="camera-feed" src="/camera/stream" alt="Live sorter camera feed">
+  </article>
+  <article class="panel">
+    <p class="eyebrow">Run control</p>
+    <h2>Operator actions</h2>
+    <div class="button-row">
+      <button data-run="start">Start run</button>
+      <button class="secondary" data-run="stop">Stop</button>
+    </div>
+    <dl class="metric-list" id="status-summary"></dl>
+  </article>
+</section>
+<section class="dashboard-grid">
+  <article class="panel wide">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">Machine</p>
+        <h2>Pile state</h2>
+      </div>
+    </div>
+    <div id="pile-grid" class="pile-grid"></div>
+  </article>
+  <article class="panel">
+    <p class="eyebrow">Recognition</p>
+    <h2>Latest scan</h2>
+    <div id="latest-recognition" class="stacked-copy muted">No scans yet.</div>
+  </article>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>window.SorterPages.dashboard();</script>
+{% endblock %}

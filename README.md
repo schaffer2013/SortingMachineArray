@@ -30,12 +30,27 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 1. Create/activate a Python 3.11+ environment.
 2. Install dependencies:
 	 - `pip install -e .[dev]`
-	 - if you want the real vendored recognizer, also install `pip install -e ./third_party/fuzzy-enigma-card-recognition[ocr]`
+	 - if you want the real vendored recognizer, also install `pip install -e ./third_party/fuzzy-enigma-card-recognition[ocr,moss]`
 3. Optional env file:
 	 - Copy `.env.example` values into your environment.
 4. Run:
 	 - `python -m sorter.interfaces.cli --mode sim`
 	 - or `python scripts/run_simulation.py`
+
+## Web operator console
+
+- Start the responsive web UI:
+	- `python -m sorter.interfaces.web_runner`
+- Then open:
+	- `http://localhost:8000`
+- Included pages:
+	- dashboard with live camera panel, run controls, pile state, and latest recognition
+	- machine page with axis and I/O controls
+	- recognition page with local catalog validation and manual image recognition
+	- recent run history
+	- capability map that distinguishes ready vs partial hardware-facing features
+
+The current web console is immediately useful in `sim` mode. The camera stream endpoint is already exposed, but the present `PiCamera2Adapter` is still a hardware stub, so true live Pi-camera frames require the hardware capture path to be completed.
 
 ## Recognition backend toggle
 
@@ -62,9 +77,11 @@ The sim camera no longer mutates pile observation state on capture by itself; ob
 	- `python scripts/replay_recognition.py --backend sim_truth`
 - Replay the vendored recognizer with the parent benchmark config:
 	- `python scripts/replay_recognition.py --backend fuzzy_enigma --pile 1`
+	- `python scripts/replay_recognition.py --backend moss_machine --pile 1`
 - Generate a benchmark summary JSON:
 	- `python scripts/benchmark_recognizer.py --backend sim_truth`
 	- `python scripts/benchmark_recognizer.py --backend fuzzy_enigma`
+	- `python scripts/benchmark_recognizer.py --backend moss_machine`
 	- `python scripts/benchmark_recognizer.py --backend fuzzy_enigma --card-engine-mode small_pool --use-expected-label`
 	- `python scripts/benchmark_recognizer.py --backend fuzzy_enigma --card-engine-mode reevaluation --use-expected-label`
 	- `python scripts/benchmark_recognizer.py --backend fuzzy_enigma --card-engine-mode confirmation --use-expected-label`
@@ -76,7 +93,7 @@ The sim camera no longer mutates pile observation state on capture by itself; ob
 	- `python scripts/package_submodule_feedback.py`
 - The summary JSON is written under `data/recognition_reports/`.
 - Portable success/failure reports are written under `data/recognition_reports/portable/`.
-- For `fuzzy_enigma`, replay and benchmark commands automatically prefer the parent-owned benchmark config unless you override `--card-engine-config`.
+- For `fuzzy_enigma` and `moss_machine`, replay and benchmark commands automatically prefer the parent-owned benchmark config unless you override `--card-engine-config`.
 - The summary JSON now includes alternatives, review reasons, confidence-band counts, and debug payloads, not just the final score line.
 - Replay and benchmark commands now accept `--card-engine-mode` so mode requests are explicit and reportable.
 - Replay and benchmark commands now accept `--use-expected-label`, `--use-tracked-pool`, `--track-result`, and `--prefer-visual-small-pool` so parent-side mode experiments are explicit and portable.
@@ -94,9 +111,9 @@ The sim camera no longer mutates pile observation state on capture by itself; ob
 - Imported manifests land under `data/vision/labels/...`
 - The initial stable sim-backed regression slice is documented in `tests/golden_frames/runtime_small_stack_top_cards.json`
 
-If you want to run the real vendored recognizer, make sure the submodule OCR extras are installed first:
+If you want to run the real vendored recognizer, make sure the submodule OCR and Moss extras are installed first:
 
-- `pip install -e ./third_party/fuzzy-enigma-card-recognition[ocr]`
+- `pip install -e ./third_party/fuzzy-enigma-card-recognition[ocr,moss]`
 
 ## Hardware mode notes
 

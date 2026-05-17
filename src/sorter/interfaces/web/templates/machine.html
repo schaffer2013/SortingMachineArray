@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Machine · Sorter Console{% endblock %}
+{% block content %}
+<section class="two-column">
+  <article class="panel">
+    <p class="eyebrow">Axis control</p>
+    <h2>Motion</h2>
+    <div class="button-row">
+      <button data-control="home">Home axes</button>
+      <button class="secondary" data-control="wait_idle">Wait idle</button>
+    </div>
+    <div class="form-grid">
+      <label>X mm<input id="move-x" type="number" value="100"></label>
+      <label>Y mm<input id="move-y" type="number" value="100"></label>
+      <button data-control="move_xy">Move XY</button>
+      <label>Z mm<input id="move-z" type="number" value="5"></label>
+      <button data-control="move_z">Move Z</button>
+    </div>
+  </article>
+  <article class="panel">
+    <p class="eyebrow">I/O control</p>
+    <h2>Vacuum and lights</h2>
+    <div class="button-row">
+      <button data-control="vacuum_on">Vacuum on</button>
+      <button class="secondary" data-control="vacuum_off">Vacuum off</button>
+    </div>
+    <label>Light status
+      <select id="light-status">
+        <option>idle</option>
+        <option>running</option>
+        <option>warning</option>
+        <option>fault</option>
+      </select>
+    </label>
+    <button data-control="lights">Apply lights</button>
+  </article>
+</section>
+<section class="two-column">
+  <article class="panel">
+    <p class="eyebrow">NeoPixel ring</p>
+    <h2>Saved light profiles</h2>
+    <label>Profile
+      <select id="light-profile"></select>
+    </label>
+    <button data-control="light_profile">Apply profile</button>
+  </article>
+  <article class="panel">
+    <p class="eyebrow">Create profile</p>
+    <h2>Custom RGB preset</h2>
+    <form id="light-profile-form">
+      <label>Name<input name="name" placeholder="inspection blue" required></label>
+      <div class="form-grid three-up">
+        <label>Red<input name="red" type="number" min="0" max="255" value="0"></label>
+        <label>Green<input name="green" type="number" min="0" max="255" value="0"></label>
+        <label>Blue<input name="blue" type="number" min="0" max="255" value="32"></label>
+      </div>
+      <button>Save profile</button>
+    </form>
+  </article>
+</section>
+<section class="panel">
+  <div class="panel-heading">
+    <div>
+      <p class="eyebrow">Telemetry</p>
+      <h2>Axis and I/O status</h2>
+    </div>
+  </div>
+  <div id="machine-status" class="status-cards"></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>window.SorterPages.machine();</script>
+{% endblock %}

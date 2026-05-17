@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Runs · Sorter Console{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="panel-heading">
+    <div>
+      <p class="eyebrow">History</p>
+      <h2>Recent runs</h2>
+    </div>
+  </div>
+  <div id="runs-table" class="table-wrap"></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>window.SorterPages.runs();</script>
+{% endblock %}
