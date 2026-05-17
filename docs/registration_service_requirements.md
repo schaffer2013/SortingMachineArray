@@ -331,17 +331,17 @@ collection exports.
 ### 9.2 Registration job submission
 
 - The sorter shall submit one job per card image.
-- The sorter shall submit jobs with an HTTP `POST`.
+- The sorter shall submit jobs with an HTTP `POST` using `multipart/form-data`.
 - Each job shall include:
-  - sorter run ID
-  - card sequence number within the run
-  - target collection ID
-  - raw image payload
-  - capture timestamp
-  - source pile and destination pile
-  - immediate recognition result when available
-  - expected Scryfall ID or equivalent identity hint when available
-  - optional expected printing metadata when available
+  - `sorter_run_id`
+  - `sorter_card_seq`
+  - `collection_id`
+  - `captured_at`
+  - `source_pile`
+  - `destination_pile`
+  - `sorter_expected_scryfall_id` when available
+  - `sorter_recognition_payload` when available
+  - `raw_image`
 - The service shall return a stable job ID.
 - The service shall persist the raw image on receipt and create an unverified
   collection-card record associated with the target collection.
@@ -476,13 +476,24 @@ collection exports.
 
 ## 11. Suggested API Surface
 
+The current authoritative API contract lives outside this repository in the
+collection service project:
+
+- `https://github.com/schaffer2013/magic-the-collecting/blob/main/API.md`
+
+That external `API.md` is the source of truth for implemented collection-facing
+endpoints, request fields, response codes, and export shape. The endpoint list
+below should stay aligned with it rather than becoming a competing contract.
+
 ### 11.1 Sorter-facing
 
 - `GET /health`
+- `POST /collections`
+- `GET /collections`
+- `GET /collections/{collection_id}/cards`
+- `GET /collections/{collection_id}/export.csv`
 - `POST /registration-jobs`
 - `GET /registration-jobs/{job_id}`
-- `GET /runs/{run_id}/registration-summary`
-- `GET /collections/{collection_id}/cards?verification_state=...`
 
 ### 11.2 Reviewer-facing
 
