@@ -10,4 +10,8 @@
   - correcting a typo
   - changing a single obvious value
   - another similarly minimal, low-risk edit
+- Updating submodule pointers after pulling submodules is also allowed directly on `main`:
+  - switch to `main`
+  - pull submodules recursively to bring them up to date
+  - commit and push the resulting submodule pointer change directly from `main`
 - If there is any doubt about whether a change is "tiny," create a branch instead of working on `main`.
