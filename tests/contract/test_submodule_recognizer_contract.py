@@ -102,9 +102,21 @@ def test_vendored_submodule_can_route_to_moss_backend(monkeypatch, tmp_path):
     image_path.write_bytes(b"fixture")
     seen: dict[str, object] = {}
 
-    def fake_run_moss_backend(image, *, mode=None, progress_callback=None, config=None):
+    def fake_run_moss_backend(
+        image,
+        *,
+        mode=None,
+        candidate_pool=None,
+        expected_card=None,
+        unsupported_reason=None,
+        progress_callback=None,
+        config=None,
+    ):
         seen["image"] = image
         seen["mode"] = mode
+        seen["candidate_pool"] = candidate_pool
+        seen["expected_card"] = expected_card
+        seen["unsupported_reason"] = unsupported_reason
         seen["config"] = config
         return SimpleNamespace(
             bbox=None,
@@ -154,4 +166,7 @@ def test_vendored_submodule_can_route_to_moss_backend(monkeypatch, tmp_path):
     assert output.active_roi == "moss_machine"
     assert seen["image"] == str(image_path)
     assert seen["mode"] == "greenfield"
+    assert seen["candidate_pool"] is None
+    assert seen["expected_card"] is None
+    assert seen["unsupported_reason"] is None
     assert seen["config"] is config

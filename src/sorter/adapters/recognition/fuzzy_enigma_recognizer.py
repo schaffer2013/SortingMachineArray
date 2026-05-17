@@ -13,6 +13,10 @@ from sorter.ports.camera import Frame
 from sorter.ports.recognizer import RecognitionResult
 
 
+_NO_ENV_CHANGE = object()
+_ENV_WAS_UNSET = object()
+
+
 @dataclass(frozen=True)
 class CardEngineModules:
     config: ModuleType
@@ -175,42 +179,48 @@ class FuzzyEnigmaRecognizerAdapter:
                 collector_number=expected_card_payload.get("collector_number"),
             )
 
+        previous_bytecode_env = _disable_bytecode_for_moss_subprocess(
+            requested_backend or self.card_engine_requested_backend
+        )
         try:
-            output = _recognize_card_engine_detailed(
-                self._recognizer,
-                frame.path,
-                mode=requested_mode,
-                expected_card=expected_card,
-                use_tracked_pool=use_tracked_pool,
-                track_result=track_result,
-                prefer_visual_small_pool=prefer_visual_small_pool,
-                progress_callback=progress_callback,
-            )
-        except ValueError as exc:
-            error_message = str(exc)
-            error_code = _engine_error_code(error_message)
-            if error_code is None:
-                raise
-            return RecognitionResult(
-                card_name=None,
-                confidence=0.0,
-                backend=requested_backend or self.card_engine_requested_backend,
-                requested_mode=requested_mode,
-                effective_mode=requested_mode,
-                failure_code=error_code,
-                review_reason=error_code,
-                needs_review=True,
-                mode_features=_mode_features(
-                    mode_flags=None,
-                    pipeline_summary={"resolution_path": "precondition_failed"},
+            try:
+                output = _recognize_card_engine_detailed(
+                    self._recognizer,
+                    frame.path,
+                    mode=requested_mode,
+                    expected_card=expected_card,
+                    use_tracked_pool=use_tracked_pool,
+                    track_result=track_result,
                     prefer_visual_small_pool=prefer_visual_small_pool,
-                ),
-                pipeline_summary={"resolution_path": "precondition_failed"},
-                debug={
-                    "engine_error_code": error_code,
-                    "engine_error": error_message,
-                },
-            )
+                    progress_callback=progress_callback,
+                )
+            except ValueError as exc:
+                error_message = str(exc)
+                error_code = _engine_error_code(error_message)
+                if error_code is None:
+                    raise
+                return RecognitionResult(
+                    card_name=None,
+                    confidence=0.0,
+                    backend=requested_backend or self.card_engine_requested_backend,
+                    requested_mode=requested_mode,
+                    effective_mode=requested_mode,
+                    failure_code=error_code,
+                    review_reason=error_code,
+                    needs_review=True,
+                    mode_features=_mode_features(
+                        mode_flags=None,
+                        pipeline_summary={"resolution_path": "precondition_failed"},
+                        prefer_visual_small_pool=prefer_visual_small_pool,
+                    ),
+                    pipeline_summary={"resolution_path": "precondition_failed"},
+                    debug={
+                        "engine_error_code": error_code,
+                        "engine_error": error_message,
+                    },
+                )
+        finally:
+            _restore_bytecode_env(previous_bytecode_env)
         raw_debug = dict(_output_attr(output, "debug", {}))
         mode_flags = dict(_output_attr(output, "mode_flags", {}))
         pipeline_summary = dict(_output_attr(output, "pipeline_summary", {}))
@@ -266,6 +276,26 @@ def _progress_callback_from_value(value: Any):
     if callable(update):
         return update
     return None
+
+
+def _disable_bytecode_for_moss_subprocess(backend: str | None) -> str | object:
+    if _normalize_card_engine_backend(backend) != "moss_machine":
+        return _NO_ENV_CHANGE
+    previous = os.environ.get("PYTHONDONTWRITEBYTECODE", _ENV_WAS_UNSET)
+    os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+    return previous
+
+
+def _restore_bytecode_env(previous: str | object) -> None:
+    if previous is _NO_ENV_CHANGE:
+        return
+    if previous is _ENV_WAS_UNSET:
+        os.environ.pop("PYTHONDONTWRITEBYTECODE", None)
+        return
+    if isinstance(previous, str):
+        os.environ["PYTHONDONTWRITEBYTECODE"] = previous
+    else:
+        os.environ.pop("PYTHONDONTWRITEBYTECODE", None)
 
 
 def _recognize_card_engine_detailed(
@@ -328,10 +358,7 @@ def _engine_error_code(message: str) -> str | None:
 
 def _configured_card_engine_backend(config: Any) -> str:
     configured = os.getenv("CARD_ENGINE_BACKEND") or getattr(config, "recognition_backend", None) or "fuzzy_enigma"
-    normalized = str(configured).strip().lower()
-    if normalized in {"moss", "moss_machine", "moss-machine"}:
-        return "moss_machine"
-    return "fuzzy_enigma"
+    return _normalize_card_engine_backend(configured)
 
 
 def _effective_card_engine_backend(raw_debug: dict[str, Any], *, default: str) -> str:
@@ -346,3 +373,10 @@ def _effective_card_engine_backend(raw_debug: dict[str, Any], *, default: str) -
                 return "fuzzy_enigma"
             return normalized
     return default
+
+
+def _normalize_card_engine_backend(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"moss", "moss_machine", "moss-machine"}:
+        return "moss_machine"
+    return "fuzzy_enigma"

@@ -188,7 +188,11 @@ def run_sim_recognition_benchmark(
             )
         )
 
-    requested_mode = getattr(settings, "card_engine_mode", None) if settings.recognizer_backend == "fuzzy_enigma" else None
+    requested_mode = (
+        getattr(settings, "card_engine_mode", None)
+        if _uses_card_engine_recognizer(settings.recognizer_backend)
+        else None
+    )
     if requested_mode is None:
         requested_modes = {case.requested_mode for case in cases if case.requested_mode}
         if len(requested_modes) == 1:
@@ -261,7 +265,7 @@ def _frame_with_recognition_request(
     track_result: bool | None,
     prefer_visual_small_pool: bool | None,
 ):
-    if settings.recognizer_backend != "fuzzy_enigma":
+    if not _uses_card_engine_recognizer(settings.recognizer_backend):
         return frame
 
     request: dict[str, object] = {}
@@ -318,7 +322,7 @@ def _mode_request_options(
     track_result: bool | None,
     prefer_visual_small_pool: bool | None,
 ) -> dict[str, object]:
-    if settings.recognizer_backend != "fuzzy_enigma":
+    if not _uses_card_engine_recognizer(settings.recognizer_backend):
         return {}
     options: dict[str, object] = {
         "mode": settings.card_engine_mode,
@@ -352,6 +356,10 @@ def _serialize_mode_request(value: object) -> dict[str, object]:
                     nested[str(nested_key)] = nested_item
             out[str(key)] = nested
     return out
+
+
+def _uses_card_engine_recognizer(backend: str) -> bool:
+    return str(backend).strip().lower() in {"fuzzy_enigma", "moss_machine"}
 
 
 def default_json_path(project_root: Path, backend: str) -> Path:

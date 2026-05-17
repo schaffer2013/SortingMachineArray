@@ -25,7 +25,7 @@ from sorter.config.settings import AppSettings
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Replay the configured recognizer over simulated top-card captures.")
-    parser.add_argument("--backend", choices=["sim_truth", "fuzzy_enigma"], default=None)
+    parser.add_argument("--backend", choices=["sim_truth", "fuzzy_enigma", "moss_machine"], default=None)
     parser.add_argument("--include-empty", action="store_true")
     parser.add_argument("--pile", action="append", dest="piles", help="Replay one or more piles by display number.")
     parser.add_argument("--card-engine-config", default=None, help="Optional parent-owned card-engine config path.")
@@ -44,7 +44,7 @@ def main() -> int:
         settings = replace(settings, recognizer_backend=args.backend)
     if args.card_engine_mode is not None:
         settings = replace(settings, card_engine_mode=args.card_engine_mode)
-    if settings.recognizer_backend == "fuzzy_enigma":
+    if settings.recognizer_backend in {"fuzzy_enigma", "moss_machine"}:
         override_path = None if args.card_engine_config is None else (PROJECT_ROOT / args.card_engine_config)
         settings = replace(
             settings,
@@ -72,7 +72,7 @@ def main() -> int:
     artifact_root = None
     if args.artifact_root is not None:
         artifact_root = Path(args.artifact_root)
-    elif summary.backend == "fuzzy_enigma":
+    elif summary.backend in {"fuzzy_enigma", "moss_machine"}:
         artifact_root = default_artifact_path(PROJECT_ROOT, f"{summary.backend}_replay")
     if artifact_root is not None:
         artifact_root = write_benchmark_artifacts(summary, artifact_root)

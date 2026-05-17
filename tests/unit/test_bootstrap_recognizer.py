@@ -64,7 +64,7 @@ def test_build_recognizer_selects_fuzzy_enigma_backend(monkeypatch, tmp_path):
     assert seen["mode"] == "greenfield"
     assert seen["auto_track_results"] is True
     assert seen["prefer_visual_small_pool"] is True
-    assert seen["card_engine_backend"] is None
+    assert seen["card_engine_backend"] == "fuzzy_enigma"
 
 
 def test_build_recognizer_selects_moss_machine_backend(monkeypatch, tmp_path):

@@ -1,8 +1,34 @@
 {
   "profiles": [
-    {"name": "idle", "red": 0, "green": 0, "blue": 16},
-    {"name": "running", "red": 0, "green": 16, "blue": 0},
-    {"name": "warning", "red": 16, "green": 8, "blue": 0},
-    {"name": "fault", "red": 16, "green": 0, "blue": 0}
+    {
+      "name": "fault",
+      "red": 16,
+      "green": 0,
+      "blue": 0
+    },
+    {
+      "name": "idle",
+      "red": 0,
+      "green": 0,
+      "blue": 16
+    },
+    {
+      "name": "low blue",
+      "red": 0,
+      "green": 0,
+      "blue": 32
+    },
+    {
+      "name": "running",
+      "red": 0,
+      "green": 16,
+      "blue": 0
+    },
+    {
+      "name": "warning",
+      "red": 16,
+      "green": 8,
+      "blue": 0
+    }
   ]
 }

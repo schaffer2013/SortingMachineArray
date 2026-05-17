@@ -121,7 +121,7 @@ def _build_recognizer(settings: AppSettings, world: SimWorld, catalog: FileCardC
             mode=settings.card_engine_mode,
             auto_track_results=settings.card_engine_auto_track_results,
             prefer_visual_small_pool=settings.card_engine_prefer_visual_small_pool,
-            card_engine_backend="moss_machine" if backend == "moss_machine" else None,
+            card_engine_backend=backend,
         )
         fallback = SimRecognizerAdapter(world, catalog) if settings.fuzzy_enigma_sim_truth_fallback else None
         recognizer = PolicyRecognizerAdapter(
