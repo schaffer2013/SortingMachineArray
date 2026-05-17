@@ -62,6 +62,11 @@ Therefore the sorter should submit image evidence and keep working, while the
 new service performs deeper validation in the background and presents uncertain
 cases to a human reviewer.
 
+The registration service is also the owner of the raw submitted image after
+intake. The sorter sends image data to the service; the service stores it,
+associates it with a collection card record, and manages that record through
+its unverified-to-verified lifecycle.
+
 ### 0.5 Plain-language example
 
 Suppose the sorter images a card and thinks:
@@ -213,12 +218,15 @@ heavier distributed stack with a concrete need.
 ### 5.7 Meaning of collection database
 
 For v1, the service is the **trusted registration ledger and system of record**
-for cards it finalizes.
+for cards it receives and later finalizes.
 
 - Other applications may later ingest or sync from it.
 - A future broader collection-management product may exist.
 - This service should still retain enough canonical identity and provenance data
   to stand on its own as the authoritative registration source.
+- A submitted card shall be represented in a collection immediately as an
+  **unverified collection card**, then transition to a **verified collection
+  card** once exact identity is finalized.
 
 ## 6. System Context
 
@@ -255,11 +263,13 @@ The sorter:
 The service:
 
 - receives card-registration jobs from one or more sorters
-- stores job metadata and raw image payloads
+- stores job metadata and raw image payloads on the service side
+- creates unverified collection-card records associated with a target collection
 - runs background max-accuracy fuzzy-enigma validation
 - exposes queue and job state to the sorter web console
 - supports human adjudication and exact-printing correction
-- writes finalized validated card records into a collection database
+- promotes unverified collection-card records into verified records once final
+  validation is complete
 - removes raw images once a card is fully validated unless retention is enabled
 
 ## 7. Primary Users
@@ -293,15 +303,18 @@ collection exports.
    - image the top card
    - optionally run immediate recognition
    - move the card into the registered pile set, distributed evenly
-   - submit the raw image plus any expected Scryfall identity hint to the
-     registration service without blocking machine movement
+   - submit the raw image plus target collection context and any expected
+     Scryfall identity hint to the registration service without blocking machine
+     movement
 7. The registration service:
-   - persists the registration job
+   - persists the registration job and raw image
+   - creates an unverified card record associated with the requested collection
    - runs max-accuracy fuzzy-enigma validation in the background
    - classifies confidence and review state
 8. A reviewer resolves non-final cards through the validation UI.
 9. Once exact identity and printing are finalized:
-   - the card is written to the collection database
+   - the existing unverified card record is marked verified and finalized in the
+     collection database
    - the raw image is deleted by default
 
 ## 9. Functional Requirements
@@ -318,16 +331,20 @@ collection exports.
 ### 9.2 Registration job submission
 
 - The sorter shall submit one job per card image.
+- The sorter shall submit jobs with an HTTP `POST`.
 - Each job shall include:
   - sorter run ID
   - card sequence number within the run
-  - raw image
+  - target collection ID
+  - raw image payload
   - capture timestamp
   - source pile and destination pile
   - immediate recognition result when available
   - expected Scryfall ID or equivalent identity hint when available
   - optional expected printing metadata when available
 - The service shall return a stable job ID.
+- The service shall persist the raw image on receipt and create an unverified
+  collection-card record associated with the target collection.
 - Job submission shall be idempotent for retried requests from the same sorter
   card event.
 
@@ -381,9 +398,16 @@ collection exports.
 
 ### 9.5 Collection database
 
-- The service shall create one finalized collection record for each human- or
-  machine-validated card.
-- The finalized record shall capture:
+- The service shall create one collection-card record at intake time for each
+  submitted card image.
+- Newly created collection-card records shall:
+  - be associated with a target collection
+  - be marked `unverified`
+  - reference the raw submitted image
+  - reference the originating registration job
+- Once exact identity is finalized, the same card record shall transition to
+  `verified`.
+- A verified record shall capture:
   - exact Scryfall printing ID
   - card name
   - set code
@@ -395,9 +419,11 @@ collection exports.
   - validation timestamp
 - The service shall support querying cards by registration job, run, and final
   identity.
+- The service shall support querying cards by collection and verification state.
 
 ### 9.6 Raw-image retention
 
+- The service shall store raw images on the collection service after intake.
 - The service shall delete raw images after final validation by default.
 - The service shall support a future configurable retention policy when storage
   capacity allows.
@@ -456,6 +482,7 @@ collection exports.
 - `POST /registration-jobs`
 - `GET /registration-jobs/{job_id}`
 - `GET /runs/{run_id}/registration-summary`
+- `GET /collections/{collection_id}/cards?verification_state=...`
 
 ### 11.2 Reviewer-facing
 
@@ -472,6 +499,7 @@ collection exports.
 - `sorter_run_id`
 - `sorter_card_seq`
 - `raw_image_uri`
+- `collection_id`
 - `captured_at`
 - `source_pile`
 - `destination_pile`
@@ -496,6 +524,9 @@ collection exports.
 
 - `collection_card_id`
 - `job_id`
+- `collection_id`
+- `verification_state`
+- `raw_image_uri`
 - `scryfall_id`
 - `name`
 - `set_code`
