@@ -1,0 +1,37 @@
+{
+  "name": "registration",
+  "version": 1,
+  "steps": [
+    {
+      "name": "split_piles",
+      "params": {
+        "unregistered_label": "unregistered",
+        "registered_label": "registered"
+      }
+    },
+    {
+      "name": "scan_piles"
+    },
+    {
+      "name": "probe_piles",
+      "params": {
+        "card_height_mm": 0.31
+      }
+    },
+    {
+      "name": "plan_rebalance",
+      "params": {
+        "source_group": "registered",
+        "target_group": "unregistered",
+        "max_cards_per_pile": 85
+      }
+    },
+    {
+      "name": "plan_registration_pass",
+      "params": {
+        "from_group": "unregistered",
+        "to_group": "registered"
+      }
+    }
+  ]
+}

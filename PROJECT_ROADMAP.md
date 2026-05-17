@@ -175,6 +175,18 @@ Done when:
 - a new contributor can find the supported runtime path without reverse
   engineering the repo
 
+### 7. Generalize Machine Sequences
+
+The first registration sequence is being used as a testbed for reusable,
+versioned machine sequences composed from typed steps plus declarative configs.
+
+TODO:
+
+- migrate existing hard-coded sorter workflows onto the reusable sequence
+  framework once the registration sequence proves the model
+- replace one-off command-list builders with shared sequence primitives where it
+  improves clarity without weakening safety
+
 ## Suggested Order
 
 1. Finish the parent/submodule contract and catalog-first metadata flow.
