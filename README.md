@@ -53,6 +53,49 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 The current web console is immediately useful in `sim` mode. The camera stream endpoint is already exposed, but the present `PiCamera2Adapter` is still a hardware stub, so true live Pi-camera frames require the hardware capture path to be completed.
 
 
+
+## Collection API integration (`magic-the-collecting`)
+
+This sorter repo is the machine-side controller. The collection service is the inventory and review system-of-record.
+
+### What this API is expected to do
+
+- own persistent collection state (what cards are in which collection/binder/queue)
+- own review workflows for uncertain recognitions (operator correction/confirmation)
+- own run-level audit/export surfaces (e.g. run summaries and export artifacts)
+
+### What this machine is expected to send to that API
+
+- run lifecycle
+	- run started
+	- run completed/stopped/failed
+- recognition/move events
+	- per-card observation payloads (name, confidence, backend/mode, pile context)
+- review-required events
+	- low-confidence or policy-failed recognitions that need operator action
+
+### Integration approach in this repo
+
+- Port contract: `src/sorter/ports/collection_service.py`
+- Adapters:
+	- `NullCollectionServiceAdapter` (default no-op)
+	- `HttpCollectionServiceAdapter` (scaffold; endpoint wiring is intentionally pending)
+- Default sim wiring currently uses the null adapter so local workflows remain offline-safe.
+
+### Recommended operator flow in the machine UI
+
+1. Open the web console (`python -m sorter.interfaces.web_runner`, then `http://localhost:8000`).
+2. Start a run from the dashboard.
+3. Watch recognition outcomes and run state from dashboard/runs pages.
+4. For any `REVIEW_REQUIRED` condition, use the collection system review UI to confirm/correct card identity.
+5. Resume or rerun machine flow after the review decision is recorded in the collection system.
+
+### Current UI status (important)
+
+- The sorter web UI currently exposes machine/runtime APIs (`/api/status`, `/api/snapshot`, `/api/run/start`, `/api/runs`, etc.).
+- It does **not** yet include first-class collection API controls (e.g. browse unverified queue, submit review decisions directly from this UI).
+- Until that is implemented, use the machine UI for operations + the collection service UI for review/registration tasks.
+
 ## Recognition backend toggle
 
 - Default recognizer backend: `SORTER_RECOGNIZER_BACKEND=moss_machine`

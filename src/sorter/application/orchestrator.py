@@ -26,6 +26,7 @@ from sorter.ports.lights import LightsPort
 from sorter.ports.recognizer import RecognizerPort
 from sorter.ports.card_catalog import CardCatalogPort
 from sorter.ports.run_store import RunStorePort
+from sorter.ports.collection_service import CollectionEvent, CollectionServicePort
 
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ class Orchestrator:
     catalog: CardCatalogPort
     run_store: RunStorePort
     world: Any
+    collection_service: CollectionServicePort | None = None
     recognition_min_confidence: float = 0.6
     startup_scan_max_retries: int = 1
     verification_max_retries: int = 2
@@ -170,6 +172,13 @@ class Orchestrator:
         if result.confidence < self.recognition_min_confidence:
             return False, "confidence_below_threshold"
         return True, "accepted"
+
+    def _emit_collection_event(self, *, run_id: str, seq: int, event_type: str, payload: dict[str, Any]) -> None:
+        if self.collection_service is None:
+            return
+        self.collection_service.record_event(
+            CollectionEvent(run_id=run_id, sequence=seq, event_type=event_type, payload=payload)
+        )
 
     def _observe_pile_with_retries(
         self,
