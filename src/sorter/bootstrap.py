@@ -16,6 +16,7 @@ from sorter.adapters.persistence.sim_card_list_loader import expand_and_shuffle_
 from sorter.adapters.persistence.sim_fixture_builder import build_runtime_fixture
 from sorter.adapters.persistence.sim_image_sync import sync_simulated_images
 from sorter.adapters.persistence.sqlite_run_store import SQLiteRunStore
+from sorter.adapters.integrations.collection_service import NullCollectionServiceAdapter
 from sorter.application.orchestrator import Orchestrator
 from sorter.domain.ranking_service import RankingService
 from sorter.domain.sort_policy_config import load_sort_policy_file
@@ -47,6 +48,7 @@ def build_sim_orchestrator(settings: AppSettings) -> Orchestrator:
         catalog=context.catalog,
         run_store=context.run_store,
         world=context.world,
+        collection_service=NullCollectionServiceAdapter(),
         recognition_min_confidence=settings.recognition_min_confidence,
         startup_scan_max_retries=settings.startup_scan_max_retries,
         verification_max_retries=settings.verification_max_retries,
