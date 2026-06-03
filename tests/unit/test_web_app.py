@@ -29,6 +29,7 @@ def test_status_snapshot_and_capabilities_are_available():
     capabilities = client.get("/api/capabilities").get_json()
 
     assert status["lifecycle"] == "IDLE"
+    assert status["machine_initialized"] is False
     assert "pose" in status
     assert snapshot["piles"]
     assert any(item["name"] == "Camera preview" for item in capabilities["capabilities"])
@@ -114,3 +115,33 @@ def test_web_xy_control_blocks_when_vacuum_z_is_too_low():
     assert "XY travel blocked" in response.get_json()["message"]
     assert status["pose"]["x_mm"] == 0.0
     assert status["pose"]["y_mm"] == 0.0
+
+
+def test_machine_initialization_is_explicit_web_control():
+    settings = AppSettings.from_env()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path).with_updates(
+        safe_z_mm=2.0,
+        min_xy_travel_z_mm=5.0,
+    )
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    client = app.test_client()
+
+    initial_status = client.get("/api/status").get_json()
+    blocked_start_response = client.post("/api/run/start", json={})
+    initialize_response = client.post("/api/control/initialize", json={})
+    initialized_status = client.get("/api/status").get_json()
+
+    assert initial_status["machine_initialized"] is False
+    assert initial_status["pose"] == {"x_mm": 0.0, "y_mm": 0.0, "z_mm": 0.0}
+    assert blocked_start_response.get_json() == {
+        "ok": False,
+        "message": "Initialize machine before starting a run",
+    }
+    assert initialize_response.status_code == 200
+    assert initialize_response.get_json()["ok"] is True
+    assert initialized_status["machine_initialized"] is True
+    assert initialized_status["phase"] == "IDLE"
+    assert initialized_status["active_command"] is None
+    assert initialized_status["pose"] == {"x_mm": 0.0, "y_mm": 0.0, "z_mm": 5.0}

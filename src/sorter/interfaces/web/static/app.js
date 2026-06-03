@@ -110,6 +110,7 @@ window.SorterPages = {
         ["Lifecycle", status.lifecycle],
         ["Phase", status.phase],
         ["Active command", status.active_command || "—"],
+        ["Initialized", status.machine_initialized ? "Yes" : "No"],
         ["X", `${status.pose.x_mm.toFixed(2)} mm`],
         ["Y", `${status.pose.y_mm.toFixed(2)} mm`],
         ["Z", `${status.pose.z_mm.toFixed(2)} mm`],

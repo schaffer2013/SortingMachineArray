@@ -150,6 +150,25 @@ class Orchestrator:
         self.motion.move_z(float(z_mm))
         self.world.snapshot.pose.z_mm = float(z_mm)
 
+    def initialize_machine(self, calibration: CalibrationProfile) -> float:
+        snapshot = self.world.snapshot
+        self._set_run_substate(snapshot, phase="INITIALIZING", active_command="VacuumOff")
+        self.vacuum.off()
+        self.lights.set_status("running")
+        self._set_run_substate(snapshot, phase="INITIALIZING", active_command="HomeAxes")
+        self.motion.home_axes()
+        snapshot.pose.x_mm = 0.0
+        snapshot.pose.y_mm = 0.0
+        snapshot.pose.z_mm = 0.0
+        travel_z_mm = calibration.xy_travel_z_mm()
+        self._set_run_substate(snapshot, phase="INITIALIZING", active_command="MoveZToTravelClearance")
+        self.move_vac_z(travel_z_mm)
+        self._set_run_substate(snapshot, phase="INITIALIZING", active_command="WaitUntilIdle")
+        self.motion.wait_until_idle()
+        self.lights.set_status("idle")
+        self._set_run_substate(snapshot, phase="IDLE", active_command=None)
+        return travel_z_mm
+
     def _move_camera_over_pile(
         self,
         snapshot: MachineSnapshot,

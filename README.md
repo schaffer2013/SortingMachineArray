@@ -169,6 +169,7 @@ If you want to run the real vendored recognizer, make sure the submodule OCR and
 	- `src/sorter/adapters/hardware/neopixel_lights.py` maps machine status to Marlin `M150` RGB commands.
 	- Motion and lights share one `MarlinSerialTransport` connection to the SKR board firmware so G-code is serialized through one controller channel.
 - App-layer calibration uses the vacuum/nozzle as the baseline XY/Z pose. `camera_offset_x_mm`, `camera_offset_y_mm`, and `camera_offset_z_mm` describe the fixed physical camera offset from that baseline before any Marlin commands are emitted.
+- The web app does not move the machine on process startup or from **Start run** before initialization. Operators must explicitly press **Initialize machine** on the machine page to run the homing/clearance initialization sequence first.
 - `min_xy_travel_z_mm` blocks app-layer XY moves while the vacuum Z is below the configured clearance; the web machine page can update these calibration values.
 
 ## Tests

@@ -37,21 +37,24 @@ class WebRuntime:
         self.last_result: dict[str, Any] | None = None
         self.last_error: str | None = None
         self.last_manual_recognition: dict[str, Any] | None = None
+        self.machine_initialized = False
         self.light_profiles_path = light_profiles_path
         self.calibration_path = calibration_path
         self.light_profiles = self._load_light_profiles()
         self.lock = threading.RLock()
 
-    def start_run(self) -> bool:
+    def start_run(self) -> dict[str, Any]:
         with self.lock:
             if self.run_thread and self.run_thread.is_alive():
-                return False
+                return {"ok": False, "message": "Run already active"}
+            if not self.machine_initialized:
+                return {"ok": False, "message": "Initialize machine before starting a run"}
             self.stop_event.clear()
             self.last_result = None
             self.last_error = None
             self.run_thread = threading.Thread(target=self._run_worker, daemon=True)
             self.run_thread.start()
-            return True
+            return {"ok": True, "message": "Run started"}
 
     def stop_run(self) -> None:
         self.stop_event.set()
@@ -94,6 +97,7 @@ class WebRuntime:
                 "last_error": self.last_error,
                 "last_recognition": getattr(self.orchestrator, "last_recognition", None),
                 "last_manual_recognition": self.last_manual_recognition,
+                "machine_initialized": self.machine_initialized,
                 "calibration": self.calibration_payload(),
             }
 
@@ -151,9 +155,25 @@ class WebRuntime:
             "image_available": bool(self.orchestrator.world.top_card_image_path(pile.pile_id)),
         }
 
+    def initialize_machine(self) -> dict[str, Any]:
+        with self.lock:
+            travel_z_mm = self.orchestrator.initialize_machine(self.calibration)
+            self.machine_initialized = True
+            return {
+                "ok": True,
+                "message": f"Machine initialized and homed; vacuum Z at {travel_z_mm:.2f} mm travel clearance",
+            }
+
     def control(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if action == "initialize":
+            return self.initialize_machine()
         if action == "home":
             self.orchestrator.motion.home_axes()
+            snapshot = self.orchestrator.world.snapshot
+            snapshot.pose.x_mm = 0.0
+            snapshot.pose.y_mm = 0.0
+            snapshot.pose.z_mm = 0.0
+            self.machine_initialized = False
             return {"ok": True, "message": "Axes homed"}
         if action == "wait_idle":
             self.orchestrator.motion.wait_until_idle()
@@ -438,8 +458,7 @@ def create_web_app(
 
     @app.post("/api/run/start")
     def api_start():
-        started = runtime.start_run()
-        return jsonify({"ok": started, "message": "Run started" if started else "Run already active"})
+        return jsonify(runtime.start_run())
 
     @app.post("/api/run/stop")
     def api_stop():

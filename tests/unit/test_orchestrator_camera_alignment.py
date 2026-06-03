@@ -12,12 +12,36 @@ class RecordingMotion:
     def __init__(self) -> None:
         self.moves: list[tuple[float, float]] = []
         self.z_moves: list[float] = []
+        self.homed = False
+        self.waited = False
+
+    def home_axes(self) -> None:
+        self.homed = True
 
     def move_xy(self, x_mm: float, y_mm: float) -> None:
         self.moves.append((x_mm, y_mm))
 
     def move_z(self, z_mm: float) -> None:
         self.z_moves.append(z_mm)
+
+    def wait_until_idle(self) -> None:
+        self.waited = True
+
+
+class RecordingVacuum:
+    def __init__(self) -> None:
+        self.off_called = False
+
+    def off(self) -> None:
+        self.off_called = True
+
+
+class RecordingLights:
+    def __init__(self) -> None:
+        self.statuses: list[str] = []
+
+    def set_status(self, status: str) -> None:
+        self.statuses.append(status)
 
 
 def test_move_camera_over_pile_uses_camera_offset() -> None:
@@ -189,3 +213,48 @@ def test_xy_motion_is_blocked_when_vacuum_z_is_below_clearance() -> None:
     assert motion.moves == []
     assert snapshot.pose.x_mm == 0.0
     assert snapshot.pose.y_mm == 0.0
+
+
+def test_initialize_machine_runs_homing_sequence_only_when_called() -> None:
+    snapshot = MachineSnapshot(piles={}, run_state=RunState())
+    world = SimpleNamespace(snapshot=snapshot, coords={})
+    motion = RecordingMotion()
+    vacuum = RecordingVacuum()
+    lights = RecordingLights()
+    orchestrator = Orchestrator(
+        motion=motion,
+        camera=SimpleNamespace(),
+        vacuum=vacuum,
+        lights=lights,
+        recognizer=SimpleNamespace(),
+        catalog=SimpleNamespace(),
+        run_store=SimpleNamespace(),
+        world=world,
+    )
+    calibration = CalibrationProfile(
+        safe_z_mm=1.0,
+        pick_z_mm=0.5,
+        place_z_mm=0.75,
+        camera_offset_x_mm=0.0,
+        camera_offset_y_mm=0.0,
+        min_xy_travel_z_mm=4.0,
+        pile_positions_mm=(),
+    )
+
+    assert motion.homed is False
+    assert motion.z_moves == []
+
+    travel_z_mm = orchestrator.initialize_machine(calibration)
+
+    assert travel_z_mm == 4.0
+    assert vacuum.off_called is True
+    assert motion.homed is True
+    assert motion.moves == []
+    assert motion.z_moves == [4.0]
+    assert motion.waited is True
+    assert lights.statuses == ["running", "idle"]
+    assert snapshot.pose.x_mm == 0.0
+    assert snapshot.pose.y_mm == 0.0
+    assert snapshot.pose.z_mm == 4.0
+    assert snapshot.run_state.phase == "IDLE"
+    assert snapshot.run_state.active_command is None
