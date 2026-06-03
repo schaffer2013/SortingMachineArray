@@ -167,7 +167,7 @@ If you want to run the real vendored recognizer, make sure the submodule OCR and
 	- `docs/hardware_prep.md`
 - NeoPixels on BTT SKR 1.4 Turbo:
 	- `src/sorter/adapters/hardware/neopixel_lights.py` maps machine status to Marlin `M150` RGB commands.
-	- Integrate this with your serial transport to the SKR board firmware.
+	- Motion and lights share one `MarlinSerialTransport` connection to the SKR board firmware so G-code is serialized through one controller channel.
 
 ## Tests
 
