@@ -18,6 +18,7 @@ def main() -> int:
         calibration,
         slow_ms=settings.slow_ms,
         light_profiles_path=project_root / "config" / "light_profiles.json",
+        calibration_path=settings.calibration_path,
     )
     app.run(host="0.0.0.0", port=8000, debug=False, threaded=True)
     return 0

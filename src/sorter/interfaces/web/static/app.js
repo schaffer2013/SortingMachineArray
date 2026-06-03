@@ -50,9 +50,10 @@ window.SorterPages = {
     const statusRoot = document.querySelector("#machine-status");
     const profileSelect = document.querySelector("#light-profile");
     const profileForm = document.querySelector("#light-profile-form");
+    const calibrationForm = document.querySelector("#calibration-form");
     document.querySelectorAll("[data-control]").forEach(button => button.onclick = async () => {
       const action = button.dataset.control;
-      const payload = action === "move_xy" ? {
+      const payload = (action === "move_xy" || action === "move_camera_xy") ? {
         x_mm: document.querySelector("#move-x").value,
         y_mm: document.querySelector("#move-y").value,
       } : action === "move_z" ? {
@@ -81,6 +82,22 @@ window.SorterPages = {
       profileForm.reset();
       await loadProfiles();
     };
+    calibrationForm.onsubmit = async event => {
+      event.preventDefault();
+      const form = new FormData(calibrationForm);
+      await json("/api/calibration", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          camera_offset_x_mm: Number(form.get("camera_offset_x_mm")),
+          camera_offset_y_mm: Number(form.get("camera_offset_y_mm")),
+          camera_offset_z_mm: Number(form.get("camera_offset_z_mm")),
+          min_xy_travel_z_mm: Number(form.get("min_xy_travel_z_mm")),
+          safe_z_mm: Number(form.get("safe_z_mm")),
+        }),
+      });
+      refresh();
+    };
     async function loadProfiles() {
       const data = await json("/api/light-profiles");
       profileSelect.innerHTML = data.profiles
@@ -100,7 +117,13 @@ window.SorterPages = {
         ["Lights", status.lights_status],
         ["Light profile", status.lights_profile || "—"],
         ["RGB", status.lights_rgb?.length ? status.lights_rgb.join(", ") : "—"],
+        ["Camera offset", `${status.calibration.camera_offset_x_mm.toFixed(2)}, ${status.calibration.camera_offset_y_mm.toFixed(2)}, ${status.calibration.camera_offset_z_mm.toFixed(2)} mm`],
+        ["Min XY Z", `${status.calibration.min_xy_travel_z_mm.toFixed(2)} mm`],
       ];
+      ["camera_offset_x_mm", "camera_offset_y_mm", "camera_offset_z_mm", "min_xy_travel_z_mm", "safe_z_mm"].forEach(name => {
+        const input = calibrationForm.elements[name];
+        if (document.activeElement !== input) input.value = status.calibration[name];
+      });
       statusRoot.innerHTML = cards.map(([k,v]) => `<article class="status-card"><div class="muted">${k}</div><strong>${v}</strong></article>`).join("");
     }
     loadProfiles(); refresh(); setInterval(refresh, 1200);

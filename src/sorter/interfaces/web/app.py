@@ -27,6 +27,7 @@ class WebRuntime:
         calibration: CalibrationProfile,
         slow_ms: int = 0,
         light_profiles_path: Path | None = None,
+        calibration_path: Path | None = None,
     ):
         self.orchestrator = orchestrator
         self.calibration = calibration
@@ -37,6 +38,7 @@ class WebRuntime:
         self.last_error: str | None = None
         self.last_manual_recognition: dict[str, Any] | None = None
         self.light_profiles_path = light_profiles_path
+        self.calibration_path = calibration_path
         self.light_profiles = self._load_light_profiles()
         self.lock = threading.RLock()
 
@@ -92,7 +94,30 @@ class WebRuntime:
                 "last_error": self.last_error,
                 "last_recognition": getattr(self.orchestrator, "last_recognition", None),
                 "last_manual_recognition": self.last_manual_recognition,
+                "calibration": self.calibration_payload(),
             }
+
+    def calibration_payload(self) -> dict[str, Any]:
+        return self.calibration.to_json_dict()
+
+    def update_calibration(self, payload: dict[str, Any]) -> dict[str, Any]:
+        allowed_fields = {
+            "camera_offset_x_mm",
+            "camera_offset_y_mm",
+            "camera_offset_z_mm",
+            "min_xy_travel_z_mm",
+            "safe_z_mm",
+            "pick_z_mm",
+            "place_z_mm",
+        }
+        updates = {key: payload[key] for key in allowed_fields if key in payload}
+        if not updates:
+            raise ValueError("No supported calibration fields provided")
+        with self.lock:
+            self.calibration = self.calibration.with_updates(**updates)
+            if self.calibration_path is not None:
+                self.calibration.save(self.calibration_path)
+            return {"ok": True, "calibration": self.calibration_payload()}
 
     def snapshot(self) -> dict[str, Any]:
         snapshot = self.orchestrator.world.snapshot
@@ -136,12 +161,24 @@ class WebRuntime:
         if action == "move_xy":
             x_mm = float(payload["x_mm"])
             y_mm = float(payload["y_mm"])
-            self.orchestrator.motion.move_xy(x_mm, y_mm)
-            return {"ok": True, "message": f"Moved XY to ({x_mm:.2f}, {y_mm:.2f})"}
+            self.orchestrator.move_vac_xy_when_safe(self.calibration, x_mm, y_mm)
+            return {"ok": True, "message": f"Moved vacuum XY to ({x_mm:.2f}, {y_mm:.2f})"}
+        if action == "move_camera_xy":
+            x_mm = float(payload["x_mm"])
+            y_mm = float(payload["y_mm"])
+            self.orchestrator.move_camera_to_vacuum_xy_when_safe(self.calibration, x_mm, y_mm)
+            target_x_mm, target_y_mm = self.calibration.camera_baseline_xy_for_vacuum_target(x_mm, y_mm)
+            return {
+                "ok": True,
+                "message": (
+                    f"Moved camera over ({x_mm:.2f}, {y_mm:.2f}) "
+                    f"using vacuum baseline ({target_x_mm:.2f}, {target_y_mm:.2f})"
+                ),
+            }
         if action == "move_z":
             z_mm = float(payload["z_mm"])
-            self.orchestrator.motion.move_z(z_mm)
-            return {"ok": True, "message": f"Moved Z to {z_mm:.2f}"}
+            self.orchestrator.move_vac_z(z_mm)
+            return {"ok": True, "message": f"Moved vacuum Z to {z_mm:.2f}"}
         if action == "vacuum_on":
             self.orchestrator.vacuum.on()
             return {"ok": True, "message": "Vacuum enabled"}
@@ -348,6 +385,7 @@ def create_web_app(
     calibration: CalibrationProfile,
     slow_ms: int = 0,
     light_profiles_path: Path | None = None,
+    calibration_path: Path | None = None,
 ) -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
     runtime = WebRuntime(
@@ -355,6 +393,7 @@ def create_web_app(
         calibration,
         slow_ms=slow_ms,
         light_profiles_path=light_profiles_path,
+        calibration_path=calibration_path,
     )
     app.config["runtime"] = runtime
 
@@ -385,6 +424,17 @@ def create_web_app(
     @app.get("/api/snapshot")
     def api_snapshot():
         return jsonify(runtime.snapshot())
+
+    @app.get("/api/calibration")
+    def api_calibration():
+        return jsonify({"calibration": runtime.calibration_payload()})
+
+    @app.post("/api/calibration")
+    def api_update_calibration():
+        try:
+            return jsonify(runtime.update_calibration(request.get_json(silent=True) or {}))
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
 
     @app.post("/api/run/start")
     def api_start():

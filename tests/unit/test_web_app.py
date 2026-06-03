@@ -68,3 +68,49 @@ def test_active_navigation_tab_is_marked():
     client = _client()
     response = client.get("/machine")
     assert b'class="active" href="/machine"' in response.data
+
+
+def test_calibration_can_be_updated_from_web_app(tmp_path):
+    settings = AppSettings.from_env()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    calibration_path = tmp_path / "calibration.json"
+    app = create_web_app(orchestrator, calibration, calibration_path=calibration_path)
+    app.testing = True
+    client = app.test_client()
+
+    response = client.post(
+        "/api/calibration",
+        json={
+            "camera_offset_x_mm": 4.5,
+            "camera_offset_y_mm": -2.0,
+            "camera_offset_z_mm": 11.0,
+            "min_xy_travel_z_mm": 3.0,
+        },
+    )
+    status = client.get("/api/status").get_json()
+    saved = CalibrationProfile.from_file(calibration_path)
+
+    assert response.status_code == 200
+    assert status["calibration"]["camera_offset_x_mm"] == 4.5
+    assert status["calibration"]["camera_offset_y_mm"] == -2.0
+    assert status["calibration"]["camera_offset_z_mm"] == 11.0
+    assert status["calibration"]["min_xy_travel_z_mm"] == 3.0
+    assert saved.camera_offset_z_mm == 11.0
+
+
+def test_web_xy_control_blocks_when_vacuum_z_is_too_low():
+    settings = AppSettings.from_env()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path).with_updates(min_xy_travel_z_mm=10.0)
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    client = app.test_client()
+
+    response = client.post("/api/control/move_xy", json={"x_mm": 100.0, "y_mm": 50.0})
+    status = client.get("/api/status").get_json()
+
+    assert response.status_code == 400
+    assert "XY travel blocked" in response.get_json()["message"]
+    assert status["pose"]["x_mm"] == 0.0
+    assert status["pose"]["y_mm"] == 0.0

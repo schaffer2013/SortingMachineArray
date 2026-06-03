@@ -122,13 +122,33 @@ class Orchestrator:
 
     def _camera_target_xy(self, pile_id, calibration: CalibrationProfile) -> tuple[float, float]:
         pile_x_mm, pile_y_mm = self._pile_reference_xy(pile_id, calibration)
-        return (
-            pile_x_mm - calibration.camera_offset_x_mm,
-            pile_y_mm - calibration.camera_offset_y_mm,
-        )
+        return calibration.camera_baseline_xy_for_vacuum_target(pile_x_mm, pile_y_mm)
 
     def _picker_target_xy(self, pile_id, calibration: CalibrationProfile) -> tuple[float, float]:
         return self._pile_reference_xy(pile_id, calibration)
+
+    def _move_xy_when_safe(
+        self,
+        snapshot: MachineSnapshot,
+        calibration: CalibrationProfile,
+        x_mm: float,
+        y_mm: float,
+    ) -> None:
+        calibration.assert_xy_travel_safe(snapshot.pose.z_mm)
+        self.motion.move_xy(x_mm, y_mm)
+        snapshot.pose.x_mm = x_mm
+        snapshot.pose.y_mm = y_mm
+
+    def move_vac_xy_when_safe(self, calibration: CalibrationProfile, x_mm: float, y_mm: float) -> None:
+        self._move_xy_when_safe(self.world.snapshot, calibration, float(x_mm), float(y_mm))
+
+    def move_camera_to_vacuum_xy_when_safe(self, calibration: CalibrationProfile, x_mm: float, y_mm: float) -> None:
+        target_x_mm, target_y_mm = calibration.camera_baseline_xy_for_vacuum_target(x_mm, y_mm)
+        self._move_xy_when_safe(self.world.snapshot, calibration, target_x_mm, target_y_mm)
+
+    def move_vac_z(self, z_mm: float) -> None:
+        self.motion.move_z(float(z_mm))
+        self.world.snapshot.pose.z_mm = float(z_mm)
 
     def _move_camera_over_pile(
         self,
@@ -141,9 +161,7 @@ class Orchestrator:
     ) -> None:
         target_x_mm, target_y_mm = self._camera_target_xy(pile_id, calibration)
         self._set_run_substate(snapshot, phase=phase, active_command=active_command)
-        self.motion.move_xy(target_x_mm, target_y_mm)
-        snapshot.pose.x_mm = target_x_mm
-        snapshot.pose.y_mm = target_y_mm
+        self._move_xy_when_safe(snapshot, calibration, target_x_mm, target_y_mm)
 
     def _move_picker_over_pile(
         self,
@@ -156,9 +174,7 @@ class Orchestrator:
     ) -> None:
         target_x_mm, target_y_mm = self._picker_target_xy(pile_id, calibration)
         self._set_run_substate(snapshot, phase=phase, active_command=active_command)
-        self.motion.move_xy(target_x_mm, target_y_mm)
-        snapshot.pose.x_mm = target_x_mm
-        snapshot.pose.y_mm = target_y_mm
+        self._move_xy_when_safe(snapshot, calibration, target_x_mm, target_y_mm)
 
     def _recognition_decision(self, frame, result) -> tuple[bool, str]:
         if result.needs_review:
@@ -620,7 +636,7 @@ class Orchestrator:
                     active_command=command.name,
                 )
             elif command.name == "MoveZ":
-                self.motion.move_z(float(command.payload["z_mm"]))
+                self.move_vac_z(float(command.payload["z_mm"]))
             elif command.name == "VacuumOn":
                 self.vacuum.on()
                 self.world.pick_from(next_move.from_pile)
