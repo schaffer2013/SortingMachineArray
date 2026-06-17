@@ -165,6 +165,8 @@ If you want to run the real vendored recognizer, make sure the submodule OCR and
 	- `python scripts/hardware_smoke_test.py`
 - Hardware prep reference:
 	- `docs/hardware_prep.md`
+- Marlin firmware contract for the motion controller team:
+	- `docs/marlin_firmware_contract.md`
 - NeoPixels on BTT SKR 1.4 Turbo:
 	- `src/sorter/adapters/hardware/neopixel_lights.py` maps machine status to Marlin `M150` RGB commands.
 	- Motion and lights share one `MarlinSerialTransport` connection to the SKR board firmware so G-code is serialized through one controller channel.
@@ -219,6 +221,8 @@ If you want to run the real vendored recognizer, make sure the submodule OCR and
 	- `docs/acceptance_gates.md`
 - Hardware bring-up preparation:
 	- `docs/hardware_prep.md`
+- Firmware-side Marlin contract:
+	- `docs/marlin_firmware_contract.md`
 - Current upstream feedback for the vendored recognizer:
 	- `docs/submodule_feedback.md`
 

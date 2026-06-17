@@ -92,6 +92,8 @@ The current docs with active purpose are:
 - `docs/runtime_reference.md`: enduring runtime intent and config ownership
 - `docs/acceptance_gates.md`: current acceptance commands and evidence rules
 - `docs/hardware_prep.md`: software-side preparation before hardware work
+- `docs/marlin_firmware_contract.md`: firmware-facing Marlin axis and G-code
+  contract
 - `docs/submodule_feedback.md`: current upstream asks backed by parent evidence
 - `docs/paddleocr_path_guide.md`: OCR integration guidance
 
