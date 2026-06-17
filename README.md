@@ -168,10 +168,14 @@ If you want to run the real vendored recognizer, make sure the submodule OCR and
 	- `docs/hardware_prep.md`
 - Marlin firmware contract for the motion controller team:
 	- `docs/marlin_firmware_contract.md`
+- Suction subsystem contract for SKR/Arduino handoff:
+	- `docs/suction_subsystem_contract.md`
 - NeoPixels on BTT SKR 1.4 Turbo:
 	- `src/sorter/adapters/hardware/neopixel_lights.py` maps machine status to Marlin `M150` RGB commands.
 	- Motion and lights share one `MarlinSerialTransport` connection to the SKR board firmware so G-code is serialized through one controller channel.
 - The hardware baseline is a reworked Ender 3 with a BTT SKR 1.4 Turbo control board. Firmware should keep normal Ender 3 Z max and set Z min to `6.9 mm`.
+- Coordinate minimum is `0.0` for all axes, but Z and C home to their configured max positions. The host tracks those with `z_home_mm` and `c_home_mm` in `config/calibration.json`.
+- Suction is delegated to an Arduino Uno/Nano. The SKR sends pick/release requests and waits for `VAC_GOOD`/`RELEASE_DONE`; it does not directly drive the pump or vent solenoid.
 - App-layer calibration uses the vacuum/nozzle as the baseline XY/Z pose. `camera_offset_x_mm`, `camera_offset_y_mm`, and `camera_offset_z_mm` describe the fixed physical camera offset from that baseline before any Marlin commands are emitted.
 - Firmware-facing motion uses standard absolute X/Y/Z/C coordinates. Z is the main interface axis; C is the end-effector/suction-cup vertical axis.
 - Firmware should home Z first toward its positive end of travel on the normal endstop, then home C toward its negative end of travel using sensorless homing, then home X/Y together.
@@ -228,6 +232,8 @@ If you want to run the real vendored recognizer, make sure the submodule OCR and
 	- `docs/hardware_prep.md`
 - Firmware-side Marlin contract:
 	- `docs/marlin_firmware_contract.md`
+- SKR/Arduino suction subsystem contract:
+	- `docs/suction_subsystem_contract.md`
 - Current upstream feedback for the vendored recognizer:
 	- `docs/submodule_feedback.md`
 

@@ -159,7 +159,8 @@ class Orchestrator:
         self.motion.home_axes()
         snapshot.pose.x_mm = 0.0
         snapshot.pose.y_mm = 0.0
-        snapshot.pose.z_mm = 0.0
+        snapshot.pose.z_mm = calibration.z_home_mm
+        snapshot.pose.c_mm = calibration.c_home_mm
         travel_z_mm = calibration.xy_travel_z_mm()
         self._set_run_substate(snapshot, phase="INITIALIZING", active_command="MoveZToTravelClearance")
         self.move_vac_z(travel_z_mm)

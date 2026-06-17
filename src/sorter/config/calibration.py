@@ -16,6 +16,8 @@ class CalibrationProfile:
     pile_positions_mm: tuple[tuple[float, float], ...]
     camera_offset_z_mm: float = 0.0
     min_xy_travel_z_mm: float = 0.0
+    z_home_mm: float = 250.0
+    c_home_mm: float = 85.0
     probe_enabled: bool = False
     probe_retract_z_mm: float = 2.0
     probe_place_clearance_mm: float = 1.0
@@ -56,6 +58,8 @@ class CalibrationProfile:
             "camera_offset_y_mm",
             "camera_offset_z_mm",
             "min_xy_travel_z_mm",
+            "z_home_mm",
+            "c_home_mm",
             "probe_retract_z_mm",
             "probe_place_clearance_mm",
             "probe_max_contact_z_mm",
@@ -82,6 +86,8 @@ class CalibrationProfile:
             "camera_offset_y_mm": self.camera_offset_y_mm,
             "camera_offset_z_mm": self.camera_offset_z_mm,
             "min_xy_travel_z_mm": self.min_xy_travel_z_mm,
+            "z_home_mm": self.z_home_mm,
+            "c_home_mm": self.c_home_mm,
             "pile_positions_mm": [[x_mm, y_mm] for x_mm, y_mm in self.pile_positions_mm],
         }
 
@@ -123,5 +129,7 @@ class CalibrationProfile:
             camera_offset_y_mm=float(data.get("camera_offset_y_mm", 0.0)),
             camera_offset_z_mm=float(data.get("camera_offset_z_mm", 0.0)),
             min_xy_travel_z_mm=float(data.get("min_xy_travel_z_mm", data["safe_z_mm"])),
+            z_home_mm=float(data.get("z_home_mm", 250.0)),
+            c_home_mm=float(data.get("c_home_mm", 85.0)),
             pile_positions_mm=pile_positions,
         )

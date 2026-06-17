@@ -68,6 +68,11 @@ should optimize for.
 - The hardware baseline is a reworked Ender 3 controlled by a BTT SKR 1.4
   Turbo. Firmware should retain the normal Ender 3 Z max and set Z min to
   `6.9 mm`.
+- `0.0` is the minimum coordinate for every axis. Z and C home to their
+  configured max positions, tracked as `z_home_mm` and `c_home_mm`.
+- Suction control is split from motion control: the SKR sends high-level
+  pick/release requests and waits for Arduino response signals, while the
+  Arduino owns pump PWM, venting, vacuum sensing, and hold-mode behavior.
 
 ## Camera-Driven Micro-Calibration Contract
 
@@ -100,6 +105,8 @@ The current docs with active purpose are:
 - `docs/acceptance_gates.md`: current acceptance commands and evidence rules
 - `docs/hardware_prep.md`: software-side preparation before hardware work
 - `docs/marlin_firmware_contract.md`: firmware-facing Marlin axis and G-code
+  contract
+- `docs/suction_subsystem_contract.md`: shared SKR/Arduino suction subsystem
   contract
 - `docs/submodule_feedback.md`: current upstream asks backed by parent evidence
 - `docs/paddleocr_path_guide.md`: OCR integration guidance

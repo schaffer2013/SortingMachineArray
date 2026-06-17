@@ -63,6 +63,17 @@ def test_motion_and_lights_share_one_marlin_transport() -> None:
     assert lights.last_command == "M150 R0 U16 B0"
 
 
+def test_home_axes_reports_z_and_c_at_configured_max() -> None:
+    motion = MarlinMotionAdapter(z_home_mm=245.0, c_home_mm=41.5)
+
+    motion.home_axes()
+
+    assert motion.get_pose().x_mm == 0.0
+    assert motion.get_pose().y_mm == 0.0
+    assert motion.get_pose().z_mm == 245.0
+    assert motion.get_pose().c_mm == 41.5
+
+
 def test_marlin_serial_transport_writes_commands_and_waits_for_ok() -> None:
     connection = FakeSerialConnection([b"echo:busy\n", b"ok\n"])
     transport = MarlinSerialTransport(connection=connection)

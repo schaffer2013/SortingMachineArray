@@ -21,10 +21,16 @@ hardware measurement overrides it. For Z specifically:
 
 - Z max: normal Ender 3 Z max travel.
 - Z min: `6.9 mm`.
+- Z homes to max, not min.
 
 Keep those limits in firmware soft endstops as well as any host-side
 calibration notes. The host UI can request moves, but firmware is responsible
 for refusing unsafe travel.
+
+Suction is delegated to a separate Arduino Uno/Nano controller. The SKR should
+only issue pick/release requests and wait for response inputs; it must not
+directly drive the pump or vent solenoid. See
+`docs/suction_subsystem_contract.md` for the shared SKR/Arduino contract.
 
 ## Axis Model
 
@@ -75,6 +81,8 @@ The current hardware adapter emits these commands:
 | Wait idle | `M400` |
 | Set NeoPixel status | `M150 R{r} U{g} B{b}` |
 | BLTouch deploy/stow/probe | Firmware-standard BLTouch / probe G-code, to be confirmed during bring-up |
+| Pick request | `M42 P<PICK_REQUEST_PIN> S255`, wait with `M226 P<X_MAX_PIN> S0`, then clear request |
+| Release request | `M42 P<RELEASE_REQUEST_PIN> S255`, wait with `M226 P<Y_MAX_PIN> S0`, then clear request |
 
 The adapter uses absolute positions. Firmware should boot and remain in
 absolute coordinate mode for axes. If any startup script or panel macro changes
@@ -94,16 +102,25 @@ Configure Marlin so all of the following are true:
 - Z homes before C.
 - Z homes toward its positive end of travel using its normal endstop.
 - C homes after Z using sensorless homing toward its negative end of travel.
+- X/Y home to their minimum coordinates.
+- Z and C home to their maximum coordinates.
+- C's physical homing direction is negative, but its configured post-home
+  coordinate should still be the C max value.
 - `G1 X... Y...` moves only X and Y.
 - `G1 Z...` moves only the main vertical carriage/interface.
 - `G1 C...` moves only the suction-cup vertical axis.
 - `G1 Z... C...` coordinates Z and C in one planner block.
 - `M400` blocks until all queued motion is complete.
 - `M150 R... U... B...` controls the configured status light output.
+- Pick/release requests are high-level SKR-to-Arduino requests. Pump PWM,
+  venting, vacuum sensing, and hold-mode control live on the Arduino.
+- `VAC_GOOD` is expected on `X_MAX`; `RELEASE_DONE` is expected on `Y_MAX`,
+  preferably active-low.
 - Units are millimeters.
 - Coordinates are absolute.
 - Soft limits prevent travel outside the safe physical envelope.
 - Z soft limits use normal Ender 3 Z max and `6.9 mm` Z min.
+- X/Y minimum is `0.0`; Z/C minimum is also `0.0`, even though Z/C home to max.
 - Homing leaves Z and C in known standard coordinates.
 - The BLTouch on the end effector is available for pile-height probing.
 
@@ -142,14 +159,19 @@ G28 C
 G28 X Y
 ```
 
-After that full sequence, the Python pose is reset to:
+After that full sequence, the Python pose is:
 
 ```text
 X=0.0
 Y=0.0
-Z=0.0
-C=0.0
+Z=<configured Z max/home position>
+C=<configured C max/home position>
 ```
+
+`0.0` is the minimum coordinate for every axis. Because Z and C home to their
+maximum end-of-travel positions, they must not be reset to zero after homing.
+The host tracks those homed values through `z_home_mm` and `c_home_mm` in
+`config/calibration.json`.
 
 Firmware should execute the vertical homing sequence in this order:
 
@@ -241,6 +263,8 @@ Required protections:
   stack
 - BLTouch trigger/failure handling that prevents blind downward motion after a
   failed probe
+- optocoupled or level-shifted request/response wiring for the suction
+  subsystem
 - an accessible emergency stop or power cut path during bring-up
 
 Host-side safety also exists, but it is not a replacement for firmware limits.
@@ -314,6 +338,8 @@ The firmware team should confirm and record:
 - final travel limits for all four axes
 - final safe homing order
 - whether the status LEDs should remain on Marlin `M150`
+- final SKR request pins and response pin identifiers for the suction
+  subsystem
 
 Once those answers are stable, update this document and the hardware adapter
 together so firmware and host software remain aligned.

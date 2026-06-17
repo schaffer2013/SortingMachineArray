@@ -16,6 +16,8 @@ def test_calibration_profile_reads_optional_probe_fields(tmp_path: Path) -> None
                 "probe_retract_z_mm": 1.5,
                 "probe_place_clearance_mm": 0.8,
                 "probe_max_contact_z_mm": 7.5,
+                "z_home_mm": 245.0,
+                "c_home_mm": 42.0,
                 "camera_offset_x_mm": 0.0,
                 "camera_offset_y_mm": 0.0,
                 "pile_positions_mm": [[100.0, 200.0]],
@@ -30,6 +32,8 @@ def test_calibration_profile_reads_optional_probe_fields(tmp_path: Path) -> None
     assert profile.probe_retract_z_mm == 1.5
     assert profile.probe_place_clearance_mm == 0.8
     assert profile.probe_max_contact_z_mm == 7.5
+    assert profile.z_home_mm == 245.0
+    assert profile.c_home_mm == 42.0
 
 
 def test_resolved_place_z_uses_probe_height_when_enabled() -> None:

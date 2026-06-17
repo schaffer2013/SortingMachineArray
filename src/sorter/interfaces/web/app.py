@@ -115,6 +115,8 @@ class WebRuntime:
             "camera_offset_y_mm",
             "camera_offset_z_mm",
             "min_xy_travel_z_mm",
+            "z_home_mm",
+            "c_home_mm",
             "safe_z_mm",
             "pick_z_mm",
             "place_z_mm",
@@ -181,10 +183,16 @@ class WebRuntime:
             snapshot = self.orchestrator.world.snapshot
             snapshot.pose.x_mm = 0.0
             snapshot.pose.y_mm = 0.0
-            snapshot.pose.z_mm = 0.0
-            snapshot.pose.c_mm = 0.0
+            snapshot.pose.z_mm = self.calibration.z_home_mm
+            snapshot.pose.c_mm = self.calibration.c_home_mm
             self.machine_initialized = False
-            return {"ok": True, "message": "Axes homed"}
+            return {
+                "ok": True,
+                "message": (
+                    f"Axes homed; X/Y at 0.00 mm, Z at {self.calibration.z_home_mm:.2f} mm, "
+                    f"C at {self.calibration.c_home_mm:.2f} mm"
+                ),
+            }
         if action == "wait_idle":
             self.orchestrator.motion.wait_until_idle()
             return {"ok": True, "message": "Motion idle"}

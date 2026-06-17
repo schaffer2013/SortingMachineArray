@@ -174,6 +174,8 @@ def test_calibration_can_be_updated_from_web_app(tmp_path):
             "camera_offset_y_mm": -2.0,
             "camera_offset_z_mm": 11.0,
             "min_xy_travel_z_mm": 3.0,
+            "z_home_mm": 245.0,
+            "c_home_mm": 41.5,
             "pick_z_mm": 1.25,
             "place_z_mm": 2.5,
             "probe_enabled": True,
@@ -190,6 +192,8 @@ def test_calibration_can_be_updated_from_web_app(tmp_path):
     assert status["calibration"]["camera_offset_y_mm"] == -2.0
     assert status["calibration"]["camera_offset_z_mm"] == 11.0
     assert status["calibration"]["min_xy_travel_z_mm"] == 3.0
+    assert status["calibration"]["z_home_mm"] == 245.0
+    assert status["calibration"]["c_home_mm"] == 41.5
     assert status["calibration"]["pick_z_mm"] == 1.25
     assert status["calibration"]["place_z_mm"] == 2.5
     assert status["calibration"]["probe_enabled"] is True
@@ -197,6 +201,8 @@ def test_calibration_can_be_updated_from_web_app(tmp_path):
     assert status["calibration"]["probe_place_clearance_mm"] == 0.75
     assert status["calibration"]["probe_max_contact_z_mm"] == 8.0
     assert saved.camera_offset_z_mm == 11.0
+    assert saved.z_home_mm == 245.0
+    assert saved.c_home_mm == 41.5
     assert saved.probe_enabled is True
     assert saved.probe_place_clearance_mm == 0.75
 
@@ -224,6 +230,7 @@ def test_machine_initialization_is_explicit_web_control():
     calibration = CalibrationProfile.from_file(settings.calibration_path).with_updates(
         safe_z_mm=2.0,
         min_xy_travel_z_mm=5.0,
+        c_home_mm=41.5,
     )
     app = create_web_app(orchestrator, calibration)
     app.testing = True
@@ -246,6 +253,28 @@ def test_machine_initialization_is_explicit_web_control():
     assert initialized_status["phase"] == "IDLE"
     assert initialized_status["active_command"] is None
     assert _pose_coordinates(initialized_status["pose"]) == {"x_mm": 0.0, "y_mm": 0.0, "z_mm": 5.0}
+    assert initialized_status["pose"]["c_mm"] == 41.5
+
+
+def test_web_home_sets_vertical_axes_to_configured_max():
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path).with_updates(
+        z_home_mm=245.0,
+        c_home_mm=41.5,
+    )
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    client = app.test_client()
+
+    response = client.post("/api/control/home", json={})
+    status = client.get("/api/status").get_json()
+
+    assert response.status_code == 200
+    assert status["pose"]["x_mm"] == 0.0
+    assert status["pose"]["y_mm"] == 0.0
+    assert status["pose"]["z_mm"] == 245.0
+    assert status["pose"]["c_mm"] == 41.5
 
 
 def _pose_coordinates(pose):

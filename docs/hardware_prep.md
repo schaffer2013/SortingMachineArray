@@ -39,11 +39,19 @@ Pick one primary goal for the session:
   - confirm the machine envelope starts from the reworked Ender 3 baseline
   - confirm Z max uses the normal Ender 3 Z max
   - confirm Z min is `6.9 mm`
+  - confirm `0.0` is the minimum coordinate for every axis
+  - confirm Z/C home to their configured max positions, not zero
   - confirm X/Y/Z/C are standard absolute coordinates
   - confirm Z homes first toward positive EOT on its normal endstop
   - confirm C homes second toward negative EOT using sensorless homing
   - confirm X/Y home together after Z and C are homed
   - confirm BLTouch deploy/stow/probe behavior before any pile probing
+- [ ] verify suction subsystem wiring matches `docs/suction_subsystem_contract.md`
+  - confirm SKR request lines go through optocouplers to Arduino D4/D5
+  - confirm Arduino response lines use pull-down/level-shifted signaling to
+    SKR X_MAX/Y_MAX
+  - confirm SKR uses request/wait logic rather than directly driving pump or
+    vent hardware
 - [ ] verify `config/card_engine/engine.json`
 - [ ] verify `config/card_engine/benchmark.engine.json`
 - [ ] verify `config/vision/recognition_thresholds.json`
@@ -115,6 +123,8 @@ them.
       fixed placement height or probe-derived pile-top measurement
 - [ ] if using BLTouch probing, confirm failed probe states stop motion and are
       visible to the operator
+- [ ] if using suction hardware, confirm pick timeout, hold mode, release pulse,
+      `VAC_GOOD`, and `RELEASE_DONE` behavior before moving cards
 - [ ] confirm you will save enough context to replay failures later
 - [ ] confirm the session avoids throughput tuning unless correctness is already
       stable
