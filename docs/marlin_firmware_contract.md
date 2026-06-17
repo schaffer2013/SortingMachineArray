@@ -22,6 +22,9 @@ hardware measurement overrides it. For Z specifically:
 - Z max: normal Ender 3 Z max travel.
 - Z min: `6.9 mm`.
 - Z homes to max, not min.
+- C stroke: `85 mm`.
+- C min: `0.0 mm`.
+- C max/home position: `85.0 mm`.
 
 Keep those limits in firmware soft endstops as well as any host-side
 calibration notes. The host UI can request moves, but firmware is responsible
@@ -81,8 +84,8 @@ The current hardware adapter emits these commands:
 | Wait idle | `M400` |
 | Set NeoPixel status | `M150 R{r} U{g} B{b}` |
 | BLTouch deploy/stow/probe | Firmware-standard BLTouch / probe G-code, to be confirmed during bring-up |
-| Pick request | `M42 P<PICK_REQUEST_PIN> S255`, wait with `M226 P<X_MAX_PIN> S0`, then clear request |
-| Release request | `M42 P<RELEASE_REQUEST_PIN> S255`, wait with `M226 P<Y_MAX_PIN> S0`, then clear request |
+| Pick request | Set `P1_22` high, wait for `P1_26` low, then clear `P1_22` |
+| Release request | Set `P1_23` high, wait for `P1_25` low, then clear `P1_23` |
 
 The adapter uses absolute positions. Firmware should boot and remain in
 absolute coordinate mode for axes. If any startup script or panel macro changes
@@ -114,12 +117,13 @@ Configure Marlin so all of the following are true:
 - `M150 R... U... B...` controls the configured status light output.
 - Pick/release requests are high-level SKR-to-Arduino requests. Pump PWM,
   venting, vacuum sensing, and hold-mode control live on the Arduino.
-- `VAC_GOOD` is expected on `X_MAX`; `RELEASE_DONE` is expected on `Y_MAX`,
-  preferably active-low.
+- `VAC_GOOD` is expected on `E0DET` / `P1_26`; `RELEASE_DONE` is expected on
+  `E1DET` / `P1_25`, active-low.
 - Units are millimeters.
 - Coordinates are absolute.
 - Soft limits prevent travel outside the safe physical envelope.
 - Z soft limits use normal Ender 3 Z max and `6.9 mm` Z min.
+- C soft limits use `0.0 mm` minimum and `85.0 mm` maximum.
 - X/Y minimum is `0.0`; Z/C minimum is also `0.0`, even though Z/C home to max.
 - Homing leaves Z and C in known standard coordinates.
 - The BLTouch on the end effector is available for pile-height probing.
@@ -172,6 +176,9 @@ C=<configured C max/home position>
 maximum end-of-travel positions, they must not be reset to zero after homing.
 The host tracks those homed values through `z_home_mm` and `c_home_mm` in
 `config/calibration.json`.
+
+For the current mechanism, `c_home_mm` should be `85.0` because C only has an
+85 mm stroke.
 
 Firmware should execute the vertical homing sequence in this order:
 
@@ -256,6 +263,7 @@ Required protections:
 
 - conservative max travel for X, Y, Z, and C
 - Z travel constrained to normal Ender 3 Z max and `6.9 mm` minimum
+- C travel constrained to `0.0 mm` minimum and `85.0 mm` maximum
 - conservative max feedrate and acceleration for each axis
 - endstops or equivalent sensorless limits for every homed axis
 - motor direction verified with single-axis jogs before full homing
@@ -349,3 +357,37 @@ together so firmware and host software remain aligned.
 - Marlin `M92` documentation lists extra-axis parameters including `C`, useful
   for validating C-axis steps-per-unit support:
   <https://marlinfw.org/docs/gcode/M092.html>
+
+## Connection Inventory
+
+This list is the shared connection map for firmware and wiring review. When a
+row says "signal pin only," the design uses that named input signal and does
+not imply the whole physical connector is dedicated to that function.
+
+| Connection | From | To | Purpose | Notes |
+| --- | --- | --- | --- | --- |
+| 24 V input | Ender 3 V2 PSU | BTT SKR 1.4 Turbo power input | Main controller power | Reworked Ender 3 baseline. |
+| X motor | SKR X driver output | X stepper motor | X gantry motion | Standard Ender-style motor wiring unless reworked hardware changes it. |
+| Y motor | SKR Y driver output | Y stepper motor | Y gantry motion | Standard Ender-style motor wiring unless reworked hardware changes it. |
+| Z motor | SKR Z driver output | Z/interface stepper motor | Main vertical interface motion | Homes positive to Z max using the normal Z endstop. |
+| C motor | SKR extra driver output | C/end-effector stepper motor | 85 mm suction-cup vertical stroke | Exposed to Marlin as the `C` axis. Homes physically negative with sensorless homing, then reports C max/home as `85.0 mm`. |
+| X homing | X endstop switch | SKR `X_MIN` | X homing input | Uses the normal `X_MIN` endstop input. |
+| Y homing | Y endstop switch | SKR `Y_MIN` | Y homing input | Uses the normal `Y_MIN` endstop input. |
+| Z homing | Z max endstop switch | SKR `Z_MAX` | Z positive-EOT homing input | Uses the `Z_MAX` endstop input for Z homing. |
+| C homing | C driver sensorless signal | SKR / driver sensorless homing path | C negative-EOT homing | No physical C endstop is expected. Configure sensorless homing for C. |
+| BLTouch servo | BLTouch control lead | SKR `SERVO0` | BLTouch deploy/stow | `SERVO0` is unavailable for other uses. |
+| BLTouch probe | BLTouch probe output | SKR configured probe/Z-probe input | Probe trigger | Firmware team must confirm final probe input and offsets. |
+| NeoPixel status light | SKR NeoPixel/status output | NeoPixel ring | Machine status lighting | Controlled with Marlin `M150`. |
+| Host serial | Host Raspberry Pi / operator computer | SKR USB or serial port | Python controller to Marlin | Motion, lights, and request/wait commands share one serialized command channel. |
+| `PICK_REQUEST` | SKR EXP1 pin 7 / `P1_22` 3.3 V logic output | Arduino `D4` with 10 kohm pulldown to GND | High-level pick request | Use EXP1 signal pin and ground only. HIGH means request active. Do not use FAN/HE outputs unless real GPIO is exhausted. Do not drive 5 V back into EXP1. |
+| `RELEASE_REQUEST` | SKR EXP1 pin 8 / `P1_23` 3.3 V logic output | Arduino `D5` with 10 kohm pulldown to GND | High-level release request | Use EXP1 signal pin and ground only. HIGH means request active. Do not use FAN/HE outputs unless real GPIO is exhausted. Do not drive 5 V back into EXP1. |
+| EXP1 logic ground | SKR EXP1 pin 9 / GND | Arduino GND | Request-line reference | Use ground with EXP1 pins 7 and 8. EXP1 pin 10 is 5 V and is not needed for this handshake. |
+| `VAC_GOOD` | Arduino `D6` open-drain/open-collector style output | SKR `E0DET` / `P1_26` signal input | Vacuum-ready response for wait | Uses the `E0DET` detector signal pin only, not a normal filament runout function and not the whole connector. Active-low. Disable filament runout on this pin. Do not drive 5 V into the SKR input. |
+| `RELEASE_DONE` | Arduino `D7` open-drain/open-collector style output | SKR `E1DET` / `P1_25` signal input | Release-complete response for wait | Uses the `E1DET` detector signal pin only, not a normal filament runout function and not the whole connector. Active-low. Disable filament runout on this pin. Do not drive 5 V into the SKR input. |
+| `VAC_FAULT` optional | Arduino `D8` open-drain/open-collector style output | SKR `PWRDET` / `P1_00` signal input | Optional future suction fault input | Reserve only if power-loss features are disabled or remapped. Do not drive 5 V into the SKR input. |
+| Arduino logic power | 24 V to 5 V buck | Arduino 5 V / GND | Suction controller power | Common ground is acceptable for this build unless isolation is intentionally changed. |
+| Vacuum sensor power | 24 V to 5 V buck | Vacuum sensor | Sensor power | Sensor signal is reserved to Arduino `A0`. |
+| Vacuum sensor signal | Vacuum sensor | Arduino `A0` | Optional/reserved vacuum feedback | Used for vacuum-good threshold if installed. |
+| Pump power/control | 24 V to 5 V buck and Arduino pump driver | Pump via Arduino `D9` PWM control | Pump full-power and hold-mode control | Arduino owns pump PWM; SKR must not directly drive pump. |
+| Vent solenoid power/control | 24 V to 5 V or 12 V buck and Arduino solenoid driver | Vent solenoid via Arduino `D3` | Release vent pulse | Final valve voltage determines buck output. Arduino owns vent timing; SKR must not directly drive solenoid. |
+| Ground reference | PSU / bucks / SKR / Arduino | Common ground | Shared logic reference | Common ground is acceptable unless optocouplers are intentionally used for full isolation. |

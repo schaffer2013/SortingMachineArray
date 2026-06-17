@@ -41,15 +41,20 @@ Pick one primary goal for the session:
   - confirm Z min is `6.9 mm`
   - confirm `0.0` is the minimum coordinate for every axis
   - confirm Z/C home to their configured max positions, not zero
+  - confirm C stroke is `85 mm` and `c_home_mm` is `85.0`
   - confirm X/Y/Z/C are standard absolute coordinates
   - confirm Z homes first toward positive EOT on its normal endstop
   - confirm C homes second toward negative EOT using sensorless homing
   - confirm X/Y home together after Z and C are homed
   - confirm BLTouch deploy/stow/probe behavior before any pile probing
 - [ ] verify suction subsystem wiring matches `docs/suction_subsystem_contract.md`
-  - confirm SKR request lines go through optocouplers to Arduino D4/D5
+  - confirm SKR request lines use EXP1 pin 7 / `P1_22` and EXP1 pin 8 /
+    `P1_23`, not FAN/HE outputs
+  - confirm Arduino D4/D5 have 10 kohm pulldowns and do not drive 5 V back
+    into EXP1
   - confirm Arduino response lines use pull-down/level-shifted signaling to
-    SKR X_MAX/Y_MAX
+    SKR `E0DET` / `P1_26` and `E1DET` / `P1_25`
+  - confirm filament runout is disabled on `E0DET` / `E1DET`
   - confirm SKR uses request/wait logic rather than directly driving pump or
     vent hardware
 - [ ] verify `config/card_engine/engine.json`

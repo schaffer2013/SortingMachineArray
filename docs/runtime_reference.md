@@ -69,7 +69,8 @@ should optimize for.
   Turbo. Firmware should retain the normal Ender 3 Z max and set Z min to
   `6.9 mm`.
 - `0.0` is the minimum coordinate for every axis. Z and C home to their
-  configured max positions, tracked as `z_home_mm` and `c_home_mm`.
+  configured max positions, tracked as `z_home_mm` and `c_home_mm`. C has an
+  85 mm stroke, so `c_home_mm` is `85.0`.
 - Suction control is split from motion control: the SKR sends high-level
   pick/release requests and waits for Arduino response signals, while the
   Arduino owns pump PWM, venting, vacuum sensing, and hold-mode behavior.

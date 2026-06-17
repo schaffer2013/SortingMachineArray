@@ -62,3 +62,16 @@ def test_resolved_place_z_falls_back_to_fixed_place_height() -> None:
     )
 
     assert profile.resolved_place_z_mm(probed_top_z_mm=6.5) == 3.0
+
+
+def test_default_c_home_matches_85_mm_stroke() -> None:
+    profile = CalibrationProfile(
+        safe_z_mm=10.0,
+        pick_z_mm=2.0,
+        place_z_mm=3.0,
+        camera_offset_x_mm=0.0,
+        camera_offset_y_mm=0.0,
+        pile_positions_mm=(),
+    )
+
+    assert profile.c_home_mm == 85.0

@@ -2,18 +2,19 @@
 
 ## Purpose
 
-This document is the shared direction for both sides of the suction subsystem:
-the Marlin/SKR firmware side and the Arduino suction-controller side.
+This document is the shared direction for the SKR/Marlin side and the Arduino
+suction-controller side.
 
 Core principle:
 
 ```text
-SKR handles motion and waits.
-Arduino handles suction, pump control, venting, and vacuum feedback.
+SKR asks and waits.
+Arduino performs and reports.
 ```
 
-The SKR must not directly control the pump or vent solenoid. It should only send
-pick/release requests and wait for done/ready responses.
+No 24 V or 5 V power-output lines are used as logic handshake lines. Do not use
+FAN/HE outputs for SKR-to-Arduino requests unless all real GPIO options are
+exhausted.
 
 ## Architecture
 
@@ -27,146 +28,230 @@ Arduino Uno/Nano   = suction controller
 pump / vent solenoid / vacuum sensor
 ```
 
-## SKR Developer Guidance
+## Ownership Split
 
-Already used:
+SKR 1.4 Turbo / Marlin / OpenPnP owns:
 
-| SKR resource | Use |
-| --- | --- |
-| `X_MIN` | X homing |
-| `Y_MIN` | Y homing |
-| `Z_MAX` | Z homing |
-| `SERVO0` | BLTouch, unavailable |
+- X/Y/Z/C motion
+- homing
+- high-level pick/release request
+- waiting for Arduino response
 
-Recommended SKR pins/signals:
+Arduino Uno now / Nano later owns:
 
-| Function | Direction | SKR side |
+- pump PWM
+- vent solenoid
+- vacuum sensor
+- pick confirmation
+- quiet hold behavior
+- release pulse
+
+## SKR Reserved Pins
+
+| Function | SKR connector / pin | Notes |
 | --- | --- | --- |
-| `VAC_GOOD` | Arduino to SKR | `X_MAX` endstop input |
-| `RELEASE_DONE` | Arduino to SKR | `Y_MAX` endstop input |
-| `PICK_REQUEST` | SKR to Arduino | unused FAN/HE output through optocoupler |
-| `RELEASE_REQUEST` | SKR to Arduino | unused FAN/HE output through optocoupler |
+| X home | `X-` / `P1_29` | Used |
+| Y home | `Y-` / `P1_28` | Used |
+| Z top home | `Z-` / `P1_27` | Used for top-of-machine Z endstop |
+| BLTouch servo | `SERVO0` / `P2_00` | Used only for BLTouch deploy/stow |
+| BLTouch probe signal | `PROBE` / `P0_10` | Used as probe/device input, not Z homing |
 
-Use active-low response signals if possible.
+SKR 1.4/Turbo has `X-`, `Y-`, `Z-`, `E0DET`, `E1DET`, and `PWRDET`, not separate
+min/max endstop headers. In Marlin's SKR 1.4 pin file these map to:
 
-## SKR G-code Concept
-
-Pick:
-
-```gcode
-M42 P<PICK_REQUEST_PIN> S255
-M226 P<X_MAX_PIN> S0
-M42 P<PICK_REQUEST_PIN> S0
-```
-
-Release:
-
-```gcode
-M42 P<RELEASE_REQUEST_PIN> S255
-M226 P<Y_MAX_PIN> S0
-M42 P<RELEASE_REQUEST_PIN> S0
-```
-
-`M226` should wait until the Arduino pulls the corresponding response input
-active.
-
-The exact `P...` pin numbers must come from the final SKR 1.4 Turbo Marlin pin
-mapping. Record those final pin names/numbers in this document once assigned.
-
-## Arduino Developer Guidance
-
-Recommended Arduino pinout:
-
-| Arduino pin | Function |
+| Logical input | MCU pin |
 | --- | --- |
-| `D4` | `PICK_REQUEST` input from SKR optocoupler |
-| `D5` | `RELEASE_REQUEST` input from SKR optocoupler |
-| `D6` | `VAC_GOOD` output to SKR `X_MAX` |
-| `D7` | `RELEASE_DONE` output to SKR `Y_MAX` |
-| `D9` | Pump PWM output |
-| `D3` | Vent solenoid output |
-| `A0` | Vacuum sensor input, optional/reserved |
+| `X_STOP` | `P1_29` |
+| `Y_STOP` | `P1_28` |
+| `Z_STOP` | `P1_27` |
+| `E0DET` | `P1_26` |
+| `E1DET` | `P1_25` |
+| `PWRDET` | `P1_00` |
 
-## Arduino Behavior
+The same pin file maps `SERVO0` to `P2_00` and the probe input to `P0_10`, so
+the BLTouch can remain separate from Z homing.
 
-On `PICK_REQUEST`:
+## SKR To Arduino Request Outputs
 
-1. Turn vent off.
-2. Run pump at 100% until the vacuum-good threshold is reached or timeout.
-3. Assert `VAC_GOOD`.
-4. Enter hold mode.
+Use EXP1 logic pins, not heater/fan outputs:
 
-In hold mode:
+| Signal | Direction | SKR physical header | MCU pin | Arduino pin |
+| --- | --- | --- | --- | --- |
+| `PICK_REQUEST` | SKR to Arduino | EXP1 pin 7 | `P1_22` | Arduino `D4` |
+| `RELEASE_REQUEST` | SKR to Arduino | EXP1 pin 8 | `P1_23` | Arduino `D5` |
+| Logic ground | common | EXP1 pin 9 | `GND` | Arduino `GND` |
 
-1. Run pump continuously at low PWM or PI trim.
-2. Maintain suction quietly.
-3. Keep `VAC_GOOD` asserted while vacuum remains acceptable.
+Marlin lists EXP1 pins 7 and 8 as `P1_22` and `P1_23`, with EXP1 pin 9 as
+ground and pin 10 as 5 V. Use only the signal pins and ground for this
+interface.
 
-On `RELEASE_REQUEST`:
+Electrical rule:
 
-1. Turn pump off.
-2. Turn vent solenoid on briefly.
-3. Deassert `VAC_GOOD`.
-4. Assert `RELEASE_DONE`.
+- SKR `P1_22` / `P1_23` are 3.3 V logic outputs.
+- Arduino `D4` / `D5` should have 10 kohm pulldowns to GND.
+- HIGH means request active.
+- LOW means no request.
+- A 5 V Arduino normally reads 3.3 V as HIGH, so this is acceptable.
+- Do not drive 5 V back into the EXP pins.
 
-Timeouts and fault states should be explicit. If vacuum cannot be reached, the
-Arduino should avoid asserting `VAC_GOOD`, and the SKR-side wait should time out
-or require operator recovery according to the final firmware policy.
+## Arduino To SKR Response Inputs
 
-## Electrical Interface
+Use the spare detector inputs:
 
-SKR to Arduino request lines:
+| Signal | Direction | SKR connector | MCU pin | Purpose |
+| --- | --- | --- | --- | --- |
+| `VAC_GOOD` | Arduino to SKR | `E0DET` | `P1_26` | Pick/vacuum confirmed |
+| `RELEASE_DONE` | Arduino to SKR | `E1DET` | `P1_25` | Release cycle complete |
+| `VAC_FAULT` | Arduino to SKR | `PWRDET` | `P1_00` | Optional future fault input |
+
+`E0DET` and `E1DET` are Marlin's default filament runout pins, so firmware
+should not enable filament runout on those pins. `PWRDET` is Marlin's default
+power-loss input / PS_ON-related pin, so reserve it only if power-loss features
+are disabled or remapped.
+
+Response electrical rule:
+
+- Arduino must not drive 5 V into SKR inputs.
+- Use open-drain / open-collector style.
+- Active LOW is preferred.
+
+Recommended circuit per response line:
 
 ```text
-SKR FAN/HE output -> optocoupler input -> Arduino D4/D5
+SKR E0DET/E1DET signal pin ---- collector of NPN or optocoupler transistor
+SKR GND ----------------------- emitter of NPN or optocoupler transistor
+
+Arduino output pin -- resistor --> transistor base / optocoupler LED
 ```
 
-Add optocouplers between the SKR switched outputs and Arduino inputs. Do not
-wire SKR heater/fan outputs directly to Arduino pins.
+Signal meaning:
 
-Arduino to SKR response lines:
+| Signal | High / released | Low / pulled down |
+| --- | --- | --- |
+| `VAC_GOOD` | not ready | vacuum good |
+| `RELEASE_DONE` | not done | release done |
 
-```text
-Arduino D6/D7 -> open-drain/open-collector style pull-down -> SKR X_MAX/Y_MAX
-```
+## Arduino Pin Allocation
 
-Do not send 5 V from the Arduino directly into SKR endstop inputs. Use
-transistor pull-downs, optocouplers, or level shifting.
+| Arduino pin | Function | Notes |
+| --- | --- | --- |
+| `D4` | `PICK_REQUEST` input | From SKR EXP1 pin 7 / `P1_22` |
+| `D5` | `RELEASE_REQUEST` input | From SKR EXP1 pin 8 / `P1_23` |
+| `D6` | `VAC_GOOD` output | Open-drain driver to SKR `E0DET` / `P1_26` |
+| `D7` | `RELEASE_DONE` output | Open-drain driver to SKR `E1DET` / `P1_25` |
+| `D8` | `VAC_FAULT` output | Optional future output to `PWRDET` / `P1_00` |
+| `D9` | Pump PWM | Drives pump transistor/MOSFET |
+| `D3` | Vent solenoid output | Drives solenoid transistor |
+| `A0` | Vacuum sensor input | Reserved for pressure/vacuum sensor |
 
-## Power
+## Power And Load Wiring
+
+Assume suction subsystem loads are 5 V:
 
 ```text
 Ender 3 V2 24 V PSU
         |
-        +-- 24 V -> 5 V buck -> Arduino + sensor
-        +-- 24 V -> 5 V buck -> pump
-        +-- 24 V -> 5 V or 12 V buck -> vent solenoid, depending on final valve
+        +-- LM2596 buck set to 5 V
+              |
+              +-- Arduino
+              +-- sensor
+              +-- pump power
+              +-- vent solenoid power
 ```
 
-All grounds common unless optocouplers are intentionally used for isolation. For
-this build, common ground is acceptable.
+Do not power the pump or solenoid from Arduino pins. Arduino pins only drive
+the transistor bases/gates.
 
-## Firmware Bring-up Checklist
+Load drivers:
 
-- Confirm SKR pin mapping for `PICK_REQUEST` and `RELEASE_REQUEST`.
-- Confirm SKR endstop input mapping for `VAC_GOOD` and `RELEASE_DONE`.
-- Confirm `M42` can drive both request outputs.
-- Confirm `M226` can wait on the selected response inputs.
-- Confirm active-low response behavior.
-- Confirm Arduino request inputs change state only through the optocouplers.
-- Confirm Arduino response outputs do not drive 5 V into SKR inputs.
-- Confirm pump full-power, hold-power, and off states.
-- Confirm vent pulse duration releases a card reliably without excessive air.
-- Confirm vacuum sensor threshold and timeout behavior if `A0` is used.
-- Confirm failure behavior when `VAC_GOOD` never arrives.
-- Confirm release behavior deasserts `VAC_GOOD` and asserts `RELEASE_DONE`.
+| Load | Arduino pin | Driver |
+| --- | --- | --- |
+| Pump | `D9` PWM | Prefer logic-level MOSFET; TIP120 acceptable for prototype but wastes voltage |
+| Vent solenoid | `D3` | TIP120 is acceptable |
+| Flyback diode | both loads | Required; diode stripe/cathode to +5 V |
+
+## Firmware Behavior Contract
+
+Pick sequence:
+
+1. OpenPnP/Marlin moves nozzle to pick location.
+2. SKR sets `PICK_REQUEST` high on `P1_22`.
+3. Arduino sees `D4` high.
+4. Arduino closes vent.
+5. Arduino runs pump at 100%.
+6. Arduino waits for vacuum threshold, or fixed timeout in V1 if no sensor is
+   installed.
+7. Arduino asserts `VAC_GOOD` low on `E0DET` / `P1_26`.
+8. SKR waits until `E0DET` reads active low, then continues.
+9. Arduino enters HOLD mode.
+
+Hold behavior:
+
+- Vent closed.
+- Pump runs continuously at low PWM for quiet rumble.
+- Later: PI trim around target vacuum.
+- `VAC_GOOD` remains active while vacuum/card hold is valid.
+
+Release sequence:
+
+1. OpenPnP/Marlin moves nozzle to place location.
+2. SKR sets `RELEASE_REQUEST` high on `P1_23`.
+3. Arduino sees `D5` high.
+4. Arduino turns pump off.
+5. Arduino opens vent solenoid for release pulse.
+6. Arduino deasserts `VAC_GOOD`.
+7. Arduino asserts `RELEASE_DONE` low on `E1DET` / `P1_25`.
+8. SKR waits until `E1DET` reads active low, then continues.
+9. SKR clears `RELEASE_REQUEST`.
+10. Arduino closes vent and clears `RELEASE_DONE`.
+
+## SKR Firmware Requirements
+
+Firmware team should:
+
+- Disable LCD/TFT features using EXP1 pins `P1_22` / `P1_23`, or confirm no
+  conflict.
+- Configure `P1_22` as `PICK_REQUEST` output.
+- Configure `P1_23` as `RELEASE_REQUEST` output.
+- Configure `P1_26` / `E0DET` as `VAC_GOOD` input with pullup, active low.
+- Configure `P1_25` / `E1DET` as `RELEASE_DONE` input with pullup, active low.
+- Disable filament runout usage on `E0DET` / `E1DET`.
+- Leave `P1_00` / `PWRDET` unused unless power-loss features are disabled or
+  remapped.
+- Expose the sequence through `M42` / `M226` or custom G-code macros.
+
+Conceptual G-code:
+
+```gcode
+; PICK
+set P1_22 HIGH
+wait for P1_26 LOW
+set P1_22 LOW
+
+; RELEASE
+set P1_23 HIGH
+wait for P1_25 LOW
+set P1_23 LOW
+```
+
+## Arduino Firmware Requirements
+
+Arduino team should:
+
+- Treat `D4` high as `PICK_REQUEST`.
+- Treat `D5` high as `RELEASE_REQUEST`.
+- Drive `D6` through open-drain/open-collector hardware for `VAC_GOOD`.
+- Drive `D7` through open-drain/open-collector hardware for `RELEASE_DONE`.
+- Never drive SKR input lines directly with 5 V.
+- Run pump with PWM on `D9`.
+- Drive vent solenoid on `D3`.
+- Implement PICK, HOLD, RELEASE, and FAULT states.
 
 ## Open Decisions
 
-- Final SKR `PICK_REQUEST_PIN` and `RELEASE_REQUEST_PIN` values.
-- Final SKR `X_MAX_PIN` and `Y_MAX_PIN` identifiers for `M226`.
-- Active-low polarity details in Marlin and Arduino firmware.
+- Final Marlin syntax or macro names for setting `P1_22` / `P1_23`.
+- Final Marlin syntax or macro names for waiting on `P1_26` / `P1_25`.
+- Whether `VAC_FAULT` on `PWRDET` / `P1_00` is used in V1.
 - Vacuum-good threshold if the sensor is installed.
 - Pick timeout and release timeout durations.
 - Hold-mode PWM baseline and optional PI trim constants.
-- Vent solenoid voltage and buck converter selection.
