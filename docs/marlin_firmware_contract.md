@@ -11,6 +11,21 @@ The sorter controller talks to Marlin as a motion controller. Marlin owns
 stepper mapping, endstops, homing direction, soft limits, acceleration,
 current, and any board-specific pin assignments.
 
+## Hardware Baseline
+
+This machine is a reworked Ender 3 using a BTT SKR 1.4 Turbo as the Marlin
+control board.
+
+Firmware should start from the normal Ender 3 machine envelope unless a later
+hardware measurement overrides it. For Z specifically:
+
+- Z max: normal Ender 3 Z max travel.
+- Z min: `6.9 mm`.
+
+Keep those limits in firmware soft endstops as well as any host-side
+calibration notes. The host UI can request moves, but firmware is responsible
+for refusing unsafe travel.
+
 ## Axis Model
 
 The machine is treated as a four-linear-axis system:
@@ -88,6 +103,7 @@ Configure Marlin so all of the following are true:
 - Units are millimeters.
 - Coordinates are absolute.
 - Soft limits prevent travel outside the safe physical envelope.
+- Z soft limits use normal Ender 3 Z max and `6.9 mm` Z min.
 - Homing leaves Z and C in known standard coordinates.
 - The BLTouch on the end effector is available for pile-height probing.
 
@@ -217,6 +233,7 @@ Firmware should enforce safety even if the host sends a bad command.
 Required protections:
 
 - conservative max travel for X, Y, Z, and C
+- Z travel constrained to normal Ender 3 Z max and `6.9 mm` minimum
 - conservative max feedrate and acceleration for each axis
 - endstops or equivalent sensorless limits for every homed axis
 - motor direction verified with single-axis jogs before full homing
@@ -287,6 +304,7 @@ paired Z/C compensation rule.
 The firmware team should confirm and record:
 
 - board and driver assignment for X, Y, Z, and C
+- confirmation of the exact Ender 3 Z max value used in firmware
 - whether C has a physical endstop, sensorless homing, or a fixed startup
   reference
 - final sensorless homing settings for C toward negative end of travel

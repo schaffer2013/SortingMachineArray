@@ -35,6 +35,10 @@ Pick one primary goal for the session:
   - confirm BLTouch fields (`probe_enabled`, retract, clearance, max contact)
     match the firmware configuration
 - [ ] verify Marlin firmware matches `docs/marlin_firmware_contract.md`
+  - confirm the controller board is configured as BTT SKR 1.4 Turbo
+  - confirm the machine envelope starts from the reworked Ender 3 baseline
+  - confirm Z max uses the normal Ender 3 Z max
+  - confirm Z min is `6.9 mm`
   - confirm X/Y/Z/C are standard absolute coordinates
   - confirm Z homes first toward positive EOT on its normal endstop
   - confirm C homes second toward negative EOT using sensorless homing

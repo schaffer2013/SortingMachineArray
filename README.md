@@ -171,6 +171,7 @@ If you want to run the real vendored recognizer, make sure the submodule OCR and
 - NeoPixels on BTT SKR 1.4 Turbo:
 	- `src/sorter/adapters/hardware/neopixel_lights.py` maps machine status to Marlin `M150` RGB commands.
 	- Motion and lights share one `MarlinSerialTransport` connection to the SKR board firmware so G-code is serialized through one controller channel.
+- The hardware baseline is a reworked Ender 3 with a BTT SKR 1.4 Turbo control board. Firmware should keep normal Ender 3 Z max and set Z min to `6.9 mm`.
 - App-layer calibration uses the vacuum/nozzle as the baseline XY/Z pose. `camera_offset_x_mm`, `camera_offset_y_mm`, and `camera_offset_z_mm` describe the fixed physical camera offset from that baseline before any Marlin commands are emitted.
 - Firmware-facing motion uses standard absolute X/Y/Z/C coordinates. Z is the main interface axis; C is the end-effector/suction-cup vertical axis.
 - Firmware should home Z first toward its positive end of travel on the normal endstop, then home C toward its negative end of travel using sensorless homing, then home X/Y together.

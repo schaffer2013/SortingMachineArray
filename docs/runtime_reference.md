@@ -65,6 +65,9 @@ should optimize for.
   homing, then home X/Y together.
 - Hardware-facing assumptions should stay visible in docs and config rather than
   being buried in adapter-specific code.
+- The hardware baseline is a reworked Ender 3 controlled by a BTT SKR 1.4
+  Turbo. Firmware should retain the normal Ender 3 Z max and set Z min to
+  `6.9 mm`.
 
 ## Camera-Driven Micro-Calibration Contract
 
