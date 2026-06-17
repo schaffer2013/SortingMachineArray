@@ -17,18 +17,22 @@ body {
   color: var(--text);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
-.app-shell { width: min(1240px, calc(100% - 32px)); margin: 0 auto 40px; }
+.app-shell { width: min(1320px, calc(100% - 32px)); margin: 0 auto 40px; }
 .topbar {
   display: flex; justify-content: space-between; align-items: end; gap: 20px;
   padding: 24px 0 20px;
 }
 .topbar h1, h2 { margin: 0; }
-.topbar nav { display: flex; gap: 10px; flex-wrap: wrap; }
-.topbar a {
-  color: var(--muted); text-decoration: none; padding: 10px 12px; border-radius: 999px;
+.app-layout { display:grid; grid-template-columns: 180px minmax(0, 1fr); gap:18px; align-items:start; }
+.app-layout nav {
+  position: sticky; top: 16px; display:grid; gap:8px; padding:10px;
+  background:rgba(17,24,39,.72); border:1px solid var(--line); border-radius:18px;
 }
-.topbar a:hover { background: rgba(255,255,255,.06); color: var(--text); }
-.topbar a.active {
+.app-layout a {
+  color: var(--muted); text-decoration: none; padding: 11px 12px; border-radius: 12px;
+}
+.app-layout a:hover { background: rgba(255,255,255,.06); color: var(--text); }
+.app-layout a.active {
   background: rgba(56,189,248,.16);
   color: var(--text);
   box-shadow: inset 0 0 0 1px rgba(56,189,248,.4);
@@ -43,6 +47,7 @@ body {
   display:grid; grid-template-columns: minmax(0, 1.4fr) minmax(320px, .8fr); gap:16px; margin-bottom:16px;
 }
 .dashboard-grid { grid-template-columns: minmax(0, 1.5fr) minmax(280px, .7fr); }
+.movement-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:16px; margin:16px 0; }
 .wide { min-width: 0; }
 .camera-feed {
   display:block; width:100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 16px;
@@ -54,6 +59,7 @@ button {
   font-weight:700; cursor:pointer;
 }
 button.secondary { background:#243146; color:var(--text); }
+button:disabled { cursor:not-allowed; opacity:.55; }
 label { display:grid; gap:6px; color:var(--muted); margin: 12px 0; }
 input, select {
   width:100%; border:1px solid var(--line); background:#0b1220; color:var(--text);
@@ -61,6 +67,13 @@ input, select {
 }
 .form-grid { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:12px; align-items:end; }
 .form-grid.three-up { grid-template-columns: repeat(3, minmax(0,1fr)); }
+.axis-controls { display:grid; gap:10px; }
+.jog-pad {
+  display:grid; grid-template-columns: repeat(3, minmax(64px, 1fr)); gap:10px; align-items:stretch;
+  max-width: 360px;
+}
+.jog-pad button { min-height:54px; }
+.movement-pad label { max-width: 180px; }
 .checkbox-row { display:flex; gap:14px; flex-wrap:wrap; margin:12px 0; }
 .checkbox-row label { display:flex; gap:8px; align-items:center; margin:0; }
 .checkbox-row input { width:auto; }
@@ -73,6 +86,8 @@ input, select {
 .pill {
   padding:7px 11px; border-radius:999px; background:rgba(56,189,248,.12); color:var(--accent); font-weight:700;
 }
+.good-pill { background:rgba(52,211,153,.13); color:var(--good); }
+.warn-pill { background:rgba(245,158,11,.14); color:var(--warn); }
 .pile-grid, .status-cards, .capability-grid {
   display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px;
 }
@@ -95,7 +110,11 @@ th { color:var(--muted); font-size:.82rem; text-transform:uppercase; letter-spac
 @media (max-width: 820px) {
   .app-shell { width:min(100% - 20px, 1240px); }
   .topbar { display:grid; align-items:start; }
+  .app-layout { grid-template-columns: 1fr; }
+  .app-layout nav { position:static; display:flex; overflow:auto; }
+  .app-layout a { white-space:nowrap; }
   .hero-grid, .dashboard-grid, .two-column { grid-template-columns: 1fr; }
+  .movement-grid { grid-template-columns: 1fr; }
   .form-grid, .metric-list { grid-template-columns: 1fr; }
   .form-grid.three-up { grid-template-columns: 1fr; }
 }

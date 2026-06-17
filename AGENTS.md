@@ -16,6 +16,12 @@
   - commit and push the resulting submodule pointer change directly from `main`
 - If there is any doubt about whether a change is "tiny," create a branch instead of working on `main`.
 
+## Software version tracking
+
+- Track the software version for each commit as `x.y.z-SHA`, where `x.y.z` comes from the project version in `pyproject.toml` and `SHA` is the short Git commit SHA.
+- When making a release-oriented or operator-visible change, confirm that the web System tab reports the expected `x.y.z-SHA` after the commit is created.
+- Increment `x.y.z` intentionally when the user requests a version bump or when the change should be treated as a new packaged software version; otherwise the commit SHA uniquely identifies the build.
+
 ## Collection integration
 
 - Before implementing or changing anything that interfaces with the collection or registration service, review the current collection API contract in:

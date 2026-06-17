@@ -14,6 +14,7 @@ class MarlinMotionAdapter:
     transport: MarlinTransport | None = None
     xy_feedrate_mm_per_min: int = 6000
     z_feedrate_mm_per_min: int = 1200
+    c_feedrate_mm_per_min: int = 1200
     total_distance_mm: float = field(init=False, default=0.0)
 
     def __post_init__(self) -> None:
@@ -34,6 +35,10 @@ class MarlinMotionAdapter:
     def move_z(self, z_mm: float) -> None:
         self._send(f"G1 Z{_format_mm(z_mm)} F{self.z_feedrate_mm_per_min}")
         self._pose.z_mm = z_mm
+
+    def move_c(self, c_mm: float) -> None:
+        self._send(f"G1 C{_format_mm(c_mm)} F{self.c_feedrate_mm_per_min}")
+        self._pose.c_mm = c_mm
 
     def get_pose(self) -> MachinePose:
         return self._pose

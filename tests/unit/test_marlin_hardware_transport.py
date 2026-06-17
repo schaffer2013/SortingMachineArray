@@ -40,6 +40,7 @@ def test_motion_and_lights_share_one_marlin_transport() -> None:
     motion.home_axes()
     motion.move_xy(10, 20)
     motion.move_z(3.5)
+    motion.move_c(1.25)
     lights.set_status("running")
     motion.wait_until_idle()
 
@@ -47,12 +48,14 @@ def test_motion_and_lights_share_one_marlin_transport() -> None:
         "G28",
         "G1 X10.000 Y20.000 F6000",
         "G1 Z3.500 F1200",
+        "G1 C1.250 F1200",
         "M150 R0 U16 B0",
         "M400",
     ]
     assert motion.get_pose().x_mm == 10
     assert motion.get_pose().y_mm == 20
     assert motion.get_pose().z_mm == 3.5
+    assert motion.get_pose().c_mm == 1.25
     assert lights.last_command == "M150 R0 U16 B0"
 
 

@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Movement - Sorter Console{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="panel-heading">
+    <div>
+      <p class="eyebrow">Four-axis motion</p>
+      <h2>Movement</h2>
+    </div>
+    <span id="movement-state" class="pill">Loading</span>
+  </div>
+  <div id="movement-status" class="status-cards"></div>
+  <p id="movement-message" class="muted"></p>
+</section>
+
+<section class="movement-grid">
+  <article class="panel movement-pad">
+    <p class="eyebrow">X / Y gantry</p>
+    <h2>Planar jog</h2>
+    <label>Jog step mm<input id="xy-step" type="number" step="0.1" value="10"></label>
+    <div class="jog-pad" aria-label="XY jog controls">
+      <span></span>
+      <button data-jog-axis="y" data-jog-sign="1">Y+</button>
+      <span></span>
+      <button data-jog-axis="x" data-jog-sign="-1">X-</button>
+      <button class="secondary" data-control="wait_idle">Idle</button>
+      <button data-jog-axis="x" data-jog-sign="1">X+</button>
+      <span></span>
+      <button data-jog-axis="y" data-jog-sign="-1">Y-</button>
+      <span></span>
+    </div>
+  </article>
+
+  <article class="panel">
+    <p class="eyebrow">Absolute target</p>
+    <h2>Move X/Y</h2>
+    <div class="form-grid">
+      <label>X mm<input id="movement-x" type="number" step="0.1" value="100"></label>
+      <label>Y mm<input id="movement-y" type="number" step="0.1" value="100"></label>
+      <button data-control="move_xy">Move vacuum XY</button>
+      <button class="secondary" data-control="move_camera_xy">Move camera to XY</button>
+    </div>
+  </article>
+
+  <article class="panel">
+    <p class="eyebrow">Z axis</p>
+    <h2>Vacuum carriage Z</h2>
+    <div class="axis-controls">
+      <label>Target Z mm<input id="movement-z" type="number" step="0.1" value="5"></label>
+      <label>Jog step mm<input id="z-step" type="number" step="0.1" value="1"></label>
+      <div class="button-row">
+        <button data-control="move_z">Move Z</button>
+        <button class="secondary" data-jog-axis="z" data-jog-sign="1">Z+</button>
+        <button class="secondary" data-jog-axis="z" data-jog-sign="-1">Z-</button>
+      </div>
+    </div>
+  </article>
+
+  <article class="panel">
+    <p class="eyebrow">C axis</p>
+    <h2>Suction-cup Z</h2>
+    <div class="axis-controls">
+      <label>Target C mm<input id="movement-c" type="number" step="0.1" value="0"></label>
+      <label>Jog step mm<input id="c-step" type="number" step="0.1" value="1"></label>
+      <div class="button-row">
+        <button data-control="move_c">Move C</button>
+        <button class="secondary" data-jog-axis="c" data-jog-sign="1">C+</button>
+        <button class="secondary" data-jog-axis="c" data-jog-sign="-1">C-</button>
+      </div>
+    </div>
+  </article>
+
+  <article class="panel">
+    <p class="eyebrow">Paired Z / C</p>
+    <h2>Move interface only</h2>
+    <div class="axis-controls">
+      <label>Interface jog mm<input id="zc-step" type="number" step="0.1" value="1"></label>
+      <div class="button-row">
+        <button data-paired-zc="1">Interface up</button>
+        <button class="secondary" data-paired-zc="-1">Interface down</button>
+      </div>
+      <p class="muted">Moves Z and C in opposite directions so the end-effector height remains unchanged.</p>
+    </div>
+  </article>
+</section>
+
+<section class="panel">
+  <p class="eyebrow">Machine setup</p>
+  <h2>Homing and initialization</h2>
+  <div class="button-row">
+    <button data-control="initialize">Initialize machine</button>
+    <button class="secondary" data-control="home">Home axes only</button>
+    <button class="secondary" data-control="wait_idle">Wait idle</button>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>window.SorterPages.movement();</script>
+{% endblock %}

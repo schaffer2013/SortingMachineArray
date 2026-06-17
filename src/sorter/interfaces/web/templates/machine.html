@@ -3,23 +3,6 @@
 {% block content %}
 <section class="two-column">
   <article class="panel">
-    <p class="eyebrow">Axis control</p>
-    <h2>Motion</h2>
-    <div class="button-row">
-      <button data-control="initialize">Initialize machine</button>
-      <button class="secondary" data-control="home">Home axes only</button>
-      <button class="secondary" data-control="wait_idle">Wait idle</button>
-    </div>
-    <div class="form-grid">
-      <label>Target X mm<input id="move-x" type="number" value="100"></label>
-      <label>Target Y mm<input id="move-y" type="number" value="100"></label>
-      <button data-control="move_xy">Move vacuum XY</button>
-      <button class="secondary" data-control="move_camera_xy">Move camera to XY</button>
-      <label>Vacuum Z mm<input id="move-z" type="number" value="5"></label>
-      <button data-control="move_z">Move vacuum Z</button>
-    </div>
-  </article>
-  <article class="panel">
     <p class="eyebrow">I/O control</p>
     <h2>Vacuum and lights</h2>
     <div class="button-row">

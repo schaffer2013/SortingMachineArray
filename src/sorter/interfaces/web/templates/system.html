@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}System - Sorter Console{% endblock %}
+{% block content %}
+<section class="two-column">
+  <article class="panel">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">Software</p>
+        <h2>System version</h2>
+      </div>
+      <span id="update-pill" class="pill">Checking</span>
+    </div>
+    <dl id="system-details" class="metric-list"></dl>
+    <div class="button-row">
+      <button id="check-update" type="button" class="secondary">Check for update</button>
+      <button id="apply-update" type="button">Update from main</button>
+    </div>
+    <p id="system-message" class="muted"></p>
+  </article>
+  <article class="panel">
+    <p class="eyebrow">Runtime</p>
+    <h2>Restart state</h2>
+    <p class="muted">
+      Updates are pulled from origin/main with a fast-forward Git update. When code changes are applied,
+      restart the web process so the running app loads the new version.
+    </p>
+    <pre id="system-raw" class="code-block"></pre>
+  </article>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>window.SorterPages.system();</script>
+{% endblock %}

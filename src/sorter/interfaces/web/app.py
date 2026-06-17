@@ -2,13 +2,17 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import datetime, UTC
+from importlib.metadata import PackageNotFoundError, version
 from io import BytesIO
 from pathlib import Path
 import json
+import os
 import sqlite3
+import subprocess
 import tempfile
 import threading
 import time
+import tomllib
 from typing import Any
 
 from flask import Flask, Response, jsonify, render_template, request, send_file
@@ -40,6 +44,7 @@ class WebRuntime:
         self.machine_initialized = False
         self.light_profiles_path = light_profiles_path
         self.calibration_path = calibration_path
+        self.repo_root = _repo_root()
         self.light_profiles = self._load_light_profiles()
         self.lock = threading.RLock()
 
@@ -173,6 +178,7 @@ class WebRuntime:
             snapshot.pose.x_mm = 0.0
             snapshot.pose.y_mm = 0.0
             snapshot.pose.z_mm = 0.0
+            snapshot.pose.c_mm = 0.0
             self.machine_initialized = False
             return {"ok": True, "message": "Axes homed"}
         if action == "wait_idle":
@@ -183,6 +189,17 @@ class WebRuntime:
             y_mm = float(payload["y_mm"])
             self.orchestrator.move_vac_xy_when_safe(self.calibration, x_mm, y_mm)
             return {"ok": True, "message": f"Moved vacuum XY to ({x_mm:.2f}, {y_mm:.2f})"}
+        if action == "jog_xy":
+            dx_mm = float(payload.get("dx_mm", 0.0))
+            dy_mm = float(payload.get("dy_mm", 0.0))
+            snapshot = self.orchestrator.world.snapshot
+            x_mm = float(snapshot.pose.x_mm) + dx_mm
+            y_mm = float(snapshot.pose.y_mm) + dy_mm
+            self.orchestrator.move_vac_xy_when_safe(self.calibration, x_mm, y_mm)
+            return {
+                "ok": True,
+                "message": f"Jogged vacuum XY by ({dx_mm:.2f}, {dy_mm:.2f}) to ({x_mm:.2f}, {y_mm:.2f})",
+            }
         if action == "move_camera_xy":
             x_mm = float(payload["x_mm"])
             y_mm = float(payload["y_mm"])
@@ -199,6 +216,38 @@ class WebRuntime:
             z_mm = float(payload["z_mm"])
             self.orchestrator.move_vac_z(z_mm)
             return {"ok": True, "message": f"Moved vacuum Z to {z_mm:.2f}"}
+        if action == "jog_z":
+            dz_mm = float(payload.get("dz_mm", 0.0))
+            snapshot = self.orchestrator.world.snapshot
+            z_mm = float(snapshot.pose.z_mm) + dz_mm
+            self.orchestrator.move_vac_z(z_mm)
+            return {"ok": True, "message": f"Jogged vacuum Z by {dz_mm:.2f} to {z_mm:.2f}"}
+        if action == "move_c":
+            c_mm = float(payload["c_mm"])
+            self._move_c(c_mm)
+            return {"ok": True, "message": f"Moved suction C to {c_mm:.2f}"}
+        if action == "jog_c":
+            dc_mm = float(payload.get("dc_mm", 0.0))
+            snapshot = self.orchestrator.world.snapshot
+            c_mm = float(getattr(snapshot.pose, "c_mm", 0.0)) + dc_mm
+            self._move_c(c_mm)
+            return {"ok": True, "message": f"Jogged suction C by {dc_mm:.2f} to {c_mm:.2f}"}
+        if action == "jog_zc_interface":
+            dz_mm = float(payload.get("dz_mm", 0.0))
+            snapshot = self.orchestrator.world.snapshot
+            current_z_mm = float(snapshot.pose.z_mm)
+            current_c_mm = float(getattr(snapshot.pose, "c_mm", 0.0))
+            target_z_mm = current_z_mm + dz_mm
+            target_c_mm = current_c_mm - dz_mm
+            self.orchestrator.move_vac_z(target_z_mm)
+            self._move_c(target_c_mm)
+            return {
+                "ok": True,
+                "message": (
+                    f"Moved interface Z by {dz_mm:.2f}; suction C compensated to {target_c_mm:.2f} "
+                    "so end-effector height stayed fixed"
+                ),
+            }
         if action == "vacuum_on":
             self.orchestrator.vacuum.on()
             return {"ok": True, "message": "Vacuum enabled"}
@@ -399,6 +448,72 @@ class WebRuntime:
             {"name": "Hardware runtime", "status": "partial", "detail": "Adapters exist, but the repo currently documents sim as the supported end-to-end runtime."},
         ]
 
+    def _move_c(self, c_mm: float) -> None:
+        mover = getattr(self.orchestrator.motion, "move_c", None)
+        if not callable(mover):
+            raise ValueError("C axis is not supported by the configured motion adapter")
+        mover(float(c_mm))
+        self.orchestrator.world.snapshot.pose.c_mm = float(c_mm)
+
+    def system_info(self, refresh_remote: bool = False) -> dict[str, Any]:
+        current_sha = _git(["rev-parse", "--short", "HEAD"], cwd=self.repo_root)
+        current_branch = _git(["branch", "--show-current"], cwd=self.repo_root, default="detached")
+        package_version = _package_version()
+        dirty = bool(_git(["status", "--porcelain"], cwd=self.repo_root))
+        fetch_error = None
+        if refresh_remote:
+            fetch = _run_git(["fetch", "origin", "main"], cwd=self.repo_root, timeout=30)
+            if fetch.returncode != 0:
+                fetch_error = fetch.stderr.strip() or fetch.stdout.strip() or "Unable to fetch origin/main"
+        remote_sha = _git(["rev-parse", "--short", "origin/main"], cwd=self.repo_root)
+        commits_behind = _count_commits(f"HEAD..origin/main", cwd=self.repo_root)
+        commits_ahead = _count_commits("origin/main..HEAD", cwd=self.repo_root)
+        update_available = commits_behind > 0
+        can_update = update_available and current_branch == "main" and not dirty and fetch_error is None
+        reason = None
+        if not update_available:
+            reason = "Already up to date"
+        elif current_branch != "main":
+            reason = "Switch to main before updating from the web UI"
+        elif dirty:
+            reason = "Commit or stash local changes before updating"
+        elif fetch_error:
+            reason = fetch_error
+        return {
+            "version": f"{package_version}-{current_sha}",
+            "package_version": package_version,
+            "current_sha": current_sha,
+            "current_branch": current_branch,
+            "dirty": dirty,
+            "remote": "origin/main",
+            "remote_sha": remote_sha,
+            "commits_behind": commits_behind,
+            "commits_ahead": commits_ahead,
+            "update_available": update_available,
+            "can_update": can_update,
+            "message": reason,
+            "restart_required": False,
+        }
+
+    def update_from_remote(self) -> dict[str, Any]:
+        before = self.system_info(refresh_remote=True)
+        if not before["can_update"]:
+            return {"ok": False, **before}
+        pull = _run_git(["pull", "--ff-only", "origin", "main"], cwd=self.repo_root, timeout=120)
+        after = self.system_info(refresh_remote=False)
+        if pull.returncode != 0:
+            return {
+                "ok": False,
+                **after,
+                "message": pull.stderr.strip() or pull.stdout.strip() or "Update failed",
+            }
+        return {
+            "ok": True,
+            **after,
+            "message": "Updated from origin/main. Restart the web process to run the new code.",
+            "restart_required": before["current_sha"] != after["current_sha"],
+        }
+
 
 def create_web_app(
     orchestrator: Orchestrator,
@@ -425,6 +540,10 @@ def create_web_app(
     def machine():
         return render_template("machine.html")
 
+    @app.get("/movement")
+    def movement():
+        return render_template("movement.html")
+
     @app.get("/recognition")
     def recognition():
         return render_template("recognition.html")
@@ -436,6 +555,10 @@ def create_web_app(
     @app.get("/about")
     def about():
         return render_template("about.html")
+
+    @app.get("/system")
+    def system():
+        return render_template("system.html")
 
     @app.get("/api/status")
     def api_status():
@@ -515,6 +638,18 @@ def create_web_app(
     def api_capabilities():
         return jsonify({"capabilities": runtime.capabilities()})
 
+    @app.get("/api/system")
+    def api_system():
+        return jsonify(runtime.system_info(refresh_remote=request.args.get("refresh") == "true"))
+
+    @app.post("/api/system/update")
+    def api_system_update():
+        status_code = 200
+        payload = runtime.update_from_remote()
+        if not payload.get("ok", False):
+            status_code = 409
+        return jsonify(payload), status_code
+
     @app.get("/api/light-profiles")
     def api_light_profiles():
         return jsonify({"profiles": runtime.list_light_profiles()})
@@ -565,3 +700,56 @@ def create_web_app(
 
 def _clamp_channel(value: int) -> int:
     return max(0, min(255, int(value)))
+
+
+def _package_version() -> str:
+    try:
+        return version("card-sorter-testbed")
+    except PackageNotFoundError:
+        pyproject_path = _repo_root() / "pyproject.toml"
+        try:
+            with pyproject_path.open("rb") as handle:
+                return str(tomllib.load(handle)["project"]["version"])
+        except Exception:
+            return "0.0.0"
+
+
+def _repo_root() -> Path:
+    found = _git(["rev-parse", "--show-toplevel"], cwd=Path(__file__).resolve().parent)
+    return Path(found) if found else Path(__file__).resolve().parents[4]
+
+
+def _count_commits(revision_range: str, cwd: Path) -> int:
+    count = _git(["rev-list", "--count", revision_range], cwd=cwd, default="0")
+    try:
+        return int(count)
+    except ValueError:
+        return 0
+
+
+def _git(args: list[str], cwd: Path, default: str = "") -> str:
+    result = _run_git(args, cwd=cwd)
+    if result.returncode != 0:
+        return default
+    return result.stdout.strip()
+
+
+def _run_git(args: list[str], cwd: Path, timeout: int = 10) -> subprocess.CompletedProcess[str]:
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    try:
+        return subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return subprocess.CompletedProcess(
+            ["git", *args],
+            returncode=124,
+            stdout=exc.stdout or "",
+            stderr=f"Git command timed out after {timeout} seconds",
+        )

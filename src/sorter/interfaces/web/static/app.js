@@ -129,6 +129,78 @@ window.SorterPages = {
     }
     loadProfiles(); refresh(); setInterval(refresh, 1200);
   },
+  movement() {
+    const statusRoot = document.querySelector("#movement-status");
+    const statePill = document.querySelector("#movement-state");
+    const message = document.querySelector("#movement-message");
+    const controlPayload = action => {
+      if (action === "move_xy" || action === "move_camera_xy") {
+        return {
+          x_mm: Number(document.querySelector("#movement-x").value),
+          y_mm: Number(document.querySelector("#movement-y").value),
+        };
+      }
+      if (action === "move_z") return {z_mm: Number(document.querySelector("#movement-z").value)};
+      if (action === "move_c") return {c_mm: Number(document.querySelector("#movement-c").value)};
+      return {};
+    };
+    async function sendControl(action, payload = controlPayload(action)) {
+      try {
+        const result = await json(`/api/control/${action}`, {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify(payload),
+        });
+        message.textContent = result.message || "";
+      } catch (error) {
+        message.textContent = error.message;
+      }
+      refresh();
+    }
+    document.querySelectorAll("[data-control]").forEach(button => {
+      button.onclick = () => sendControl(button.dataset.control);
+    });
+    document.querySelectorAll("[data-jog-axis]").forEach(button => {
+      button.onclick = () => {
+        const axis = button.dataset.jogAxis;
+        const sign = Number(button.dataset.jogSign);
+        if (axis === "x" || axis === "y") {
+          const step = Number(document.querySelector("#xy-step").value) * sign;
+          sendControl("jog_xy", axis === "x" ? {dx_mm: step, dy_mm: 0} : {dx_mm: 0, dy_mm: step});
+        } else if (axis === "z") {
+          const step = Number(document.querySelector("#z-step").value) * sign;
+          sendControl("jog_z", {dz_mm: step});
+        } else if (axis === "c") {
+          const step = Number(document.querySelector("#c-step").value) * sign;
+          sendControl("jog_c", {dc_mm: step});
+        }
+      };
+    });
+    document.querySelectorAll("[data-paired-zc]").forEach(button => {
+      button.onclick = () => {
+        const step = Number(document.querySelector("#zc-step").value) * Number(button.dataset.pairedZc);
+        sendControl("jog_zc_interface", {dz_mm: step});
+      };
+    });
+    async function refresh() {
+      const status = await json("/api/status");
+      statePill.textContent = status.lifecycle;
+      const c = Number(status.pose.c_mm || 0);
+      const z = Number(status.pose.z_mm || 0);
+      statusRoot.innerHTML = [
+        ["Initialized", status.machine_initialized ? "Yes" : "No"],
+        ["X", `${status.pose.x_mm.toFixed(2)} mm`],
+        ["Y", `${status.pose.y_mm.toFixed(2)} mm`],
+        ["Z", `${z.toFixed(2)} mm`],
+        ["C", `${c.toFixed(2)} mm`],
+        ["End effector Z", `${(z + c).toFixed(2)} mm`],
+        ["Vacuum", status.vacuum_on ? "On" : "Off"],
+        ["Min XY Z", `${status.calibration.min_xy_travel_z_mm.toFixed(2)} mm`],
+        ["Command", status.active_command || "--"],
+      ].map(([k,v]) => `<article class="status-card"><div class="muted">${k}</div><strong>${v}</strong></article>`).join("");
+    }
+    refresh(); setInterval(refresh, 1200);
+  },
   recognition() {
     const query = document.querySelector("#card-query");
     const validation = document.querySelector("#card-validation");
@@ -169,6 +241,46 @@ window.SorterPages = {
         </tr>`).join("")
       }</tbody></table>`;
     })();
+  },
+  system() {
+    const details = document.querySelector("#system-details");
+    const pill = document.querySelector("#update-pill");
+    const message = document.querySelector("#system-message");
+    const raw = document.querySelector("#system-raw");
+    const checkButton = document.querySelector("#check-update");
+    const updateButton = document.querySelector("#apply-update");
+    const render = data => {
+      pill.textContent = data.update_available ? "Update available" : "Current";
+      pill.className = data.update_available ? "pill warn-pill" : "pill good-pill";
+      updateButton.disabled = !data.can_update;
+      details.innerHTML = [
+        ["Version", data.version],
+        ["Branch", data.current_branch || "detached"],
+        ["Current SHA", data.current_sha || "--"],
+        ["Main SHA", data.remote_sha || "--"],
+        ["Behind main", data.commits_behind],
+        ["Ahead of main", data.commits_ahead],
+        ["Local changes", data.dirty ? "Yes" : "No"],
+      ].map(([k,v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
+      message.textContent = data.restart_required ? "Update applied. Restart required." : (data.message || "");
+      raw.textContent = pretty(data);
+    };
+    async function refresh(refreshRemote = false) {
+      message.textContent = refreshRemote ? "Checking origin/main..." : "Loading system state...";
+      render(await json(`/api/system${refreshRemote ? "?refresh=true" : ""}`));
+    }
+    checkButton.onclick = () => refresh(true);
+    updateButton.onclick = async () => {
+      updateButton.disabled = true;
+      message.textContent = "Updating from origin/main...";
+      try {
+        render(await json("/api/system/update", {method: "POST"}));
+      } catch (error) {
+        message.textContent = error.message;
+        render(await json("/api/system"));
+      }
+    };
+    refresh(true);
   },
   about() {
     const root = document.querySelector("#capability-grid");

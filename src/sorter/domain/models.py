@@ -187,6 +187,7 @@ class MachinePose:
     x_mm: float = 0.0
     y_mm: float = 0.0
     z_mm: float = 0.0
+    c_mm: float = 0.0
     holding_card_id: str | None = None
     vacuum_on: bool = False
 

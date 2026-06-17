@@ -13,15 +13,19 @@
           <p class="eyebrow">SortingMachineArray</p>
           <h1>Sorter Console</h1>
         </div>
+      </header>
+      <div class="app-layout">
         <nav>
           <a class="{{ 'active' if request.path == '/' else '' }}" href="/">Dashboard</a>
+          <a class="{{ 'active' if request.path == '/movement' else '' }}" href="/movement">Movement</a>
           <a class="{{ 'active' if request.path == '/machine' else '' }}" href="/machine">Machine</a>
           <a class="{{ 'active' if request.path == '/recognition' else '' }}" href="/recognition">Recognition</a>
           <a class="{{ 'active' if request.path == '/runs' else '' }}" href="/runs">Runs</a>
+          <a class="{{ 'active' if request.path == '/system' else '' }}" href="/system">System</a>
           <a class="{{ 'active' if request.path == '/about' else '' }}" href="/about">Capabilities</a>
         </nav>
-      </header>
-      <main>{% block content %}{% endblock %}</main>
+        <main>{% block content %}{% endblock %}</main>
+      </div>
     </div>
     <script src="{{ url_for('static', filename='app.js') }}"></script>
     {% block scripts %}{% endblock %}
