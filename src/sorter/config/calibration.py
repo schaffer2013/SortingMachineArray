@@ -47,7 +47,7 @@ class CalibrationProfile:
                 f"minimum {self.min_xy_travel_z_mm:.2f} mm"
             )
 
-    def with_updates(self, **updates: float) -> "CalibrationProfile":
+    def with_updates(self, **updates: object) -> "CalibrationProfile":
         numeric_fields = {
             "safe_z_mm",
             "pick_z_mm",
@@ -65,6 +65,8 @@ class CalibrationProfile:
             for key, value in updates.items()
             if key in numeric_fields
         }
+        if "probe_enabled" in updates:
+            clean_updates["probe_enabled"] = bool(updates["probe_enabled"])
         return replace(self, **clean_updates)
 
     def to_json_dict(self) -> dict[str, object]:

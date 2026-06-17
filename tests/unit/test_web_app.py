@@ -174,6 +174,12 @@ def test_calibration_can_be_updated_from_web_app(tmp_path):
             "camera_offset_y_mm": -2.0,
             "camera_offset_z_mm": 11.0,
             "min_xy_travel_z_mm": 3.0,
+            "pick_z_mm": 1.25,
+            "place_z_mm": 2.5,
+            "probe_enabled": True,
+            "probe_retract_z_mm": 1.5,
+            "probe_place_clearance_mm": 0.75,
+            "probe_max_contact_z_mm": 8.0,
         },
     )
     status = client.get("/api/status").get_json()
@@ -184,7 +190,15 @@ def test_calibration_can_be_updated_from_web_app(tmp_path):
     assert status["calibration"]["camera_offset_y_mm"] == -2.0
     assert status["calibration"]["camera_offset_z_mm"] == 11.0
     assert status["calibration"]["min_xy_travel_z_mm"] == 3.0
+    assert status["calibration"]["pick_z_mm"] == 1.25
+    assert status["calibration"]["place_z_mm"] == 2.5
+    assert status["calibration"]["probe_enabled"] is True
+    assert status["calibration"]["probe_retract_z_mm"] == 1.5
+    assert status["calibration"]["probe_place_clearance_mm"] == 0.75
+    assert status["calibration"]["probe_max_contact_z_mm"] == 8.0
     assert saved.camera_offset_z_mm == 11.0
+    assert saved.probe_enabled is True
+    assert saved.probe_place_clearance_mm == 0.75
 
 
 def test_web_xy_control_blocks_when_vacuum_z_is_too_low():

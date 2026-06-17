@@ -31,6 +31,10 @@ class SimMotionAdapter:
     def move_c(self, c_mm: float) -> None:
         self.world.snapshot.pose.c_mm = c_mm
 
+    def move_zc(self, z_mm: float, c_mm: float) -> None:
+        self.world.snapshot.pose.z_mm = z_mm
+        self.world.snapshot.pose.c_mm = c_mm
+
     def get_pose(self) -> MachinePose:
         return self.world.snapshot.pose
 

@@ -32,6 +32,14 @@ Pick one primary goal for the session:
 - [ ] verify `config/calibration.json`
   - confirm whether this session is using fixed `place_z_mm` or a probe-aware
     placement experiment
+  - confirm BLTouch fields (`probe_enabled`, retract, clearance, max contact)
+    match the firmware configuration
+- [ ] verify Marlin firmware matches `docs/marlin_firmware_contract.md`
+  - confirm X/Y/Z/C are standard absolute coordinates
+  - confirm Z homes first toward positive EOT on its normal endstop
+  - confirm C homes second toward negative EOT using sensorless homing
+  - confirm X/Y home together after Z and C are homed
+  - confirm BLTouch deploy/stow/probe behavior before any pile probing
 - [ ] verify `config/card_engine/engine.json`
 - [ ] verify `config/card_engine/benchmark.engine.json`
 - [ ] verify `config/vision/recognition_thresholds.json`
@@ -101,6 +109,8 @@ them.
       instead of ad-hoc operator notes
 - [ ] confirm how safe placement height will be chosen for this session:
       fixed placement height or probe-derived pile-top measurement
+- [ ] if using BLTouch probing, confirm failed probe states stop motion and are
+      visible to the operator
 - [ ] confirm you will save enough context to replay failures later
 - [ ] confirm the session avoids throughput tuning unless correctness is already
       stable

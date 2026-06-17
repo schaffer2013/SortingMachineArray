@@ -23,7 +23,9 @@ class MarlinMotionAdapter:
             self.transport = RecordingMarlinTransport()
 
     def home_axes(self) -> None:
-        self._send("G28")
+        self._send("G28 Z")
+        self._send("G28 C")
+        self._send("G28 X Y")
         self._pose = MachinePose()
 
     def move_xy(self, x_mm: float, y_mm: float) -> None:
@@ -38,6 +40,11 @@ class MarlinMotionAdapter:
 
     def move_c(self, c_mm: float) -> None:
         self._send(f"G1 C{_format_mm(c_mm)} F{self.c_feedrate_mm_per_min}")
+        self._pose.c_mm = c_mm
+
+    def move_zc(self, z_mm: float, c_mm: float) -> None:
+        self._send(f"G1 Z{_format_mm(z_mm)} C{_format_mm(c_mm)} F{self.z_feedrate_mm_per_min}")
+        self._pose.z_mm = z_mm
         self._pose.c_mm = c_mm
 
     def get_pose(self) -> MachinePose:

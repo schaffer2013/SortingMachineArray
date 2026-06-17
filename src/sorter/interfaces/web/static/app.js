@@ -94,6 +94,12 @@ window.SorterPages = {
           camera_offset_z_mm: Number(form.get("camera_offset_z_mm")),
           min_xy_travel_z_mm: Number(form.get("min_xy_travel_z_mm")),
           safe_z_mm: Number(form.get("safe_z_mm")),
+          pick_z_mm: Number(form.get("pick_z_mm")),
+          place_z_mm: Number(form.get("place_z_mm")),
+          probe_enabled: calibrationForm.elements.probe_enabled.checked,
+          probe_retract_z_mm: Number(form.get("probe_retract_z_mm")),
+          probe_place_clearance_mm: Number(form.get("probe_place_clearance_mm")),
+          probe_max_contact_z_mm: form.get("probe_max_contact_z_mm") === "" ? null : Number(form.get("probe_max_contact_z_mm")),
         }),
       });
       refresh();
@@ -120,11 +126,14 @@ window.SorterPages = {
         ["RGB", status.lights_rgb?.length ? status.lights_rgb.join(", ") : "—"],
         ["Camera offset", `${status.calibration.camera_offset_x_mm.toFixed(2)}, ${status.calibration.camera_offset_y_mm.toFixed(2)}, ${status.calibration.camera_offset_z_mm.toFixed(2)} mm`],
         ["Min XY Z", `${status.calibration.min_xy_travel_z_mm.toFixed(2)} mm`],
+        ["BLTouch", status.calibration.probe_enabled ? "Enabled" : "Disabled"],
+        ["Probe retract", `${status.calibration.probe_retract_z_mm.toFixed(2)} mm`],
       ];
-      ["camera_offset_x_mm", "camera_offset_y_mm", "camera_offset_z_mm", "min_xy_travel_z_mm", "safe_z_mm"].forEach(name => {
+      ["camera_offset_x_mm", "camera_offset_y_mm", "camera_offset_z_mm", "min_xy_travel_z_mm", "safe_z_mm", "pick_z_mm", "place_z_mm", "probe_retract_z_mm", "probe_place_clearance_mm", "probe_max_contact_z_mm"].forEach(name => {
         const input = calibrationForm.elements[name];
         if (document.activeElement !== input) input.value = status.calibration[name];
       });
+      calibrationForm.elements.probe_enabled.checked = Boolean(status.calibration.probe_enabled);
       statusRoot.innerHTML = cards.map(([k,v]) => `<article class="status-card"><div class="muted">${k}</div><strong>${v}</strong></article>`).join("");
     }
     loadProfiles(); refresh(); setInterval(refresh, 1200);
@@ -193,7 +202,7 @@ window.SorterPages = {
         ["Y", `${status.pose.y_mm.toFixed(2)} mm`],
         ["Z", `${z.toFixed(2)} mm`],
         ["C", `${c.toFixed(2)} mm`],
-        ["End effector Z", `${(z + c).toFixed(2)} mm`],
+        ["End effector C", `${c.toFixed(2)} mm`],
         ["Vacuum", status.vacuum_on ? "On" : "Off"],
         ["Min XY Z", `${status.calibration.min_xy_travel_z_mm.toFixed(2)} mm`],
         ["Command", status.active_command || "--"],

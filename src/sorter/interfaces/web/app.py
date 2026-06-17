@@ -118,6 +118,10 @@ class WebRuntime:
             "safe_z_mm",
             "pick_z_mm",
             "place_z_mm",
+            "probe_enabled",
+            "probe_retract_z_mm",
+            "probe_place_clearance_mm",
+            "probe_max_contact_z_mm",
         }
         updates = {key: payload[key] for key in allowed_fields if key in payload}
         if not updates:
@@ -239,13 +243,12 @@ class WebRuntime:
             current_c_mm = float(getattr(snapshot.pose, "c_mm", 0.0))
             target_z_mm = current_z_mm + dz_mm
             target_c_mm = current_c_mm - dz_mm
-            self.orchestrator.move_vac_z(target_z_mm)
-            self._move_c(target_c_mm)
+            self._move_zc(target_z_mm, target_c_mm)
             return {
                 "ok": True,
                 "message": (
-                    f"Moved interface Z by {dz_mm:.2f}; suction C compensated to {target_c_mm:.2f} "
-                    "so end-effector height stayed fixed"
+                    f"Moved interface Z by {dz_mm:.2f}; coordinated C to {target_c_mm:.2f} "
+                    "in the same motion block"
                 ),
             }
         if action == "vacuum_on":
@@ -453,6 +456,14 @@ class WebRuntime:
         if not callable(mover):
             raise ValueError("C axis is not supported by the configured motion adapter")
         mover(float(c_mm))
+        self.orchestrator.world.snapshot.pose.c_mm = float(c_mm)
+
+    def _move_zc(self, z_mm: float, c_mm: float) -> None:
+        mover = getattr(self.orchestrator.motion, "move_zc", None)
+        if not callable(mover):
+            raise ValueError("Coordinated Z/C motion is not supported by the configured motion adapter")
+        mover(float(z_mm), float(c_mm))
+        self.orchestrator.world.snapshot.pose.z_mm = float(z_mm)
         self.orchestrator.world.snapshot.pose.c_mm = float(c_mm)
 
     def system_info(self, refresh_remote: bool = False) -> dict[str, Any]:

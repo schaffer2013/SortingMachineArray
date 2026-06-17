@@ -45,7 +45,8 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 	- `http://localhost:8000`
 - Included pages:
 	- dashboard with live camera panel, run controls, pile state, and latest recognition
-	- machine page with axis and I/O controls
+	- movement page with X/Y/Z/C controls and paired interface movement
+	- machine page with I/O, lights, calibration, and BLTouch probe settings
 	- recognition page with local catalog validation and manual image recognition
 	- recent run history
 	- capability map that distinguishes ready vs partial hardware-facing features
@@ -171,6 +172,9 @@ If you want to run the real vendored recognizer, make sure the submodule OCR and
 	- `src/sorter/adapters/hardware/neopixel_lights.py` maps machine status to Marlin `M150` RGB commands.
 	- Motion and lights share one `MarlinSerialTransport` connection to the SKR board firmware so G-code is serialized through one controller channel.
 - App-layer calibration uses the vacuum/nozzle as the baseline XY/Z pose. `camera_offset_x_mm`, `camera_offset_y_mm`, and `camera_offset_z_mm` describe the fixed physical camera offset from that baseline before any Marlin commands are emitted.
+- Firmware-facing motion uses standard absolute X/Y/Z/C coordinates. Z is the main interface axis; C is the end-effector/suction-cup vertical axis.
+- Firmware should home Z first toward its positive end of travel on the normal endstop, then home C toward its negative end of travel using sensorless homing, then home X/Y together.
+- The machine has a BLTouch on the end effector. Probe calibration fields are exposed in `config/calibration.json` and the web Machine tab.
 - The web app does not move the machine on process startup or from **Start run** before initialization. Operators must explicitly press **Initialize machine** on the machine page to run the homing/clearance initialization sequence first.
 - `min_xy_travel_z_mm` blocks app-layer XY moves while the vacuum Z is below the configured clearance; the web machine page can update these calibration values.
 

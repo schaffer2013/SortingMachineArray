@@ -57,8 +57,12 @@ should optimize for.
   hidden side effects of normal startup.
 - Fixed `place_z_mm` remains the current fallback placement height, but the
   hardware path should be able to derive a safer pile-specific placement height
-  from a probe measurement when a BLTouch-style or equivalent probing method is
-  available.
+  from the BLTouch mounted on the end effector.
+- Firmware-facing motion uses standard absolute X/Y/Z/C coordinates. Z is the
+  main interface axis; C is the end-effector/suction-cup vertical coordinate.
+- Firmware should home Z first toward its positive end of travel on the normal
+  endstop, then home C toward its negative end of travel with sensorless
+  homing, then home X/Y together.
 - Hardware-facing assumptions should stay visible in docs and config rather than
   being buried in adapter-specific code.
 
@@ -79,7 +83,7 @@ should optimize for.
 - The goal is to prevent accumulated pick/place drift: suction contact should
   happen at the same relative location on cards in every pile, including after
   many repeated transfers.
-- BLTouch-style probing remains complementary to this flow: probing handles
+- BLTouch probing remains complementary to this flow: probing handles
   pile-height safety and placement clearance, while camera micro-calibration
   handles lateral centering and card-face alignment.
 
