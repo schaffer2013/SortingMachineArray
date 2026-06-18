@@ -168,6 +168,7 @@ def test_hardware_panels_are_grouped_by_domain():
     system = client.get("/system")
 
     assert b'id="pixel-grid"' in machine.data
+    assert b"16-LED ring editor" in machine.data
     assert b'id="endstop-state"' in movement.data
     assert b'id="bltouch-probe"' in movement.data
     assert b'id="serial-command-form"' in system.data

@@ -191,7 +191,7 @@ window.SorterPages = {
           type="button"
           class="pixel-button${index === selectedPixel ? " selected" : ""}"
           data-pixel-index="${index}"
-          style="background:${rgbToHex(pixel)}"
+          style="background:${rgbToHex(pixel)}; --angle:${index * 22.5}deg"
           title="LED ${index}">
           ${index}
         </button>`).join("");

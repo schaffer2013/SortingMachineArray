@@ -118,10 +118,17 @@ input[type="checkbox"] { width:auto; justify-self:start; }
 .jog-pad button { min-height:54px; }
 .movement-pad label { max-width: 180px; }
 .pixel-grid {
-  display:grid; grid-template-columns: repeat(8, minmax(42px, 1fr)); gap:10px; margin:14px 0;
+  position:relative; width:min(100%, 420px); aspect-ratio:1 / 1; margin:16px auto 20px;
+  border:1px dashed var(--line); border-radius:50%; background:var(--panel-soft);
 }
 .pixel-button {
-  aspect-ratio: 1 / 1; border:1px solid var(--line); border-radius:10px; padding:0;
+  position:absolute; left:50%; top:50%; width:44px; height:44px;
+  transform:
+    translate(-50%, -50%)
+    rotate(var(--angle))
+    translateY(calc(-1 * min(158px, 37vw)))
+    rotate(calc(-1 * var(--angle)));
+  border:1px solid var(--line); border-radius:50%; padding:0;
   color:var(--text); text-shadow:0 1px 3px rgba(0,0,0,.55); box-shadow: inset 0 0 0 2px rgba(255,255,255,.14);
 }
 .pixel-button.selected { outline:3px solid var(--accent); outline-offset:2px; }
@@ -166,7 +173,13 @@ th { color:var(--muted); font-size:.82rem; text-transform:uppercase; letter-spac
   .app-layout a { white-space:nowrap; }
   .hero-grid, .dashboard-grid, .two-column { grid-template-columns: 1fr; }
   .movement-grid { grid-template-columns: 1fr; }
-  .pixel-grid { grid-template-columns: repeat(4, minmax(42px, 1fr)); }
+  .pixel-button {
+    transform:
+      translate(-50%, -50%)
+      rotate(var(--angle))
+      translateY(calc(-1 * min(132px, 36vw)))
+      rotate(calc(-1 * var(--angle)));
+  }
   .form-grid, .metric-list { grid-template-columns: 1fr; }
   .form-grid.three-up { grid-template-columns: 1fr; }
 }
