@@ -305,6 +305,24 @@ class SerialBoardSession:
         finally:
             self.command_lock.release()
 
+    def set_neopixel_pixels(self, pixels: list[tuple[int, int, int]]) -> dict[str, Any]:
+        if len(pixels) != 16:
+            raise ValueError("NeoPixel display requires exactly 16 pixels")
+        if not self.command_lock.acquire(blocking=False):
+            raise RuntimeError("Serial board is busy with another command")
+        try:
+            responses: list[str] = []
+            for index, (red, green, blue) in enumerate(pixels):
+                command = (
+                    f"M150 I{index} "
+                    f"R{_clamp_channel(red)} U{_clamp_channel(green)} B{_clamp_channel(blue)}"
+                )
+                result = self._send_command_locked(command)
+                responses.extend(result["response"])
+            return {"ok": True, "message": "Applied 16-pixel NeoPixel display", "response": responses, **self.status()}
+        finally:
+            self.command_lock.release()
+
 
 def _port_auto_score(port: dict[str, str]) -> tuple[int, str]:
     text = " ".join([port.get("device", ""), port.get("description", ""), port.get("hwid", "")]).lower()
@@ -678,6 +696,21 @@ class WebRuntime:
                 self.orchestrator.lights.set_status(profile_name)
             return {"ok": True, "message": f"Applied live board light profile {profile_name}"}
         raise ValueError(f"Unsupported hardware control action: {action}")
+
+    def apply_neopixel_display(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.runtime_mode != "hardware":
+            raise ValueError("Pixel-by-pixel NeoPixel display requires Hardware runtime")
+        if not self.serial_board.status()["connected"]:
+            raise ValueError("Hardware runtime selected, but the serial board is not verified live")
+        raw_pixels = payload.get("pixels")
+        if not isinstance(raw_pixels, list):
+            raise ValueError("pixels must be a list of 16 RGB triples")
+        pixels: list[tuple[int, int, int]] = []
+        for index, raw_pixel in enumerate(raw_pixels):
+            if not isinstance(raw_pixel, list) or len(raw_pixel) != 3:
+                raise ValueError(f"pixels[{index}] must be an RGB triple")
+            pixels.append((int(raw_pixel[0]), int(raw_pixel[1]), int(raw_pixel[2])))
+        return self.serial_board.set_neopixel_pixels(pixels)
 
     def _hardware_serial_control(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         if action == "initialize":
@@ -1214,6 +1247,13 @@ def create_web_app(
             return jsonify({"ok": True, "profile": profile})
         except Exception as exc:
             return jsonify({"ok": False, "message": str(exc)}), 400
+
+    @app.post("/api/neopixel/display")
+    def api_neopixel_display():
+        try:
+            return jsonify(runtime.apply_neopixel_display(request.get_json(silent=True) or {}))
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc), "status": runtime.status()}), 400
 
     @app.get("/api/camera/frame.jpg")
     def camera_frame():

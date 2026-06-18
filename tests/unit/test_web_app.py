@@ -163,9 +163,11 @@ def test_explicit_simulation_runtime_enables_sim_controls():
 def test_hardware_panels_are_grouped_by_domain():
     client = _client()
 
+    machine = client.get("/machine")
     movement = client.get("/movement")
     system = client.get("/system")
 
+    assert b'id="pixel-grid"' in machine.data
     assert b'id="endstop-state"' in movement.data
     assert b'id="bltouch-probe"' in movement.data
     assert b'id="serial-command-form"' in system.data
@@ -173,6 +175,36 @@ def test_hardware_panels_are_grouped_by_domain():
     assert b'id="theme-mode"' in system.data
     assert b'id="endstop-state"' not in system.data
     assert b'id="bltouch-probe"' not in system.data
+
+
+def test_neopixel_pixel_display_requires_hardware_and_sends_all_pixels():
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    runtime = app.config["runtime"]
+    runtime.serial_board = FakeSerialBoard()
+    runtime.serial_board.connect("COM8", 115200)
+    client = app.test_client()
+    pixels = [[index, index + 1, index + 2] for index in range(16)]
+
+    response = client.post("/api/neopixel/display", json={"pixels": pixels})
+
+    assert response.status_code == 200
+    assert runtime.serial_board.pixel_displays == [pixels]
+    assert runtime.serial_board.sent_commands[0] == "M150 I0 R0 U1 B2"
+    assert runtime.serial_board.sent_commands[-1] == "M150 I15 R15 U16 B17"
+
+
+def test_neopixel_pixel_display_rejects_without_live_hardware():
+    client = _client()
+    pixels = [[0, 0, 0] for _ in range(16)]
+
+    response = client.post("/api/neopixel/display", json={"pixels": pixels})
+
+    assert response.status_code == 400
+    assert "serial board is not verified live" in response.get_json()["message"]
 
 
 def test_connected_serial_board_takes_over_movement_controls():
@@ -457,6 +489,7 @@ class FakeSerialBoard:
         self.live_pose = {}
         self.sent_commands = []
         self.rgb_commands = []
+        self.pixel_displays = []
         self.fail_next_command = False
         self.connection_state = "disconnected"
 
@@ -549,3 +582,16 @@ class FakeSerialBoard:
 
     def set_lights_rgb(self, red, green, blue, *, profile_name=None):
         self.rgb_commands.append((red, green, blue, profile_name))
+
+    def set_neopixel_pixels(self, pixels):
+        normalized = [[int(red), int(green), int(blue)] for red, green, blue in pixels]
+        self.pixel_displays.append(normalized)
+        for index, (red, green, blue) in enumerate(normalized):
+            self.sent_commands.append(f"M150 I{index} R{red} U{green} B{blue}")
+        self.last_response = ["ok"] * len(normalized)
+        return {
+            "ok": True,
+            "message": "Applied 16-pixel NeoPixel display",
+            "response": self.last_response,
+            **self.status(),
+        }

@@ -49,6 +49,40 @@
   </article>
 </section>
 <section class="panel">
+  <div class="panel-heading">
+    <div>
+      <p class="eyebrow">NeoPixel display</p>
+      <h2>Pixel editor</h2>
+    </div>
+    <span id="pixel-editor-pill" class="pill">16 LEDs</span>
+  </div>
+  <div id="pixel-grid" class="pixel-grid"></div>
+  <div class="form-grid three-up">
+    <label>Selected LED
+      <input id="pixel-index" type="number" min="0" max="15" value="0">
+    </label>
+    <label>Color
+      <input id="pixel-color" type="color" value="#000020">
+    </label>
+    <label>Copy buffer
+      <input id="pixel-copy-preview" readonly value="#000020">
+    </label>
+  </div>
+  <div class="form-grid three-up">
+    <label>Red<input id="pixel-red" type="number" min="0" max="255" value="0"></label>
+    <label>Green<input id="pixel-green" type="number" min="0" max="255" value="0"></label>
+    <label>Blue<input id="pixel-blue" type="number" min="0" max="255" value="32"></label>
+  </div>
+  <div class="button-row">
+    <button id="pixel-copy" type="button" class="secondary">Copy selected</button>
+    <button id="pixel-paste" type="button" class="secondary">Paste to selected</button>
+    <button id="pixel-fill" type="button" class="secondary">Fill all</button>
+    <button id="pixel-clear" type="button" class="secondary">Clear</button>
+    <button id="pixel-apply" type="button">Apply 16 pixels</button>
+  </div>
+  <p id="pixel-message" class="muted"></p>
+</section>
+<section class="panel">
   <p class="eyebrow">App-layer calibration</p>
   <h2>Vacuum baseline and camera offset</h2>
   <p class="muted">Pile coordinates are vacuum/nozzle baseline coordinates. The app subtracts this fixed camera offset before sending motion commands, and blocks XY travel whenever vacuum Z is below the configured clearance.</p>

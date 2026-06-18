@@ -48,6 +48,13 @@ const isHardwareLive = status => status.runtime_target === "hardware_serial";
 const setButtonsDisabled = (root, selector, disabled) => {
   root.querySelectorAll(selector).forEach(button => button.disabled = disabled);
 };
+const clampChannel = value => Math.max(0, Math.min(255, Number(value) || 0));
+const rgbToHex = ([red, green, blue]) =>
+  `#${[red, green, blue].map(value => clampChannel(value).toString(16).padStart(2, "0")).join("")}`;
+const hexToRgb = hex => {
+  const clean = String(hex || "#000000").replace("#", "").padEnd(6, "0").slice(0, 6);
+  return [0, 2, 4].map(offset => parseInt(clean.slice(offset, offset + 2), 16) || 0);
+};
 
 window.SorterPages = {
   dashboard() {
@@ -96,6 +103,23 @@ window.SorterPages = {
     const profileSelect = document.querySelector("#light-profile");
     const profileForm = document.querySelector("#light-profile-form");
     const calibrationForm = document.querySelector("#calibration-form");
+    const pixelGrid = document.querySelector("#pixel-grid");
+    const pixelEditorPill = document.querySelector("#pixel-editor-pill");
+    const pixelIndex = document.querySelector("#pixel-index");
+    const pixelColor = document.querySelector("#pixel-color");
+    const pixelCopyPreview = document.querySelector("#pixel-copy-preview");
+    const pixelRed = document.querySelector("#pixel-red");
+    const pixelGreen = document.querySelector("#pixel-green");
+    const pixelBlue = document.querySelector("#pixel-blue");
+    const pixelCopy = document.querySelector("#pixel-copy");
+    const pixelPaste = document.querySelector("#pixel-paste");
+    const pixelFill = document.querySelector("#pixel-fill");
+    const pixelClear = document.querySelector("#pixel-clear");
+    const pixelApply = document.querySelector("#pixel-apply");
+    const pixelMessage = document.querySelector("#pixel-message");
+    const pixels = Array.from({length: 16}, () => [0, 0, 32]);
+    let selectedPixel = 0;
+    let copiedPixel = [0, 0, 32];
     document.querySelectorAll("[data-control]").forEach(button => button.onclick = async () => {
       const action = button.dataset.control;
       const payload = (action === "move_xy" || action === "move_camera_xy") ? {
@@ -161,6 +185,79 @@ window.SorterPages = {
         .map(profile => `<option value="${profile.name}">${profile.name} (${profile.red}, ${profile.green}, ${profile.blue})</option>`)
         .join("");
     }
+    function renderPixels() {
+      pixelGrid.innerHTML = pixels.map((pixel, index) => `
+        <button
+          type="button"
+          class="pixel-button${index === selectedPixel ? " selected" : ""}"
+          data-pixel-index="${index}"
+          style="background:${rgbToHex(pixel)}"
+          title="LED ${index}">
+          ${index}
+        </button>`).join("");
+      pixelGrid.querySelectorAll("[data-pixel-index]").forEach(button => {
+        button.onclick = () => selectPixel(Number(button.dataset.pixelIndex));
+      });
+      pixelEditorPill.textContent = `LED ${selectedPixel}`;
+    }
+    function syncPixelInputs() {
+      const pixel = pixels[selectedPixel];
+      pixelIndex.value = selectedPixel;
+      pixelColor.value = rgbToHex(pixel);
+      pixelRed.value = pixel[0];
+      pixelGreen.value = pixel[1];
+      pixelBlue.value = pixel[2];
+      pixelCopyPreview.value = rgbToHex(copiedPixel);
+    }
+    function selectPixel(index) {
+      selectedPixel = Math.max(0, Math.min(15, Number(index) || 0));
+      syncPixelInputs();
+      renderPixels();
+    }
+    function setSelectedPixel(rgb) {
+      pixels[selectedPixel] = rgb.map(clampChannel);
+      syncPixelInputs();
+      renderPixels();
+    }
+    pixelIndex.oninput = () => selectPixel(pixelIndex.value);
+    pixelColor.oninput = () => setSelectedPixel(hexToRgb(pixelColor.value));
+    [pixelRed, pixelGreen, pixelBlue].forEach(input => {
+      input.oninput = () => setSelectedPixel([pixelRed.value, pixelGreen.value, pixelBlue.value]);
+    });
+    pixelCopy.onclick = () => {
+      copiedPixel = [...pixels[selectedPixel]];
+      syncPixelInputs();
+      pixelMessage.textContent = `Copied LED ${selectedPixel}`;
+    };
+    pixelPaste.onclick = () => {
+      setSelectedPixel([...copiedPixel]);
+      pixelMessage.textContent = `Pasted to LED ${selectedPixel}`;
+    };
+    pixelFill.onclick = () => {
+      const color = [...pixels[selectedPixel]];
+      pixels.forEach((_, index) => pixels[index] = [...color]);
+      renderPixels();
+      syncPixelInputs();
+      pixelMessage.textContent = "Filled all LEDs from selected color";
+    };
+    pixelClear.onclick = () => {
+      pixels.forEach((_, index) => pixels[index] = [0, 0, 0]);
+      renderPixels();
+      syncPixelInputs();
+      pixelMessage.textContent = "Cleared all LEDs";
+    };
+    pixelApply.onclick = async () => {
+      try {
+        const result = await json("/api/neopixel/display", {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({pixels}),
+        });
+        pixelMessage.textContent = result.message || "Applied";
+      } catch (error) {
+        pixelMessage.textContent = error.message;
+      }
+    };
     async function refresh() {
       const status = await json("/api/status");
       renderRuntimeBanner(status);
@@ -174,6 +271,7 @@ window.SorterPages = {
       document.querySelectorAll("[data-control='vacuum_on'], [data-control='vacuum_off']").forEach(button => {
         button.disabled = hardwareMode;
       });
+      pixelApply.disabled = hardwareMode && !hardwareLive;
       const cards = [
         ["Lifecycle", status.lifecycle],
         ["Runtime", status.runtime_message],
@@ -200,7 +298,7 @@ window.SorterPages = {
       calibrationForm.elements.probe_enabled.checked = Boolean(status.calibration.probe_enabled);
       statusRoot.innerHTML = cards.map(([k,v]) => `<article class="status-card"><div class="muted">${k}</div><strong>${v}</strong></article>`).join("");
     }
-    loadProfiles(); refresh(); setInterval(refresh, 1200);
+    renderPixels(); syncPixelInputs(); loadProfiles(); refresh(); setInterval(refresh, 1200);
   },
   movement() {
     const statusRoot = document.querySelector("#movement-status");
