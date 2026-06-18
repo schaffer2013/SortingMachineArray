@@ -38,10 +38,11 @@ class SerialBoardSession:
         self.live_pose: dict[str, float] = {}
         self.last_success_monotonic: float | None = None
         self.connection_state = "disconnected"
-        self.lock = threading.RLock()
+        self.state_lock = threading.RLock()
+        self.command_lock = threading.Lock()
 
     def status(self) -> dict[str, Any]:
-        with self.lock:
+        with self.state_lock:
             session_open = self.transport is not None
             verified = session_open and self.connection_state == "verified"
             if verified and self.last_success_monotonic is not None:
@@ -56,6 +57,7 @@ class SerialBoardSession:
                 "connected": verified,
                 "session_open": session_open,
                 "connection_state": state,
+                "busy": self.command_lock.locked(),
                 "port": self.port,
                 "baud_rate": self.baud_rate,
                 "last_error": self.last_error,
@@ -82,89 +84,126 @@ class SerialBoardSession:
         return ports
 
     def auto_connect(self) -> dict[str, Any]:
-        with self.lock:
-            if self.transport is not None:
-                return {"ok": True, "message": f"Already connected to {self.port}", **self.status()}
-            ports = self.list_ports()
-            for item in sorted(ports, key=_port_auto_score, reverse=True):
-                try:
-                    return self.connect(item["device"])
-                except Exception:
-                    continue
-            message = self.last_error or "No serial board responded to M115"
-            return {"ok": False, "message": message, **self.status()}
+        if self.status()["session_open"]:
+            return {"ok": True, "message": f"Already connected to {self.port}", **self.status()}
+        ports = self.list_ports()
+        for item in sorted(ports, key=_port_auto_score, reverse=True):
+            try:
+                return self.connect(item["device"])
+            except Exception:
+                continue
+        message = self.last_error or "No serial board responded to M115"
+        return {"ok": False, "message": message, **self.status()}
 
     def connect(self, port: str, baud_rate: int = 115200) -> dict[str, Any]:
-        with self.lock:
-            self.disconnect()
-            self.port = port
-            self.baud_rate = int(baud_rate)
-            transport = MarlinSerialTransport(serial_port=port, baud_rate=self.baud_rate, timeout_seconds=60.0)
+        if not self.command_lock.acquire(blocking=False):
+            raise RuntimeError("Serial board is busy with another command")
+        try:
+            with self.state_lock:
+                if self.transport is not None:
+                    self.transport.close()
+                self.transport = None
+                self.lights = None
+                self.port = port
+                self.baud_rate = int(baud_rate)
+            transport = MarlinSerialTransport(serial_port=port, baud_rate=int(baud_rate), timeout_seconds=60.0)
             try:
                 response = transport.send_command("M115")
             except Exception as exc:
                 transport.close()
-                self.transport = None
-                self.lights = None
-                self.last_error = str(exc)
-                self.last_response = []
-                self.connection_state = "error"
+                with self.state_lock:
+                    self.transport = None
+                    self.lights = None
+                    self.last_error = str(exc)
+                    self.last_response = []
+                    self.connection_state = "error"
                 raise
-            self.transport = transport
-            self.lights = NeoPixelLightsAdapter(transport=transport)
-            self.last_error = None
-            self.last_response = response
-            self.last_success_monotonic = time.monotonic()
-            self.connection_state = "verified"
+            with self.state_lock:
+                self.transport = transport
+                self.lights = NeoPixelLightsAdapter(transport=transport)
+                self.last_error = None
+                self.last_response = response
+                self.last_success_monotonic = time.monotonic()
+                self.connection_state = "verified"
             return {"ok": True, "message": f"Connected to {port}", **self.status()}
+        finally:
+            self.command_lock.release()
 
     def disconnect(self) -> dict[str, Any]:
-        with self.lock:
-            if self.transport is not None:
-                self.transport.close()
-            self.transport = None
-            self.lights = None
-            self.port = None
-            self.connection_state = "disconnected"
+        if not self.command_lock.acquire(blocking=False):
+            raise RuntimeError("Serial board is busy with another command")
+        try:
+            with self.state_lock:
+                transport = self.transport
+                self.transport = None
+                self.lights = None
+                self.port = None
+                self.connection_state = "disconnected"
+                self.last_error = None
+            if transport is not None:
+                transport.close()
             return {"ok": True, "message": "Disconnected", **self.status()}
+        finally:
+            self.command_lock.release()
 
     def send_command(self, command: str) -> dict[str, Any]:
-        with self.lock:
-            if self.transport is None:
-                raise ValueError("Serial board is not connected")
-            try:
-                response = self.transport.send_command(command)
-            except Exception as exc:
+        if not self.command_lock.acquire(blocking=False):
+            raise RuntimeError("Serial board is busy with another command")
+        try:
+            result = self._send_command_locked(command)
+        finally:
+            self.command_lock.release()
+        return {**result, **self.status()}
+
+    def _send_command_locked(self, command: str) -> dict[str, Any]:
+        with self.state_lock:
+            transport = self.transport
+        if transport is None:
+            raise ValueError("Serial board is not connected")
+        try:
+            response = transport.send_command(command)
+        except Exception as exc:
+            with self.state_lock:
                 self.last_error = str(exc)
                 self.connection_state = "error"
                 if self.transport is not None:
                     self.transport.close()
                 self.transport = None
                 self.lights = None
-                raise
+            raise
+        pose = _parse_m114(response)
+        with self.state_lock:
             self.last_error = None
             self.last_response = response
             self.last_success_monotonic = time.monotonic()
             self.connection_state = "verified"
-            pose = _parse_m114(response)
             if pose:
                 self.live_pose.update(pose)
-            return {"ok": True, "message": f"Sent {command.strip()}", "response": response, **self.status()}
+        return {"ok": True, "message": f"Sent {command.strip()}", "response": response, **self.status()}
 
     def send_commands(self, commands: list[str], *, message: str) -> dict[str, Any]:
-        responses: list[str] = []
-        with self.lock:
+        if not self.command_lock.acquire(blocking=False):
+            raise RuntimeError("Serial board is busy with another command")
+        try:
+            responses: list[str] = []
             for command in commands:
-                result = self.send_command(command)
+                result = self._send_command_locked(command)
                 responses.extend(result["response"])
-            return {"ok": True, "message": message, "response": responses, **self.status()}
+        finally:
+            self.command_lock.release()
+        return {"ok": True, "message": message, "response": responses, **self.status()}
 
     def read_endstops(self) -> dict[str, Any]:
-        with self.lock:
-            result = self.send_command("M119")
+        if not self.command_lock.acquire(blocking=False):
+            raise RuntimeError("Serial board is busy with another command")
+        try:
+            result = self._send_command_locked("M119")
             endstops = _parse_m119(result["response"])
-            self.last_endstops = endstops
-            return {"ok": True, "message": "Read endstop states", "endstops": endstops, **self.status()}
+            with self.state_lock:
+                self.last_endstops = endstops
+        finally:
+            self.command_lock.release()
+        return {"ok": True, "message": "Read endstop states", "endstops": endstops, **self.status()}
 
     def bltouch(self, action: str) -> dict[str, Any]:
         commands = {
@@ -182,16 +221,56 @@ class SerialBoardSession:
         return result
 
     def set_lights_status(self, status: str) -> None:
-        with self.lock:
-            if self.lights is not None:
-                self.lights.set_status(status)
-                self.last_response = list(getattr(self.transport, "command_log", []))[-1:]
+        if not self.command_lock.acquire(blocking=False):
+            raise RuntimeError("Serial board is busy with another command")
+        try:
+            with self.state_lock:
+                lights = self.lights
+                transport = self.transport
+            if lights is not None:
+                lights.set_status(status)
+                with self.state_lock:
+                    self.last_error = None
+                    self.last_response = list(getattr(transport, "command_log", []))[-1:]
+                    self.last_success_monotonic = time.monotonic()
+                    self.connection_state = "verified"
+        except Exception as exc:
+            with self.state_lock:
+                self.last_error = str(exc)
+                self.connection_state = "error"
+                if self.transport is not None:
+                    self.transport.close()
+                self.transport = None
+                self.lights = None
+            raise
+        finally:
+            self.command_lock.release()
 
     def set_lights_rgb(self, red: int, green: int, blue: int, *, profile_name: str | None = None) -> None:
-        with self.lock:
-            if self.lights is not None:
-                self.lights.set_rgb(red, green, blue, profile_name=profile_name)
-                self.last_response = list(getattr(self.transport, "command_log", []))[-1:]
+        if not self.command_lock.acquire(blocking=False):
+            raise RuntimeError("Serial board is busy with another command")
+        try:
+            with self.state_lock:
+                lights = self.lights
+                transport = self.transport
+            if lights is not None:
+                lights.set_rgb(red, green, blue, profile_name=profile_name)
+                with self.state_lock:
+                    self.last_error = None
+                    self.last_response = list(getattr(transport, "command_log", []))[-1:]
+                    self.last_success_monotonic = time.monotonic()
+                    self.connection_state = "verified"
+        except Exception as exc:
+            with self.state_lock:
+                self.last_error = str(exc)
+                self.connection_state = "error"
+                if self.transport is not None:
+                    self.transport.close()
+                self.transport = None
+                self.lights = None
+            raise
+        finally:
+            self.command_lock.release()
 
 
 def _port_auto_score(port: dict[str, str]) -> tuple[int, str]:

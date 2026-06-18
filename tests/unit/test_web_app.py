@@ -160,6 +160,24 @@ def test_serial_error_clears_live_connection(monkeypatch):
     assert status["runtime_target"] == "sim"
 
 
+def test_status_reports_busy_without_waiting_on_serial_lock():
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    runtime = app.config["runtime"]
+    client = app.test_client()
+
+    assert runtime.serial_board.command_lock.acquire(blocking=False) is True
+    try:
+        status = client.get("/api/status").get_json()
+    finally:
+        runtime.serial_board.command_lock.release()
+
+    assert status["serial_board"]["busy"] is True
+
+
 def test_active_navigation_tab_is_marked():
     client = _client()
     response = client.get("/movement")
