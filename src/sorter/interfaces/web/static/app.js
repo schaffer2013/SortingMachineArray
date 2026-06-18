@@ -9,14 +9,26 @@ const renderRuntimeBanner = status => {
   const banner = document.querySelector("#runtime-banner");
   if (!banner || !status) return;
   const live = status.runtime_target === "hardware_serial";
+  const sessionOpen = status.serial_board?.session_open;
   banner.className = live ? "runtime-banner live" : "runtime-banner sim";
   banner.textContent = live
     ? `LIVE HARDWARE: ${status.serial_board?.port || "serial board"}`
-    : "SIM BACKED: connect serial on System";
+    : sessionOpen
+      ? `SERIAL ${status.serial_board?.connection_state || "unverified"}: not live`
+      : "SIM BACKED: connect serial on System";
 };
 const refreshRuntimeBanner = async () => {
   try {
-    renderRuntimeBanner(await json("/api/status"));
+    let status = await json("/api/status");
+    if (status.serial_board?.session_open) {
+      try {
+        await json("/api/serial/heartbeat", {method:"POST"});
+        status = await json("/api/status");
+      } catch (error) {
+        status = await json("/api/status");
+      }
+    }
+    renderRuntimeBanner(status);
   } catch (error) {
   }
 };
@@ -332,10 +344,14 @@ window.SorterPages = {
     };
     function renderSerial(data) {
       const status = data.status || data;
-      serialPill.textContent = status.connected ? `Connected ${status.port}` : "Disconnected";
+      serialPill.textContent = status.connected
+        ? `Verified ${status.port}`
+        : status.session_open
+          ? `${status.connection_state || "Unverified"} ${status.port || ""}`
+          : "Disconnected";
       serialPill.className = status.connected ? "pill good-pill" : "pill warn-pill";
-      serialConnect.disabled = Boolean(status.connected);
-      serialDisconnect.disabled = !status.connected;
+      serialConnect.disabled = Boolean(status.session_open);
+      serialDisconnect.disabled = !status.session_open;
       if (data.ports) {
         const selected = status.port || serialPort.value;
         serialPort.innerHTML = data.ports.length
@@ -432,7 +448,7 @@ window.SorterPages = {
       try {
         const status = await json("/api/status");
         renderRuntimeBanner(status);
-        if (status.serial_board?.connected) refreshEndstops();
+        if (status.serial_board?.session_open) refreshEndstops();
       } catch (error) {
       }
     }, 2000);

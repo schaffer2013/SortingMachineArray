@@ -25,6 +25,7 @@ hardware measurement overrides it. For Z specifically:
 - C stroke: `85 mm`.
 - C min: `0.0 mm`.
 - C max/home position: `85.0 mm`.
+- C homes to its positive end of travel using a real sensor.
 
 Keep those limits in firmware soft endstops as well as any host-side
 calibration notes. The host UI can request moves, but firmware is responsible
@@ -84,7 +85,7 @@ The current hardware adapter emits these commands:
 | Wait idle | `M400` |
 | Set NeoPixel status | `M150 R{r} U{g} B{b}` |
 | BLTouch deploy/stow/probe | Firmware-standard BLTouch / probe G-code, to be confirmed during bring-up |
-| Pick request | Set `P1_22` high, wait for `P1_26` low, then clear `P1_22` |
+| Pick request | Set `P1_22` high, wait for `P1_00` low, then clear `P1_22` |
 | Release request | Set `P1_23` high, wait for `P1_25` low, then clear `P1_23` |
 
 The adapter uses absolute positions. Firmware should boot and remain in
@@ -104,11 +105,11 @@ Configure Marlin so all of the following are true:
 - `G28 X Y` homes X and Y together after Z and C are homed.
 - Z homes before C.
 - Z homes toward its positive end of travel using its normal endstop.
-- C homes after Z using sensorless homing toward its negative end of travel.
+- C homes after Z toward its positive end of travel using a real sensor.
 - X/Y home to their minimum coordinates.
 - Z and C home to their maximum coordinates.
-- C's physical homing direction is negative, but its configured post-home
-  coordinate should still be the C max value.
+- C's physical homing direction is positive, and its configured post-home
+  coordinate should be the C max value.
 - `G1 X... Y...` moves only X and Y.
 - `G1 Z...` moves only the main vertical carriage/interface.
 - `G1 C...` moves only the suction-cup vertical axis.
@@ -117,7 +118,7 @@ Configure Marlin so all of the following are true:
 - `M150 R... U... B...` controls the configured status light output.
 - Pick/release requests are high-level SKR-to-Arduino requests. Pump PWM,
   venting, vacuum sensing, and hold-mode control live on the Arduino.
-- `VAC_GOOD` is expected on `E0DET` / `P1_26`; `RELEASE_DONE` is expected on
+- `VAC_GOOD` is expected on `PWRDET` / `P1_00`; `RELEASE_DONE` is expected on
   `E1DET` / `P1_25`, active-low.
 - Units are millimeters.
 - Coordinates are absolute.
@@ -183,7 +184,7 @@ For the current mechanism, `c_home_mm` should be `85.0` because C only has an
 Firmware should execute the vertical homing sequence in this order:
 
 1. Home Z first toward the positive end of travel using the normal Z endstop.
-2. Home C second toward its negative end of travel using sensorless homing.
+2. Home C second toward its positive end of travel using the real C home sensor.
 3. Home X and Y together.
 
 If the real machine needs nonzero post-home offsets, configure those offsets in
@@ -337,9 +338,7 @@ The firmware team should confirm and record:
 
 - board and driver assignment for X, Y, Z, and C
 - confirmation of the exact Ender 3 Z max value used in firmware
-- whether C has a physical endstop, sensorless homing, or a fixed startup
-  reference
-- final sensorless homing settings for C toward negative end of travel
+- final physical C positive-end home sensor wiring and hit-state settings
 - final Z homing settings toward positive end of travel
 - final BLTouch deploy/stow/probe G-code sequence
 - BLTouch offsets relative to the suction cup and camera reference
@@ -370,11 +369,11 @@ not imply the whole physical connector is dedicated to that function.
 | X motor | SKR X driver output | X stepper motor | X gantry motion | Standard Ender-style motor wiring unless reworked hardware changes it. |
 | Y motor | SKR Y driver output | Y stepper motor | Y gantry motion | Standard Ender-style motor wiring unless reworked hardware changes it. |
 | Z motor | SKR Z driver output | Z/interface stepper motor | Main vertical interface motion | Homes positive to Z max using the normal Z endstop. |
-| C motor | SKR extra driver output | C/end-effector stepper motor | 85 mm suction-cup vertical stroke | Exposed to Marlin as the `C` axis. Homes physically negative with sensorless homing, then reports C max/home as `85.0 mm`. |
+| C motor | SKR extra driver output | C/end-effector stepper motor | 85 mm suction-cup vertical stroke | Exposed to Marlin as the `C` axis. Homes physically positive to a real sensor, then reports C max/home as `85.0 mm`. |
 | X homing | X endstop switch | SKR `X_MIN` | X homing input | Uses the normal `X_MIN` endstop input. |
 | Y homing | Y endstop switch | SKR `Y_MIN` | Y homing input | Uses the normal `Y_MIN` endstop input. |
 | Z homing | Z max endstop switch | SKR `Z_MAX` | Z positive-EOT homing input | Uses the `Z_MAX` endstop input for Z homing. |
-| C homing | C driver sensorless signal | SKR / driver sensorless homing path | C negative-EOT homing | No physical C endstop is expected. Configure sensorless homing for C. |
+| C homing | C positive home sensor | SKR `E0DET` / `P1_26` signal input | C positive-EOT homing | Uses a real C home sensor. Do not use the E0 TMC DIAG signal on this input. |
 | BLTouch servo | BLTouch control lead | SKR `SERVO0` | BLTouch deploy/stow | `SERVO0` is unavailable for other uses. |
 | BLTouch probe | BLTouch probe output | SKR configured probe/Z-probe input | Probe trigger | Firmware team must confirm final probe input and offsets. |
 | NeoPixel status light | SKR NeoPixel/status output | NeoPixel ring | Machine status lighting | Controlled with Marlin `M150`. |
@@ -382,9 +381,9 @@ not imply the whole physical connector is dedicated to that function.
 | `PICK_REQUEST` | SKR EXP1 pin 7 / `P1_22` 3.3 V logic output | Arduino `D4` with 10 kohm pulldown to GND | High-level pick request | Use EXP1 signal pin and ground only. HIGH means request active. Do not use FAN/HE outputs unless real GPIO is exhausted. Do not drive 5 V back into EXP1. |
 | `RELEASE_REQUEST` | SKR EXP1 pin 8 / `P1_23` 3.3 V logic output | Arduino `D5` with 10 kohm pulldown to GND | High-level release request | Use EXP1 signal pin and ground only. HIGH means request active. Do not use FAN/HE outputs unless real GPIO is exhausted. Do not drive 5 V back into EXP1. |
 | EXP1 logic ground | SKR EXP1 pin 9 / GND | Arduino GND | Request-line reference | Use ground with EXP1 pins 7 and 8. EXP1 pin 10 is 5 V and is not needed for this handshake. |
-| `VAC_GOOD` | Arduino `D6` open-drain/open-collector style output | SKR `E0DET` / `P1_26` signal input | Vacuum-ready response for wait | Uses the `E0DET` detector signal pin only, not a normal filament runout function and not the whole connector. Active-low. Disable filament runout on this pin. Do not drive 5 V into the SKR input. |
+| `VAC_GOOD` | Arduino `D6` open-drain/open-collector style output | SKR `PWRDET` / `P1_00` signal input | Vacuum-ready response for wait | Uses the `PWRDET` signal pin only, not a power-loss function and not the whole connector. Active-low. Keep power-loss recovery disabled. Do not drive 5 V into the SKR input. |
 | `RELEASE_DONE` | Arduino `D7` open-drain/open-collector style output | SKR `E1DET` / `P1_25` signal input | Release-complete response for wait | Uses the `E1DET` detector signal pin only, not a normal filament runout function and not the whole connector. Active-low. Disable filament runout on this pin. Do not drive 5 V into the SKR input. |
-| `VAC_FAULT` optional | Arduino `D8` open-drain/open-collector style output | SKR `PWRDET` / `P1_00` signal input | Optional future suction fault input | Reserve only if power-loss features are disabled or remapped. Do not drive 5 V into the SKR input. |
+| `VAC_FAULT` optional | Arduino `D8` open-drain/open-collector style output | Unassigned spare 3.3 V-safe SKR input | Optional future suction fault input | `PWRDET` / `P1_00` is reserved for `VAC_GOOD`; choose a different input before enabling this signal. Do not drive 5 V into the SKR input. |
 | Arduino logic power | 24 V to 5 V buck | Arduino 5 V / GND | Suction controller power | Common ground is acceptable for this build unless isolation is intentionally changed. |
 | Vacuum sensor power | 24 V to 5 V buck | Vacuum sensor | Sensor power | Sensor signal is reserved to Arduino `A0`. |
 | Vacuum sensor signal | Vacuum sensor | Arduino `A0` | Optional/reserved vacuum feedback | Used for vacuum-good threshold if installed. |

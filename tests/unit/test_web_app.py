@@ -139,6 +139,27 @@ def test_connected_serial_board_takes_over_movement_controls():
     assert status["pose"]["x_mm"] == 5.0
 
 
+def test_serial_error_clears_live_connection(monkeypatch):
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    runtime = app.config["runtime"]
+    runtime.serial_board = FakeSerialBoard()
+    runtime.serial_board.connect("COM8", 115200)
+    runtime.serial_board.fail_next_command = True
+    client = app.test_client()
+
+    response = client.post("/api/serial/heartbeat")
+    status = client.get("/api/status").get_json()
+
+    assert response.status_code == 400
+    assert status["serial_board"]["connected"] is False
+    assert status["serial_board"]["session_open"] is False
+    assert status["runtime_target"] == "sim"
+
+
 def test_active_navigation_tab_is_marked():
     client = _client()
     response = client.get("/movement")
@@ -358,10 +379,14 @@ class FakeSerialBoard:
         self.live_pose = {}
         self.sent_commands = []
         self.rgb_commands = []
+        self.fail_next_command = False
+        self.connection_state = "disconnected"
 
     def status(self):
         return {
             "connected": self.connected,
+            "session_open": self.connected,
+            "connection_state": self.connection_state,
             "port": self.port,
             "baud_rate": self.baud_rate,
             "last_error": self.last_error,
@@ -380,15 +405,22 @@ class FakeSerialBoard:
         self.connected = True
         self.port = port
         self.baud_rate = baud_rate
+        self.connection_state = "verified"
         self.last_response = ["FIRMWARE_NAME:test", "ok"]
         return {"ok": True, "message": f"Connected to {port}", **self.status()}
 
     def disconnect(self):
         self.connected = False
         self.port = None
+        self.connection_state = "disconnected"
         return {"ok": True, "message": "Disconnected", **self.status()}
 
     def send_command(self, command):
+        if self.fail_next_command:
+            self.fail_next_command = False
+            self.connected = False
+            self.connection_state = "error"
+            raise TimeoutError("serial heartbeat failed")
         self.sent_commands.append(command)
         if command == "M119":
             self.last_response = ["Reporting endstop status", "x_min: open", "z_max: TRIGGERED", "ok"]

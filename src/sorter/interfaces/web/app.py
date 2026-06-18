@@ -36,12 +36,26 @@ class SerialBoardSession:
         self.last_response: list[str] = []
         self.last_endstops: dict[str, str] = {}
         self.live_pose: dict[str, float] = {}
+        self.last_success_monotonic: float | None = None
+        self.connection_state = "disconnected"
         self.lock = threading.RLock()
 
     def status(self) -> dict[str, Any]:
         with self.lock:
+            session_open = self.transport is not None
+            verified = session_open and self.connection_state == "verified"
+            if verified and self.last_success_monotonic is not None:
+                if time.monotonic() - self.last_success_monotonic > 5.0:
+                    verified = False
+                    state = "stale"
+                else:
+                    state = "verified"
+            else:
+                state = self.connection_state if session_open else "disconnected"
             return {
-                "connected": self.transport is not None,
+                "connected": verified,
+                "session_open": session_open,
+                "connection_state": state,
                 "port": self.port,
                 "baud_rate": self.baud_rate,
                 "last_error": self.last_error,
@@ -94,11 +108,14 @@ class SerialBoardSession:
                 self.lights = None
                 self.last_error = str(exc)
                 self.last_response = []
+                self.connection_state = "error"
                 raise
             self.transport = transport
             self.lights = NeoPixelLightsAdapter(transport=transport)
             self.last_error = None
             self.last_response = response
+            self.last_success_monotonic = time.monotonic()
+            self.connection_state = "verified"
             return {"ok": True, "message": f"Connected to {port}", **self.status()}
 
     def disconnect(self) -> dict[str, Any]:
@@ -108,15 +125,27 @@ class SerialBoardSession:
             self.transport = None
             self.lights = None
             self.port = None
+            self.connection_state = "disconnected"
             return {"ok": True, "message": "Disconnected", **self.status()}
 
     def send_command(self, command: str) -> dict[str, Any]:
         with self.lock:
             if self.transport is None:
                 raise ValueError("Serial board is not connected")
-            response = self.transport.send_command(command)
+            try:
+                response = self.transport.send_command(command)
+            except Exception as exc:
+                self.last_error = str(exc)
+                self.connection_state = "error"
+                if self.transport is not None:
+                    self.transport.close()
+                self.transport = None
+                self.lights = None
+                raise
             self.last_error = None
             self.last_response = response
+            self.last_success_monotonic = time.monotonic()
+            self.connection_state = "verified"
             pose = _parse_m114(response)
             if pose:
                 self.live_pose.update(pose)
@@ -268,6 +297,7 @@ class WebRuntime:
         with self.lock:
             serial_status = self.serial_board.status()
             live_connected = bool(serial_status["connected"])
+            session_open = bool(serial_status.get("session_open"))
             pose = asdict(snapshot.pose)
             if live_connected:
                 live_pose = serial_status.get("live_pose", {})
@@ -291,7 +321,11 @@ class WebRuntime:
                 "runtime_message": (
                     f"Live board connected on {serial_status['port']}"
                     if live_connected
-                    else "SIM BACKED: connect a serial board on System before using controls for hardware"
+                    else (
+                        f"Serial session is {serial_status.get('connection_state')} on {serial_status.get('port')}; not verified live"
+                        if session_open
+                        else "SIM BACKED: connect a serial board on System before using controls for hardware"
+                    )
                 ),
                 "phase": run_state.phase,
                 "active_command": run_state.active_command,
@@ -988,6 +1022,13 @@ def create_web_app(
     def api_serial_endstops():
         try:
             return jsonify(runtime.serial_board.read_endstops())
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc), **runtime.serial_board.status()}), 400
+
+    @app.post("/api/serial/heartbeat")
+    def api_serial_heartbeat():
+        try:
+            return jsonify(runtime.serial_board.send_command("M114"))
         except Exception as exc:
             return jsonify({"ok": False, "message": str(exc), **runtime.serial_board.status()}), 400
 
