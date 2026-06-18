@@ -26,6 +26,39 @@ from sorter.domain.models import PileState
 from sorter.ports.camera import Frame
 
 
+HARDWARE_CONTROL_ACTIONS = {
+    "initialize",
+    "home",
+    "wait_idle",
+    "move_xy",
+    "jog_xy",
+    "move_camera_xy",
+    "move_z",
+    "jog_z",
+    "move_c",
+    "jog_c",
+    "jog_zc_interface",
+    "vacuum_on",
+    "vacuum_off",
+    "lights",
+    "light_profile",
+}
+
+MOTION_CONTROL_ACTIONS = {
+    "initialize",
+    "home",
+    "wait_idle",
+    "move_xy",
+    "jog_xy",
+    "move_camera_xy",
+    "move_z",
+    "jog_z",
+    "move_c",
+    "jog_c",
+    "jog_zc_interface",
+}
+
+
 class SerialBoardSession:
     def __init__(self):
         self.transport: MarlinSerialTransport | None = None
@@ -339,10 +372,16 @@ class WebRuntime:
         self.repo_root = _repo_root()
         self.light_profiles = self._load_light_profiles()
         self.serial_board = SerialBoardSession()
+        self.runtime_mode = "hardware"
         self.lock = threading.RLock()
 
     def start_run(self) -> dict[str, Any]:
         with self.lock:
+            if self.runtime_mode != "simulation":
+                return {
+                    "ok": False,
+                    "message": "Automated runs require Simulation runtime until the hardware run path is implemented",
+                }
             if self.run_thread and self.run_thread.is_alive():
                 return {"ok": False, "message": "Run already active"}
             if not self.machine_initialized:
@@ -375,8 +414,11 @@ class WebRuntime:
         run_state = snapshot.run_state
         with self.lock:
             serial_status = self.serial_board.status()
-            live_connected = bool(serial_status["connected"])
+            live_connected = self.runtime_mode == "hardware" and bool(serial_status["connected"])
             session_open = bool(serial_status.get("session_open"))
+            runtime_target = "simulation" if self.runtime_mode == "simulation" else (
+                "hardware_serial" if live_connected else "hardware_unavailable"
+            )
             pose = asdict(snapshot.pose)
             if live_connected:
                 live_pose = serial_status.get("live_pose", {})
@@ -396,14 +438,19 @@ class WebRuntime:
                 lifecycle = "IDLE"
             return {
                 "lifecycle": lifecycle,
-                "runtime_target": "hardware_serial" if live_connected else "sim",
+                "runtime_mode": self.runtime_mode,
+                "runtime_target": runtime_target,
                 "runtime_message": (
-                    f"Live board connected on {serial_status['port']}"
-                    if live_connected
+                    "SIMULATION runtime selected"
+                    if self.runtime_mode == "simulation"
                     else (
+                        f"Live board connected on {serial_status['port']}"
+                        if live_connected
+                        else (
                         f"Serial session is {serial_status.get('connection_state')} on {serial_status.get('port')}; not verified live"
                         if session_open
-                        else "SIM BACKED: connect a serial board on System before using controls for hardware"
+                        else "Hardware runtime selected; connect a serial board on System"
+                        )
                     )
                 ),
                 "phase": run_state.phase,
@@ -422,6 +469,14 @@ class WebRuntime:
                 "calibration": self.calibration_payload(),
                 "serial_board": serial_status,
             }
+
+    def set_runtime_mode(self, mode: str) -> dict[str, Any]:
+        normalized = mode.strip().lower()
+        if normalized not in {"hardware", "simulation"}:
+            raise ValueError("Runtime mode must be 'hardware' or 'simulation'")
+        with self.lock:
+            self.runtime_mode = normalized
+        return {"ok": True, "runtime_mode": normalized, "status": self.status()}
 
     def calibration_payload(self) -> dict[str, Any]:
         return self.calibration.to_json_dict()
@@ -493,20 +548,8 @@ class WebRuntime:
             }
 
     def control(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
-        if self.serial_board.status()["connected"] and action in {
-            "initialize",
-            "home",
-            "wait_idle",
-            "move_xy",
-            "jog_xy",
-            "move_camera_xy",
-            "move_z",
-            "jog_z",
-            "move_c",
-            "jog_c",
-            "jog_zc_interface",
-        }:
-            return self._hardware_serial_control(action, payload)
+        if self.runtime_mode == "hardware" and action in HARDWARE_CONTROL_ACTIONS:
+            return self._hardware_control(action, payload)
         if action == "initialize":
             return self.initialize_machine()
         if action == "home":
@@ -599,7 +642,6 @@ class WebRuntime:
         if action == "lights":
             status = str(payload.get("status", "idle"))
             self.orchestrator.lights.set_status(status)
-            self.serial_board.set_lights_status(status)
             return {"ok": True, "message": f"Lights set to {status}"}
         if action == "light_profile":
             profile_name = str(payload["name"])
@@ -609,6 +651,33 @@ class WebRuntime:
             self._apply_light_profile(profile_name, profile)
             return {"ok": True, "message": f"Applied light profile {profile_name}"}
         raise ValueError(f"Unsupported control action: {action}")
+
+    def _hardware_control(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+        serial_status = self.serial_board.status()
+        if action in {"vacuum_on", "vacuum_off"}:
+            raise ValueError("Vacuum hardware control is not wired yet; select Simulation runtime to use simulated vacuum")
+        if not serial_status["connected"]:
+            raise ValueError("Hardware runtime selected, but the serial board is not verified live")
+        if action in MOTION_CONTROL_ACTIONS:
+            return self._hardware_serial_control(action, payload)
+        if action == "lights":
+            status = str(payload.get("status", "idle"))
+            self.serial_board.set_lights_status(status)
+            self.orchestrator.lights.set_status(status)
+            return {"ok": True, "message": f"Live board lights set to {status}"}
+        if action == "light_profile":
+            profile_name = str(payload["name"])
+            profile = self.light_profiles.get(profile_name)
+            if profile is None:
+                raise ValueError(f"Unknown light profile: {profile_name}")
+            self.serial_board.set_lights_rgb(profile["red"], profile["green"], profile["blue"], profile_name=profile_name)
+            setter = getattr(self.orchestrator.lights, "set_rgb", None)
+            if callable(setter):
+                setter(profile["red"], profile["green"], profile["blue"], profile_name=profile_name)
+            else:
+                self.orchestrator.lights.set_status(profile_name)
+            return {"ok": True, "message": f"Applied live board light profile {profile_name}"}
+        raise ValueError(f"Unsupported hardware control action: {action}")
 
     def _hardware_serial_control(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         if action == "initialize":
@@ -728,10 +797,8 @@ class WebRuntime:
         setter = getattr(self.orchestrator.lights, "set_rgb", None)
         if callable(setter):
             setter(channels["red"], channels["green"], channels["blue"], profile_name=name)
-            self.serial_board.set_lights_rgb(channels["red"], channels["green"], channels["blue"], profile_name=name)
             return
         self.orchestrator.lights.set_status(name)
-        self.serial_board.set_lights_status(name)
 
     def validate_card(self, query: str) -> dict[str, Any]:
         normalized = query.strip().lower()
@@ -1060,6 +1127,18 @@ def create_web_app(
         if not payload.get("ok", False):
             status_code = 409
         return jsonify(payload), status_code
+
+    @app.get("/api/runtime")
+    def api_runtime():
+        return jsonify({"runtime_mode": runtime.runtime_mode, "status": runtime.status()})
+
+    @app.post("/api/runtime")
+    def api_runtime_update():
+        payload = request.get_json(silent=True) or {}
+        try:
+            return jsonify(runtime.set_runtime_mode(str(payload.get("mode", ""))))
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc), "status": runtime.status()}), 400
 
     @app.get("/api/serial/ports")
     def api_serial_ports():

@@ -5,22 +5,30 @@ const json = async (url, options = {}) => {
   return body;
 };
 const pretty = value => JSON.stringify(value, null, 2);
+const getTheme = () => localStorage.getItem("sorter-theme") || "dark";
+const setTheme = theme => {
+  const normalized = theme === "light" ? "light" : "dark";
+  localStorage.setItem("sorter-theme", normalized);
+  document.documentElement.dataset.theme = normalized;
+  return normalized;
+};
+setTheme(getTheme());
 const renderRuntimeBanner = status => {
   const banner = document.querySelector("#runtime-banner");
   if (!banner || !status) return;
   const live = status.runtime_target === "hardware_serial";
-  const sessionOpen = status.serial_board?.session_open;
+  const simulation = status.runtime_target === "simulation";
   banner.className = live ? "runtime-banner live" : "runtime-banner sim";
   banner.textContent = live
     ? `LIVE HARDWARE: ${status.serial_board?.port || "serial board"}`
-    : sessionOpen
-      ? `SERIAL ${status.serial_board?.connection_state || "unverified"}: not live`
-      : "SIM BACKED: connect serial on System";
+    : simulation
+      ? "SIMULATION"
+      : "HARDWARE NOT CONNECTED";
 };
 const refreshRuntimeBanner = async () => {
   try {
     let status = await json("/api/status");
-    if (status.serial_board?.session_open) {
+    if (status.runtime_mode === "hardware" && status.serial_board?.session_open && !status.serial_board?.busy) {
       try {
         await json("/api/serial/heartbeat", {method:"POST"});
         status = await json("/api/status");
@@ -34,6 +42,12 @@ const refreshRuntimeBanner = async () => {
 };
 refreshRuntimeBanner();
 setInterval(refreshRuntimeBanner, 2000);
+const isHardwareMode = status => status.runtime_mode === "hardware";
+const isSimulationMode = status => status.runtime_mode === "simulation";
+const isHardwareLive = status => status.runtime_target === "hardware_serial";
+const setButtonsDisabled = (root, selector, disabled) => {
+  root.querySelectorAll(selector).forEach(button => button.disabled = disabled);
+};
 
 window.SorterPages = {
   dashboard() {
@@ -78,6 +92,7 @@ window.SorterPages = {
   },
   machine() {
     const statusRoot = document.querySelector("#machine-status");
+    const runtimePill = document.querySelector("#machine-runtime-pill");
     const profileSelect = document.querySelector("#light-profile");
     const profileForm = document.querySelector("#light-profile-form");
     const calibrationForm = document.querySelector("#calibration-form");
@@ -93,7 +108,11 @@ window.SorterPages = {
       } : action === "light_profile" ? {
         name: profileSelect.value,
       } : {};
-      await json(`/api/control/${action}`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)});
+      try {
+        await json(`/api/control/${action}`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)});
+      } catch (error) {
+        statusRoot.innerHTML = `<article class="status-card"><div class="muted">Control error</div><strong>${error.message}</strong></article>`;
+      }
       refresh();
     });
     profileForm.onsubmit = async event => {
@@ -145,8 +164,19 @@ window.SorterPages = {
     async function refresh() {
       const status = await json("/api/status");
       renderRuntimeBanner(status);
+      const hardwareMode = isHardwareMode(status);
+      const hardwareLive = isHardwareLive(status);
+      runtimePill.textContent = hardwareLive ? "LIVE HARDWARE" : isSimulationMode(status) ? "SIMULATION" : "HARDWARE NOT CONNECTED";
+      runtimePill.className = hardwareLive ? "pill good-pill" : "pill warn-pill";
+      document.querySelectorAll("[data-control='lights'], [data-control='light_profile']").forEach(button => {
+        button.disabled = hardwareMode && !hardwareLive;
+      });
+      document.querySelectorAll("[data-control='vacuum_on'], [data-control='vacuum_off']").forEach(button => {
+        button.disabled = hardwareMode;
+      });
       const cards = [
         ["Lifecycle", status.lifecycle],
+        ["Runtime", status.runtime_message],
         ["Phase", status.phase],
         ["Active command", status.active_command || "—"],
         ["Initialized", status.machine_initialized ? "Yes" : "No"],
@@ -176,6 +206,13 @@ window.SorterPages = {
     const statusRoot = document.querySelector("#movement-status");
     const statePill = document.querySelector("#movement-state");
     const message = document.querySelector("#movement-message");
+    const endstopRefresh = document.querySelector("#endstop-refresh");
+    const endstopState = document.querySelector("#endstop-state");
+    const bltouchPill = document.querySelector("#bltouch-pill");
+    const bltouchMessage = document.querySelector("#bltouch-message");
+    const bltouchResponse = document.querySelector("#bltouch-response");
+    const bltouchProbe = document.querySelector("#bltouch-probe");
+    const bltouchState = document.querySelector("#bltouch-state");
     const controlPayload = action => {
       if (action === "move_xy" || action === "move_camera_xy") {
         return {
@@ -225,15 +262,72 @@ window.SorterPages = {
         sendControl("jog_zc_interface", {dz_mm: step});
       };
     });
+    function renderEndstops(endstops) {
+      const names = Object.keys(endstops).sort();
+      endstopState.innerHTML = names.length
+        ? names.map(name => {
+          const state = endstops[name];
+          const cls = state === "triggered" ? "warn-pill" : "good-pill";
+          return `<article class="status-card"><div class="muted">${name}</div><strong class="pill ${cls}">${state}</strong></article>`;
+        }).join("")
+        : `<article class="status-card"><div class="muted">M119</div><strong>No live endstop data</strong></article>`;
+    }
+    async function refreshEndstops() {
+      try {
+        const status = await json("/api/status");
+        if (!isHardwareLive(status)) {
+          renderEndstops(status.serial_board?.last_endstops || {});
+          bltouchPill.textContent = isSimulationMode(status) ? "Simulation" : "Unavailable";
+          bltouchPill.className = "pill warn-pill";
+          return;
+        }
+        const data = await json("/api/serial/endstops");
+        renderEndstops(data.endstops || {});
+        if (data.endstops?.z_probe) {
+          bltouchPill.textContent = `z_probe ${data.endstops.z_probe}`;
+          bltouchPill.className = data.endstops.z_probe === "triggered" ? "pill warn-pill" : "pill good-pill";
+        }
+      } catch (error) {
+        bltouchMessage.textContent = error.message;
+      }
+    }
+    async function sendBltouch(action) {
+      bltouchMessage.textContent = `Sending ${action.replace("_", " ")}...`;
+      try {
+        const result = await json(`/api/serial/bltouch/${action}`, {method:"POST"});
+        bltouchMessage.textContent = result.message || "";
+        bltouchResponse.textContent = result.response.join("\n");
+        if (action !== "probe") refreshEndstops();
+      } catch (error) {
+        bltouchMessage.textContent = error.message;
+      }
+    }
+    endstopRefresh.onclick = refreshEndstops;
+    document.querySelectorAll("[data-bltouch]").forEach(button => {
+      button.onclick = () => sendBltouch(button.dataset.bltouch);
+    });
+    bltouchProbe.onclick = () => {
+      if (confirm("Run single probe G30 at the current XY position?")) sendBltouch("probe");
+    };
+    bltouchState.onclick = refreshEndstops;
     async function refresh() {
       const status = await json("/api/status");
       renderRuntimeBanner(status);
-      statePill.textContent = status.lifecycle;
+      const hardwareMode = isHardwareMode(status);
+      const hardwareLive = isHardwareLive(status);
+      statePill.textContent = hardwareLive ? "LIVE HARDWARE" : isSimulationMode(status) ? "SIMULATION" : "HARDWARE NOT CONNECTED";
+      statePill.className = hardwareLive ? "pill good-pill" : "pill warn-pill";
+      setButtonsDisabled(document, "[data-control], [data-jog-axis], [data-paired-zc]", hardwareMode && !hardwareLive);
+      const hardwareOnlyDisabled = !hardwareLive;
+      endstopRefresh.disabled = hardwareOnlyDisabled;
+      bltouchProbe.disabled = hardwareOnlyDisabled;
+      bltouchState.disabled = hardwareOnlyDisabled;
+      document.querySelectorAll("[data-bltouch]").forEach(button => button.disabled = hardwareOnlyDisabled);
       const c = Number(status.pose.c_mm || 0);
       const z = Number(status.pose.z_mm || 0);
       statusRoot.innerHTML = [
         ["Initialized", status.machine_initialized ? "Yes" : "No"],
-        ["Runtime", status.runtime_target === "hardware_serial" ? "LIVE HARDWARE" : "SIM BACKED"],
+        ["Runtime", status.runtime_message],
         ["X", `${status.pose.x_mm.toFixed(2)} mm`],
         ["Y", `${status.pose.y_mm.toFixed(2)} mm`],
         ["Z", `${z.toFixed(2)} mm`],
@@ -243,8 +337,9 @@ window.SorterPages = {
         ["Min XY Z", `${status.calibration.min_xy_travel_z_mm.toFixed(2)} mm`],
         ["Command", status.active_command || "--"],
       ].map(([k,v]) => `<article class="status-card"><div class="muted">${k}</div><strong>${v}</strong></article>`).join("");
+      renderEndstops(status.serial_board?.last_endstops || {});
     }
-    refresh(); setInterval(refresh, 1200);
+    refresh(); setInterval(refresh, 1200); setInterval(refreshEndstops, 2500);
   },
   recognition() {
     const query = document.querySelector("#card-query");
@@ -294,6 +389,11 @@ window.SorterPages = {
     const raw = document.querySelector("#system-raw");
     const checkButton = document.querySelector("#check-update");
     const updateButton = document.querySelector("#apply-update");
+    const runtimeMode = document.querySelector("#runtime-mode");
+    const runtimeApply = document.querySelector("#runtime-apply");
+    const runtimeMessage = document.querySelector("#runtime-message");
+    const themeMode = document.querySelector("#theme-mode");
+    const themeApply = document.querySelector("#theme-apply");
     const serialPill = document.querySelector("#serial-pill");
     const serialPort = document.querySelector("#serial-port");
     const serialBaud = document.querySelector("#serial-baud");
@@ -304,13 +404,6 @@ window.SorterPages = {
     const serialForm = document.querySelector("#serial-command-form");
     const serialCommand = document.querySelector("#serial-command");
     const serialResponse = document.querySelector("#serial-response");
-    const endstopRefresh = document.querySelector("#endstop-refresh");
-    const endstopState = document.querySelector("#endstop-state");
-    const bltouchPill = document.querySelector("#bltouch-pill");
-    const bltouchMessage = document.querySelector("#bltouch-message");
-    const bltouchResponse = document.querySelector("#bltouch-response");
-    const bltouchProbe = document.querySelector("#bltouch-probe");
-    const bltouchState = document.querySelector("#bltouch-state");
     const render = data => {
       pill.textContent = data.update_available ? "Update available" : "Current";
       pill.className = data.update_available ? "pill warn-pill" : "pill good-pill";
@@ -327,6 +420,13 @@ window.SorterPages = {
       message.textContent = data.restart_required ? "Update applied. Restart required." : (data.message || "");
       raw.textContent = pretty(data);
     };
+    async function refreshRuntime() {
+      const data = await json("/api/runtime");
+      runtimeMode.value = data.runtime_mode;
+      themeMode.value = getTheme();
+      renderRuntimeBanner(data.status);
+      runtimeMessage.textContent = data.status.runtime_message;
+    }
     async function refresh(refreshRemote = false) {
       message.textContent = refreshRemote ? "Checking origin/main..." : "Loading system state...";
       render(await json(`/api/system${refreshRemote ? "?refresh=true" : ""}`));
@@ -342,6 +442,23 @@ window.SorterPages = {
         render(await json("/api/system"));
       }
     };
+    runtimeApply.onclick = async () => {
+      try {
+        const result = await json("/api/runtime", {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({mode: runtimeMode.value}),
+        });
+        runtimeMessage.textContent = result.status.runtime_message;
+        renderRuntimeBanner(result.status);
+      } catch (error) {
+        runtimeMessage.textContent = error.message;
+      }
+    };
+    themeApply.onclick = () => {
+      const selected = setTheme(themeMode.value);
+      runtimeMessage.textContent = `${selected[0].toUpperCase()}${selected.slice(1)} theme selected`;
+    };
     function renderSerial(data) {
       const status = data.status || data;
       serialPill.textContent = status.connected
@@ -350,8 +467,9 @@ window.SorterPages = {
           ? `${status.connection_state || "Unverified"} ${status.port || ""}`
           : "Disconnected";
       serialPill.className = status.connected ? "pill good-pill" : "pill warn-pill";
-      serialConnect.disabled = Boolean(status.session_open);
-      serialDisconnect.disabled = !status.session_open;
+      serialConnect.disabled = Boolean(status.session_open) || Boolean(status.busy);
+      serialDisconnect.disabled = !status.session_open || Boolean(status.busy);
+      serialForm.querySelector("button").disabled = !status.session_open || Boolean(status.busy);
       if (data.ports) {
         const selected = status.port || serialPort.value;
         serialPort.innerHTML = data.ports.length
@@ -362,46 +480,10 @@ window.SorterPages = {
       serialBaud.value = status.baud_rate || serialBaud.value || 115200;
       serialMessage.textContent = data.message || data.auto?.message || status.last_error || "";
       serialResponse.textContent = status.last_response?.length ? status.last_response.join("\n") : serialResponse.textContent;
-      renderEndstops(status.last_endstops || {});
-    }
-    function renderEndstops(endstops) {
-      const names = Object.keys(endstops).sort();
-      endstopState.innerHTML = names.length
-        ? names.map(name => {
-          const state = endstops[name];
-          const cls = state === "triggered" ? "warn-pill" : "good-pill";
-          return `<article class="status-card"><div class="muted">${name}</div><strong class="pill ${cls}">${state}</strong></article>`;
-        }).join("")
-        : `<article class="status-card"><div class="muted">M119</div><strong>No endstop data</strong></article>`;
     }
     async function refreshSerial(auto = false) {
       serialMessage.textContent = auto ? "Looking for controller..." : "Refreshing ports...";
       renderSerial(await json(`/api/serial/ports${auto ? "?auto=true" : ""}`));
-    }
-    async function refreshEndstops() {
-      try {
-        const data = await json("/api/serial/endstops");
-        renderSerial(data);
-        renderEndstops(data.endstops || {});
-        if (data.endstops?.z_probe) {
-          bltouchPill.textContent = `z_probe ${data.endstops.z_probe}`;
-          bltouchPill.className = data.endstops.z_probe === "triggered" ? "pill warn-pill" : "pill good-pill";
-        }
-      } catch (error) {
-        serialMessage.textContent = error.message;
-      }
-    }
-    async function sendBltouch(action) {
-      bltouchMessage.textContent = `Sending ${action.replace("_", " ")}...`;
-      try {
-        const result = await json(`/api/serial/bltouch/${action}`, {method:"POST"});
-        bltouchMessage.textContent = result.message || "";
-        bltouchResponse.textContent = result.response.join("\n");
-        renderSerial(result);
-        if (action !== "probe") refreshEndstops();
-      } catch (error) {
-        bltouchMessage.textContent = error.message;
-      }
     }
     serialRefresh.onclick = () => refreshSerial(false);
     serialConnect.onclick = async () => {
@@ -411,7 +493,7 @@ window.SorterPages = {
           headers:{"Content-Type":"application/json"},
           body:JSON.stringify({port: serialPort.value, baud_rate: Number(serialBaud.value || 115200)}),
         }));
-        refreshEndstops();
+        refreshRuntime();
       } catch (error) {
         serialMessage.textContent = error.message;
         refreshSerial(false);
@@ -419,6 +501,7 @@ window.SorterPages = {
     };
     serialDisconnect.onclick = async () => {
       renderSerial(await json("/api/serial/disconnect", {method:"POST"}));
+      refreshRuntime();
     };
     serialForm.onsubmit = async event => {
       event.preventDefault();
@@ -434,21 +517,13 @@ window.SorterPages = {
         serialMessage.textContent = error.message;
       }
     };
-    endstopRefresh.onclick = refreshEndstops;
-    document.querySelectorAll("[data-bltouch]").forEach(button => {
-      button.onclick = () => sendBltouch(button.dataset.bltouch);
-    });
-    bltouchProbe.onclick = () => {
-      if (confirm("Run single probe G30 at the current XY position?")) sendBltouch("probe");
-    };
-    bltouchState.onclick = refreshEndstops;
     refresh(true);
-    refreshSerial(true).then(refreshEndstops);
+    refreshRuntime();
+    refreshSerial(true);
     setInterval(async () => {
       try {
         const status = await json("/api/status");
         renderRuntimeBanner(status);
-        if (status.serial_board?.session_open) refreshEndstops();
       } catch (error) {
       }
     }, 2000);

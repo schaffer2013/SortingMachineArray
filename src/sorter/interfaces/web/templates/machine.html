@@ -3,8 +3,13 @@
 {% block content %}
 <section class="two-column">
   <article class="panel">
-    <p class="eyebrow">I/O control</p>
-    <h2>Vacuum and lights</h2>
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">I/O control</p>
+        <h2>Vacuum and lights</h2>
+      </div>
+      <span id="machine-runtime-pill" class="pill">Loading</span>
+    </div>
     <div class="button-row">
       <button data-control="vacuum_on">Vacuum on</button>
       <button class="secondary" data-control="vacuum_off">Vacuum off</button>

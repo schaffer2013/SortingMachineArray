@@ -84,6 +84,40 @@
   </article>
 </section>
 
+<section class="two-column">
+  <article class="panel">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">Endstops</p>
+        <h2>Live switch state</h2>
+      </div>
+      <button id="endstop-refresh" type="button" class="secondary">Read now</button>
+    </div>
+    <div id="endstop-state" class="status-cards"></div>
+  </article>
+  <article class="panel">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">BLTouch</p>
+        <h2>Probe controls</h2>
+      </div>
+      <span id="bltouch-pill" class="pill">Idle</span>
+    </div>
+    <div class="button-row">
+      <button type="button" data-bltouch="deploy">Deploy</button>
+      <button type="button" data-bltouch="stow" class="secondary">Stow</button>
+      <button type="button" data-bltouch="reset" class="secondary">Reset</button>
+      <button type="button" data-bltouch="self_test" class="secondary">Self-test</button>
+    </div>
+    <div class="button-row">
+      <button id="bltouch-probe" type="button">Single probe</button>
+      <button id="bltouch-state" type="button" class="secondary">Read probe state</button>
+    </div>
+    <p id="bltouch-message" class="muted"></p>
+    <pre id="bltouch-response" class="code-block"></pre>
+  </article>
+</section>
+
 <section class="panel">
   <p class="eyebrow">Machine setup</p>
   <h2>Homing and initialization</h2>

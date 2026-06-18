@@ -10,11 +10,12 @@ from sorter.interfaces.web import app as web_app_module
 from sorter.interfaces.web import create_web_app
 
 
-def _client():
+def _client(runtime_mode: str = "hardware"):
     settings = _sim_truth_settings()
     orchestrator = build_sim_orchestrator(settings)
     calibration = CalibrationProfile.from_file(settings.calibration_path)
     app = create_web_app(orchestrator, calibration)
+    app.config["runtime"].runtime_mode = runtime_mode
     app.testing = True
     return app.test_client()
 
@@ -37,6 +38,8 @@ def test_status_snapshot_and_capabilities_are_available():
     capabilities = client.get("/api/capabilities").get_json()
 
     assert status["lifecycle"] == "IDLE"
+    assert status["runtime_mode"] == "hardware"
+    assert status["runtime_target"] == "hardware_unavailable"
     assert status["machine_initialized"] is False
     assert "pose" in status
     assert snapshot["piles"]
@@ -57,6 +60,7 @@ def test_light_profiles_can_be_created_and_applied(tmp_path):
     orchestrator = build_sim_orchestrator(settings)
     calibration = CalibrationProfile.from_file(settings.calibration_path)
     app = create_web_app(orchestrator, calibration, light_profiles_path=tmp_path / "light_profiles.json")
+    app.config["runtime"].runtime_mode = "simulation"
     app.testing = True
     client = app.test_client()
 
@@ -81,6 +85,7 @@ def test_light_profile_is_sent_to_connected_serial_board(tmp_path):
     app.testing = True
     runtime = app.config["runtime"]
     runtime.serial_board = FakeSerialBoard()
+    runtime.serial_board.connect("COM8", 115200)
     client = app.test_client()
 
     client.post(
@@ -117,6 +122,57 @@ def test_serial_api_lists_connects_sends_and_disconnects():
     assert bltouch["bltouch_action"] == "deploy"
     assert bltouch["response"] == ["ok"]
     assert disconnect["connected"] is False
+
+
+def test_runtime_mode_defaults_to_hardware_and_can_select_simulation():
+    client = _client()
+
+    initial = client.get("/api/runtime").get_json()
+    update = client.post("/api/runtime", json={"mode": "simulation"}).get_json()
+
+    assert initial["runtime_mode"] == "hardware"
+    assert initial["status"]["runtime_target"] == "hardware_unavailable"
+    assert update["runtime_mode"] == "simulation"
+    assert update["status"]["runtime_target"] == "simulation"
+
+
+def test_hardware_controls_do_not_fall_back_to_sim_when_disconnected():
+    client = _client()
+
+    response = client.post("/api/control/jog_xy", json={"dx_mm": 5.0, "dy_mm": 0.0})
+    status = client.get("/api/status").get_json()
+
+    assert response.status_code == 400
+    assert "serial board is not verified live" in response.get_json()["message"]
+    assert status["pose"]["x_mm"] == 0.0
+    assert status["runtime_target"] == "hardware_unavailable"
+
+
+def test_explicit_simulation_runtime_enables_sim_controls():
+    client = _client()
+
+    client.post("/api/runtime", json={"mode": "simulation"})
+    response = client.post("/api/control/jog_xy", json={"dx_mm": 5.0, "dy_mm": 0.0})
+    status = client.get("/api/status").get_json()
+
+    assert response.status_code == 200
+    assert status["runtime_target"] == "simulation"
+    assert status["pose"]["x_mm"] == 5.0
+
+
+def test_hardware_panels_are_grouped_by_domain():
+    client = _client()
+
+    movement = client.get("/movement")
+    system = client.get("/system")
+
+    assert b'id="endstop-state"' in movement.data
+    assert b'id="bltouch-probe"' in movement.data
+    assert b'id="serial-command-form"' in system.data
+    assert b'id="runtime-mode"' in system.data
+    assert b'id="theme-mode"' in system.data
+    assert b'id="endstop-state"' not in system.data
+    assert b'id="bltouch-probe"' not in system.data
 
 
 def test_connected_serial_board_takes_over_movement_controls():
@@ -157,7 +213,7 @@ def test_serial_error_clears_live_connection(monkeypatch):
     assert response.status_code == 400
     assert status["serial_board"]["connected"] is False
     assert status["serial_board"]["session_open"] is False
-    assert status["runtime_target"] == "sim"
+    assert status["runtime_target"] == "hardware_unavailable"
 
 
 def test_status_reports_busy_without_waiting_on_serial_lock():
@@ -185,7 +241,7 @@ def test_active_navigation_tab_is_marked():
 
 
 def test_movement_jog_controls_update_pose():
-    client = _client()
+    client = _client("simulation")
 
     z_response = client.post("/api/control/jog_z", json={"dz_mm": 2.5})
     xy_response = client.post("/api/control/jog_xy", json={"dx_mm": 4.0, "dy_mm": -3.0})
@@ -199,7 +255,7 @@ def test_movement_jog_controls_update_pose():
 
 
 def test_c_axis_control_updates_pose():
-    client = _client()
+    client = _client("simulation")
 
     response = client.post("/api/control/move_c", json={"c_mm": 1.0})
     status = client.get("/api/status").get_json()
@@ -209,7 +265,7 @@ def test_c_axis_control_updates_pose():
 
 
 def test_paired_zc_interface_jog_keeps_end_effector_height_fixed():
-    client = _client()
+    client = _client("simulation")
 
     client.post("/api/control/move_z", json={"z_mm": 10.0})
     client.post("/api/control/move_c", json={"c_mm": 2.0})
@@ -269,6 +325,7 @@ def test_calibration_can_be_updated_from_web_app(tmp_path):
     calibration = CalibrationProfile.from_file(settings.calibration_path)
     calibration_path = tmp_path / "calibration.json"
     app = create_web_app(orchestrator, calibration, calibration_path=calibration_path)
+    app.config["runtime"].runtime_mode = "simulation"
     app.testing = True
     client = app.test_client()
 
@@ -317,6 +374,7 @@ def test_web_xy_control_blocks_when_vacuum_z_is_too_low():
     orchestrator = build_sim_orchestrator(settings)
     calibration = CalibrationProfile.from_file(settings.calibration_path).with_updates(min_xy_travel_z_mm=10.0)
     app = create_web_app(orchestrator, calibration)
+    app.config["runtime"].runtime_mode = "simulation"
     app.testing = True
     client = app.test_client()
 
@@ -338,6 +396,7 @@ def test_machine_initialization_is_explicit_web_control():
         c_home_mm=41.5,
     )
     app = create_web_app(orchestrator, calibration)
+    app.config["runtime"].runtime_mode = "simulation"
     app.testing = True
     client = app.test_client()
 
@@ -369,6 +428,7 @@ def test_web_home_sets_vertical_axes_to_configured_max():
         c_home_mm=41.5,
     )
     app = create_web_app(orchestrator, calibration)
+    app.config["runtime"].runtime_mode = "simulation"
     app.testing = True
     client = app.test_client()
 
@@ -405,6 +465,7 @@ class FakeSerialBoard:
             "connected": self.connected,
             "session_open": self.connected,
             "connection_state": self.connection_state,
+            "busy": False,
             "port": self.port,
             "baud_rate": self.baud_rate,
             "last_error": self.last_error,
