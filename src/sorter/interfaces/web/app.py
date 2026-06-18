@@ -793,17 +793,44 @@ class WebRuntime:
                 "blue": int(item["blue"]),
             }
             for item in raw.get("profiles", [])
+            if "pixels" not in item
         }
         return loaded or default_profiles
+
+    def _load_pixel_profiles(self) -> dict[str, list[list[int]]]:
+        if self.light_profiles_path is None or not self.light_profiles_path.exists():
+            return {}
+        with self.light_profiles_path.open("r", encoding="utf-8") as handle:
+            raw = json.load(handle)
+        profiles: dict[str, list[list[int]]] = {}
+        for item in raw.get("profiles", []):
+            if "name" not in item:
+                continue
+            pixels = item.get("pixels")
+            if not isinstance(pixels, list) or len(pixels) != 16:
+                continue
+            profile_name = str(item["name"])
+            profiles[profile_name] = [
+                [_clamp_channel(pixel[0]), _clamp_channel(pixel[1]), _clamp_channel(pixel[2])]
+                for pixel in pixels
+                if isinstance(pixel, list) and len(pixel) == 3
+            ]
+            if len(profiles[profile_name]) != 16:
+                profiles.pop(profile_name, None)
+        return profiles
 
     def _save_light_profiles(self) -> None:
         if self.light_profiles_path is None:
             return
         self.light_profiles_path.parent.mkdir(parents=True, exist_ok=True)
+        pixel_profiles = self._load_pixel_profiles()
         payload = {
             "profiles": [
                 {"name": name, **channels}
                 for name, channels in sorted(self.light_profiles.items())
+            ] + [
+                {"name": name, "pixels": pixels}
+                for name, pixels in sorted(pixel_profiles.items())
             ]
         }
         with self.light_profiles_path.open("w", encoding="utf-8") as handle:
@@ -825,6 +852,42 @@ class WebRuntime:
         self.light_profiles[normalized_name] = channels
         self._save_light_profiles()
         return {"name": normalized_name, **channels}
+
+    def list_pixel_profiles(self) -> list[dict[str, Any]]:
+        return [
+            {"name": name, "pixels": pixels}
+            for name, pixels in sorted(self._load_pixel_profiles().items())
+        ]
+
+    def create_pixel_profile(self, name: str, raw_pixels: list[Any]) -> dict[str, Any]:
+        normalized_name = name.strip().lower()
+        if not normalized_name:
+            raise ValueError("Profile name is required")
+        if not isinstance(raw_pixels, list) or len(raw_pixels) != 16:
+            raise ValueError("Pixel profile requires exactly 16 RGB triples")
+        pixels: list[list[int]] = []
+        for index, raw_pixel in enumerate(raw_pixels):
+            if not isinstance(raw_pixel, list) or len(raw_pixel) != 3:
+                raise ValueError(f"pixels[{index}] must be an RGB triple")
+            pixels.append([_clamp_channel(raw_pixel[0]), _clamp_channel(raw_pixel[1]), _clamp_channel(raw_pixel[2])])
+        pixel_profiles = self._load_pixel_profiles()
+        pixel_profiles[normalized_name] = pixels
+        if self.light_profiles_path is None:
+            return {"name": normalized_name, "pixels": pixels}
+        self.light_profiles_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "profiles": [
+                {"name": name, **channels}
+                for name, channels in sorted(self.light_profiles.items())
+            ] + [
+                {"name": profile_name, "pixels": profile_pixels}
+                for profile_name, profile_pixels in sorted(pixel_profiles.items())
+            ]
+        }
+        with self.light_profiles_path.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+            handle.write("\n")
+        return {"name": normalized_name, "pixels": pixels}
 
     def _apply_light_profile(self, name: str, channels: dict[str, int]) -> None:
         setter = getattr(self.orchestrator.lights, "set_rgb", None)
@@ -1244,6 +1307,19 @@ def create_web_app(
                 int(payload.get("green", 0)),
                 int(payload.get("blue", 0)),
             )
+            return jsonify({"ok": True, "profile": profile})
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
+
+    @app.get("/api/neopixel/profiles")
+    def api_neopixel_profiles():
+        return jsonify({"profiles": runtime.list_pixel_profiles()})
+
+    @app.post("/api/neopixel/profiles")
+    def api_create_neopixel_profile():
+        payload = request.get_json(silent=True) or {}
+        try:
+            profile = runtime.create_pixel_profile(str(payload.get("name", "")), payload.get("pixels"))
             return jsonify({"ok": True, "profile": profile})
         except Exception as exc:
             return jsonify({"ok": False, "message": str(exc)}), 400

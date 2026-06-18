@@ -208,6 +208,32 @@ def test_neopixel_pixel_display_rejects_without_live_hardware():
     assert "serial board is not verified live" in response.get_json()["message"]
 
 
+def test_neopixel_pixel_profiles_can_be_saved_and_listed(tmp_path):
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration, light_profiles_path=tmp_path / "light_profiles.json")
+    app.testing = True
+    client = app.test_client()
+    pixels = [[index, index + 1, index + 2] for index in range(16)]
+
+    solid_response = client.post(
+        "/api/light-profiles",
+        json={"name": "solid-blue", "red": 0, "green": 0, "blue": 32},
+    )
+    pixel_response = client.post(
+        "/api/neopixel/profiles",
+        json={"name": "chase", "pixels": pixels},
+    )
+    solid_profiles = client.get("/api/light-profiles").get_json()["profiles"]
+    pixel_profiles = client.get("/api/neopixel/profiles").get_json()["profiles"]
+
+    assert solid_response.status_code == 200
+    assert pixel_response.status_code == 200
+    assert any(profile["name"] == "solid-blue" for profile in solid_profiles)
+    assert pixel_profiles == [{"name": "chase", "pixels": pixels}]
+
+
 def test_connected_serial_board_takes_over_movement_controls():
     settings = _sim_truth_settings()
     orchestrator = build_sim_orchestrator(settings)
