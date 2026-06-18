@@ -73,6 +73,72 @@ def test_light_profiles_can_be_created_and_applied(tmp_path):
     assert status["lights_rgb"] == [1, 2, 42]
 
 
+def test_light_profile_is_sent_to_connected_serial_board(tmp_path):
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration, light_profiles_path=tmp_path / "light_profiles.json")
+    app.testing = True
+    runtime = app.config["runtime"]
+    runtime.serial_board = FakeSerialBoard()
+    client = app.test_client()
+
+    client.post(
+        "/api/light-profiles",
+        json={"name": "inspection-blue", "red": 1, "green": 2, "blue": 42},
+    )
+    response = client.post("/api/control/light_profile", json={"name": "inspection-blue"})
+
+    assert response.status_code == 200
+    assert runtime.serial_board.rgb_commands == [(1, 2, 42, "inspection-blue")]
+
+
+def test_serial_api_lists_connects_sends_and_disconnects():
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    runtime = app.config["runtime"]
+    runtime.serial_board = FakeSerialBoard()
+    client = app.test_client()
+
+    ports = client.get("/api/serial/ports?auto=true").get_json()
+    connect = client.post("/api/serial/connect", json={"port": "COM8", "baud_rate": 115200}).get_json()
+    send = client.post("/api/serial/send", json={"command": "M150 R0 U0 B32"}).get_json()
+    endstops = client.get("/api/serial/endstops").get_json()
+    bltouch = client.post("/api/serial/bltouch/deploy").get_json()
+    disconnect = client.post("/api/serial/disconnect").get_json()
+
+    assert ports["ports"][0]["device"] == "COM8"
+    assert connect["connected"] is True
+    assert send["response"] == ["ok"]
+    assert endstops["endstops"] == {"x_min": "open", "z_max": "triggered"}
+    assert bltouch["bltouch_action"] == "deploy"
+    assert bltouch["response"] == ["ok"]
+    assert disconnect["connected"] is False
+
+
+def test_connected_serial_board_takes_over_movement_controls():
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    runtime = app.config["runtime"]
+    runtime.serial_board = FakeSerialBoard()
+    runtime.serial_board.connect("COM8", 115200)
+    client = app.test_client()
+
+    response = client.post("/api/control/jog_xy", json={"dx_mm": 5.0, "dy_mm": 0.0})
+    status = client.get("/api/status").get_json()
+
+    assert response.status_code == 200
+    assert "G1 X5.000 Y0.000 F600" in runtime.serial_board.sent_commands
+    assert status["runtime_target"] == "hardware_serial"
+    assert status["pose"]["x_mm"] == 5.0
+
+
 def test_active_navigation_tab_is_marked():
     client = _client()
     response = client.get("/movement")
@@ -279,3 +345,96 @@ def test_web_home_sets_vertical_axes_to_configured_max():
 
 def _pose_coordinates(pose):
     return {key: pose[key] for key in ("x_mm", "y_mm", "z_mm")}
+
+
+class FakeSerialBoard:
+    def __init__(self):
+        self.connected = False
+        self.port = None
+        self.baud_rate = 115200
+        self.last_error = None
+        self.last_response = []
+        self.last_endstops = {}
+        self.live_pose = {}
+        self.sent_commands = []
+        self.rgb_commands = []
+
+    def status(self):
+        return {
+            "connected": self.connected,
+            "port": self.port,
+            "baud_rate": self.baud_rate,
+            "last_error": self.last_error,
+            "last_response": self.last_response,
+            "last_endstops": self.last_endstops,
+            "live_pose": self.live_pose,
+        }
+
+    def list_ports(self):
+        return [{"device": "COM8", "description": "USB Serial Device", "hwid": "USB"}]
+
+    def auto_connect(self):
+        return self.connect("COM8", self.baud_rate)
+
+    def connect(self, port, baud_rate=115200):
+        self.connected = True
+        self.port = port
+        self.baud_rate = baud_rate
+        self.last_response = ["FIRMWARE_NAME:test", "ok"]
+        return {"ok": True, "message": f"Connected to {port}", **self.status()}
+
+    def disconnect(self):
+        self.connected = False
+        self.port = None
+        return {"ok": True, "message": "Disconnected", **self.status()}
+
+    def send_command(self, command):
+        self.sent_commands.append(command)
+        if command == "M119":
+            self.last_response = ["Reporting endstop status", "x_min: open", "z_max: TRIGGERED", "ok"]
+        elif command == "M114":
+            self.last_response = [
+                f"X:{self.live_pose.get('x', 0):.2f} Y:{self.live_pose.get('y', 0):.2f} "
+                f"Z:{self.live_pose.get('z', 0):.2f} C:{self.live_pose.get('c', 0):.2f} Count X:400"
+            ]
+        else:
+            self.last_response = ["ok"]
+        return {"ok": True, "message": f"Sent {command}", "response": self.last_response, **self.status()}
+
+    def send_commands(self, commands, *, message):
+        responses = []
+        for command in commands:
+            if command.startswith("G1 "):
+                for token in command.split():
+                    if token.startswith("X"):
+                        self.live_pose["x"] = self.live_pose.get("x", 0.0) + float(token[1:])
+                    if token.startswith("Y"):
+                        self.live_pose["y"] = self.live_pose.get("y", 0.0) + float(token[1:])
+                    if token.startswith("Z"):
+                        self.live_pose["z"] = self.live_pose.get("z", 0.0) + float(token[1:])
+                    if token.startswith("C"):
+                        self.live_pose["c"] = self.live_pose.get("c", 0.0) + float(token[1:])
+            result = self.send_command(command)
+            responses.extend(result["response"])
+        return {"ok": True, "message": message, "response": responses, **self.status()}
+
+    def read_endstops(self):
+        self.send_command("M119")
+        self.last_endstops = {"x_min": "open", "z_max": "triggered"}
+        return {"ok": True, "message": "Read endstop states", "endstops": self.last_endstops, **self.status()}
+
+    def bltouch(self, action):
+        self.last_response = ["ok"]
+        return {
+            "ok": True,
+            "message": f"Sent {action}",
+            "response": self.last_response,
+            "bltouch_action": action,
+            **self.status(),
+        }
+
+    def set_lights_status(self, status):
+        self.last_response = [status]
+
+    def set_lights_rgb(self, red, green, blue, *, profile_name=None):
+        self.rgb_commands.append((red, green, blue, profile_name))

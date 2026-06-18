@@ -5,6 +5,23 @@ const json = async (url, options = {}) => {
   return body;
 };
 const pretty = value => JSON.stringify(value, null, 2);
+const renderRuntimeBanner = status => {
+  const banner = document.querySelector("#runtime-banner");
+  if (!banner || !status) return;
+  const live = status.runtime_target === "hardware_serial";
+  banner.className = live ? "runtime-banner live" : "runtime-banner sim";
+  banner.textContent = live
+    ? `LIVE HARDWARE: ${status.serial_board?.port || "serial board"}`
+    : "SIM BACKED: connect serial on System";
+};
+const refreshRuntimeBanner = async () => {
+  try {
+    renderRuntimeBanner(await json("/api/status"));
+  } catch (error) {
+  }
+};
+refreshRuntimeBanner();
+setInterval(refreshRuntimeBanner, 2000);
 
 window.SorterPages = {
   dashboard() {
@@ -18,6 +35,7 @@ window.SorterPages = {
     });
     async function refresh() {
       const [status, snapshot] = await Promise.all([json("/api/status"), json("/api/snapshot")]);
+      renderRuntimeBanner(status);
       pill.textContent = status.lifecycle;
       summary.innerHTML = [
         ["Phase", status.phase],
@@ -114,6 +132,7 @@ window.SorterPages = {
     }
     async function refresh() {
       const status = await json("/api/status");
+      renderRuntimeBanner(status);
       const cards = [
         ["Lifecycle", status.lifecycle],
         ["Phase", status.phase],
@@ -196,11 +215,13 @@ window.SorterPages = {
     });
     async function refresh() {
       const status = await json("/api/status");
+      renderRuntimeBanner(status);
       statePill.textContent = status.lifecycle;
       const c = Number(status.pose.c_mm || 0);
       const z = Number(status.pose.z_mm || 0);
       statusRoot.innerHTML = [
         ["Initialized", status.machine_initialized ? "Yes" : "No"],
+        ["Runtime", status.runtime_target === "hardware_serial" ? "LIVE HARDWARE" : "SIM BACKED"],
         ["X", `${status.pose.x_mm.toFixed(2)} mm`],
         ["Y", `${status.pose.y_mm.toFixed(2)} mm`],
         ["Z", `${z.toFixed(2)} mm`],
@@ -261,6 +282,23 @@ window.SorterPages = {
     const raw = document.querySelector("#system-raw");
     const checkButton = document.querySelector("#check-update");
     const updateButton = document.querySelector("#apply-update");
+    const serialPill = document.querySelector("#serial-pill");
+    const serialPort = document.querySelector("#serial-port");
+    const serialBaud = document.querySelector("#serial-baud");
+    const serialConnect = document.querySelector("#serial-connect");
+    const serialDisconnect = document.querySelector("#serial-disconnect");
+    const serialRefresh = document.querySelector("#serial-refresh");
+    const serialMessage = document.querySelector("#serial-message");
+    const serialForm = document.querySelector("#serial-command-form");
+    const serialCommand = document.querySelector("#serial-command");
+    const serialResponse = document.querySelector("#serial-response");
+    const endstopRefresh = document.querySelector("#endstop-refresh");
+    const endstopState = document.querySelector("#endstop-state");
+    const bltouchPill = document.querySelector("#bltouch-pill");
+    const bltouchMessage = document.querySelector("#bltouch-message");
+    const bltouchResponse = document.querySelector("#bltouch-response");
+    const bltouchProbe = document.querySelector("#bltouch-probe");
+    const bltouchState = document.querySelector("#bltouch-state");
     const render = data => {
       pill.textContent = data.update_available ? "Update available" : "Current";
       pill.className = data.update_available ? "pill warn-pill" : "pill good-pill";
@@ -292,7 +330,112 @@ window.SorterPages = {
         render(await json("/api/system"));
       }
     };
+    function renderSerial(data) {
+      const status = data.status || data;
+      serialPill.textContent = status.connected ? `Connected ${status.port}` : "Disconnected";
+      serialPill.className = status.connected ? "pill good-pill" : "pill warn-pill";
+      serialConnect.disabled = Boolean(status.connected);
+      serialDisconnect.disabled = !status.connected;
+      if (data.ports) {
+        const selected = status.port || serialPort.value;
+        serialPort.innerHTML = data.ports.length
+          ? data.ports.map(port => `<option value="${port.device}">${port.device} - ${port.description || "Serial port"}</option>`).join("")
+          : `<option value="">No ports found</option>`;
+        if (selected) serialPort.value = selected;
+      }
+      serialBaud.value = status.baud_rate || serialBaud.value || 115200;
+      serialMessage.textContent = data.message || data.auto?.message || status.last_error || "";
+      serialResponse.textContent = status.last_response?.length ? status.last_response.join("\n") : serialResponse.textContent;
+      renderEndstops(status.last_endstops || {});
+    }
+    function renderEndstops(endstops) {
+      const names = Object.keys(endstops).sort();
+      endstopState.innerHTML = names.length
+        ? names.map(name => {
+          const state = endstops[name];
+          const cls = state === "triggered" ? "warn-pill" : "good-pill";
+          return `<article class="status-card"><div class="muted">${name}</div><strong class="pill ${cls}">${state}</strong></article>`;
+        }).join("")
+        : `<article class="status-card"><div class="muted">M119</div><strong>No endstop data</strong></article>`;
+    }
+    async function refreshSerial(auto = false) {
+      serialMessage.textContent = auto ? "Looking for controller..." : "Refreshing ports...";
+      renderSerial(await json(`/api/serial/ports${auto ? "?auto=true" : ""}`));
+    }
+    async function refreshEndstops() {
+      try {
+        const data = await json("/api/serial/endstops");
+        renderSerial(data);
+        renderEndstops(data.endstops || {});
+        if (data.endstops?.z_probe) {
+          bltouchPill.textContent = `z_probe ${data.endstops.z_probe}`;
+          bltouchPill.className = data.endstops.z_probe === "triggered" ? "pill warn-pill" : "pill good-pill";
+        }
+      } catch (error) {
+        serialMessage.textContent = error.message;
+      }
+    }
+    async function sendBltouch(action) {
+      bltouchMessage.textContent = `Sending ${action.replace("_", " ")}...`;
+      try {
+        const result = await json(`/api/serial/bltouch/${action}`, {method:"POST"});
+        bltouchMessage.textContent = result.message || "";
+        bltouchResponse.textContent = result.response.join("\n");
+        renderSerial(result);
+        if (action !== "probe") refreshEndstops();
+      } catch (error) {
+        bltouchMessage.textContent = error.message;
+      }
+    }
+    serialRefresh.onclick = () => refreshSerial(false);
+    serialConnect.onclick = async () => {
+      try {
+        renderSerial(await json("/api/serial/connect", {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({port: serialPort.value, baud_rate: Number(serialBaud.value || 115200)}),
+        }));
+        refreshEndstops();
+      } catch (error) {
+        serialMessage.textContent = error.message;
+        refreshSerial(false);
+      }
+    };
+    serialDisconnect.onclick = async () => {
+      renderSerial(await json("/api/serial/disconnect", {method:"POST"}));
+    };
+    serialForm.onsubmit = async event => {
+      event.preventDefault();
+      try {
+        const result = await json("/api/serial/send", {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({command: serialCommand.value}),
+        });
+        serialResponse.textContent = result.response.join("\n");
+        renderSerial(result);
+      } catch (error) {
+        serialMessage.textContent = error.message;
+      }
+    };
+    endstopRefresh.onclick = refreshEndstops;
+    document.querySelectorAll("[data-bltouch]").forEach(button => {
+      button.onclick = () => sendBltouch(button.dataset.bltouch);
+    });
+    bltouchProbe.onclick = () => {
+      if (confirm("Run single probe G30 at the current XY position?")) sendBltouch("probe");
+    };
+    bltouchState.onclick = refreshEndstops;
     refresh(true);
+    refreshSerial(true).then(refreshEndstops);
+    setInterval(async () => {
+      try {
+        const status = await json("/api/status");
+        renderRuntimeBanner(status);
+        if (status.serial_board?.connected) refreshEndstops();
+      } catch (error) {
+      }
+    }, 2000);
   },
   about() {
     const root = document.querySelector("#capability-grid");

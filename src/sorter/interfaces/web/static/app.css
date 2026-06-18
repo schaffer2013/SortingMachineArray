@@ -23,6 +23,16 @@ body {
   padding: 24px 0 20px;
 }
 .topbar h1, h2 { margin: 0; }
+.runtime-banner {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-weight: 800;
+  max-width: 420px;
+  text-align: right;
+}
+.runtime-banner.live { background: rgba(52,211,153,.13); color: var(--good); border-color: rgba(52,211,153,.42); }
+.runtime-banner.sim { background: rgba(245,158,11,.14); color: var(--warn); border-color: rgba(245,158,11,.42); }
 .app-layout { display:grid; grid-template-columns: 180px minmax(0, 1fr); gap:18px; align-items:start; }
 .app-layout nav {
   position: sticky; top: 16px; display:grid; gap:8px; padding:10px;
