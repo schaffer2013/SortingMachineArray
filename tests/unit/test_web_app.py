@@ -234,6 +234,48 @@ def test_neopixel_pixel_profiles_can_be_saved_and_listed(tmp_path):
     assert pixel_profiles == [{"name": "chase", "pixels": pixels}]
 
 
+def test_neopixel_profile_options_include_solid_and_pixel_profiles(tmp_path):
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration, light_profiles_path=tmp_path / "light_profiles.json")
+    app.testing = True
+    client = app.test_client()
+    pixels = [[index, index + 1, index + 2] for index in range(16)]
+
+    client.post("/api/light-profiles", json={"name": "fault", "red": 16, "green": 0, "blue": 0})
+    client.post("/api/neopixel/profiles", json={"name": "mich", "pixels": pixels})
+
+    profiles = client.get("/api/neopixel/profile-options").get_json()["profiles"]
+
+    fault = next(profile for profile in profiles if profile["name"] == "fault")
+    mich = next(profile for profile in profiles if profile["name"] == "mich")
+    assert fault["kind"] == "solid"
+    assert fault["pixels"] == [[16, 0, 0] for _ in range(16)]
+    assert mich == {"name": "mich", "kind": "pixel", "pixels": pixels}
+
+
+def test_neopixel_profiles_can_be_deleted_by_kind(tmp_path):
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration, light_profiles_path=tmp_path / "light_profiles.json")
+    app.testing = True
+    client = app.test_client()
+    pixels = [[index, index + 1, index + 2] for index in range(16)]
+
+    client.post("/api/light-profiles", json={"name": "fault", "red": 16, "green": 0, "blue": 0})
+    client.post("/api/neopixel/profiles", json={"name": "mich", "pixels": pixels})
+    solid_delete = client.delete("/api/neopixel/profiles", json={"kind": "solid", "name": "fault"})
+    pixel_delete = client.delete("/api/neopixel/profiles", json={"kind": "pixel", "name": "mich"})
+
+    profiles = client.get("/api/neopixel/profile-options").get_json()["profiles"]
+
+    assert solid_delete.status_code == 200
+    assert pixel_delete.status_code == 200
+    assert all(profile["name"] not in {"fault", "mich"} for profile in profiles)
+
+
 def test_connected_serial_board_takes_over_movement_controls():
     settings = _sim_truth_settings()
     orchestrator = build_sim_orchestrator(settings)

@@ -853,11 +853,36 @@ class WebRuntime:
         self._save_light_profiles()
         return {"name": normalized_name, **channels}
 
+    def delete_light_profile(self, name: str) -> None:
+        normalized_name = name.strip().lower()
+        if normalized_name not in self.light_profiles:
+            raise ValueError(f"Unknown light profile: {normalized_name}")
+        self.light_profiles.pop(normalized_name)
+        self._save_light_profiles()
+
     def list_pixel_profiles(self) -> list[dict[str, Any]]:
         return [
             {"name": name, "pixels": pixels}
             for name, pixels in sorted(self._load_pixel_profiles().items())
         ]
+
+    def list_neopixel_profile_options(self) -> list[dict[str, Any]]:
+        solid_profiles = [
+            {
+                "name": name,
+                "kind": "solid",
+                "red": channels["red"],
+                "green": channels["green"],
+                "blue": channels["blue"],
+                "pixels": [[channels["red"], channels["green"], channels["blue"]] for _ in range(16)],
+            }
+            for name, channels in sorted(self.light_profiles.items())
+        ]
+        pixel_profiles = [
+            {"name": name, "kind": "pixel", "pixels": pixels}
+            for name, pixels in sorted(self._load_pixel_profiles().items())
+        ]
+        return solid_profiles + pixel_profiles
 
     def create_pixel_profile(self, name: str, raw_pixels: list[Any]) -> dict[str, Any]:
         normalized_name = name.strip().lower()
@@ -888,6 +913,37 @@ class WebRuntime:
             json.dump(payload, handle, indent=2)
             handle.write("\n")
         return {"name": normalized_name, "pixels": pixels}
+
+    def delete_pixel_profile(self, name: str) -> None:
+        normalized_name = name.strip().lower()
+        pixel_profiles = self._load_pixel_profiles()
+        if normalized_name not in pixel_profiles:
+            raise ValueError(f"Unknown pixel profile: {normalized_name}")
+        pixel_profiles.pop(normalized_name)
+        if self.light_profiles_path is None:
+            return
+        self.light_profiles_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "profiles": [
+                {"name": profile_name, **channels}
+                for profile_name, channels in sorted(self.light_profiles.items())
+            ] + [
+                {"name": profile_name, "pixels": profile_pixels}
+                for profile_name, profile_pixels in sorted(pixel_profiles.items())
+            ]
+        }
+        with self.light_profiles_path.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+            handle.write("\n")
+
+    def delete_neopixel_profile(self, kind: str, name: str) -> None:
+        if kind == "solid":
+            self.delete_light_profile(name)
+            return
+        if kind == "pixel":
+            self.delete_pixel_profile(name)
+            return
+        raise ValueError(f"Unknown profile kind: {kind}")
 
     def _apply_light_profile(self, name: str, channels: dict[str, int]) -> None:
         setter = getattr(self.orchestrator.lights, "set_rgb", None)
@@ -1315,12 +1371,25 @@ def create_web_app(
     def api_neopixel_profiles():
         return jsonify({"profiles": runtime.list_pixel_profiles()})
 
+    @app.get("/api/neopixel/profile-options")
+    def api_neopixel_profile_options():
+        return jsonify({"profiles": runtime.list_neopixel_profile_options()})
+
     @app.post("/api/neopixel/profiles")
     def api_create_neopixel_profile():
         payload = request.get_json(silent=True) or {}
         try:
             profile = runtime.create_pixel_profile(str(payload.get("name", "")), payload.get("pixels"))
             return jsonify({"ok": True, "profile": profile})
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
+
+    @app.delete("/api/neopixel/profiles")
+    def api_delete_neopixel_profile():
+        payload = request.get_json(silent=True) or {}
+        try:
+            runtime.delete_neopixel_profile(str(payload.get("kind", "")), str(payload.get("name", "")))
+            return jsonify({"ok": True})
         except Exception as exc:
             return jsonify({"ok": False, "message": str(exc)}), 400
 

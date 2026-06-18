@@ -119,15 +119,26 @@ window.SorterPages = {
     const pixelProfile = document.querySelector("#pixel-profile");
     const pixelProfileName = document.querySelector("#pixel-profile-name");
     const pixelLoadProfile = document.querySelector("#pixel-load-profile");
+    const pixelDeleteProfile = document.querySelector("#pixel-delete-profile");
     const pixelSaveProfile = document.querySelector("#pixel-save-profile");
     const pixelMessage = document.querySelector("#pixel-message");
     const pixels = Array.from({length: 16}, () => [0, 0, 32]);
-    let pixelProfiles = [];
+    let neopixelProfiles = [];
     let selectedPixel = 0;
     let selectedPixels = new Set([0]);
     let copiedPixel = [0, 0, 32];
     document.querySelectorAll("[data-control]").forEach(button => button.onclick = async () => {
       const action = button.dataset.control;
+      if (action === "light_profile") {
+        try {
+          await applySelectedLightProfile();
+        } catch (error) {
+          pixelMessage.textContent = error.message;
+          statusRoot.innerHTML = `<article class="status-card"><div class="muted">Control error</div><strong>${error.message}</strong></article>`;
+        }
+        refresh();
+        return;
+      }
       const payload = (action === "move_xy" || action === "move_camera_xy") ? {
         x_mm: document.querySelector("#move-x").value,
         y_mm: document.querySelector("#move-y").value,
@@ -186,17 +197,42 @@ window.SorterPages = {
       refresh();
     };
     async function loadProfiles() {
-      const data = await json("/api/light-profiles");
-      profileSelect.innerHTML = data.profiles
-        .map(profile => `<option value="${profile.name}">${profile.name} (${profile.red}, ${profile.green}, ${profile.blue})</option>`)
-        .join("");
+      const data = await json("/api/neopixel/profile-options");
+      neopixelProfiles = data.profiles || [];
+      const options = neopixelProfiles.length
+        ? neopixelProfiles.map(profile => `<option value="${profile.kind}:${profile.name}">${profileLabel(profile)}</option>`).join("")
+        : `<option value="">No profiles saved</option>`;
+      profileSelect.innerHTML = options;
+      pixelProfile.innerHTML = options;
     }
-    async function loadPixelProfiles() {
-      const data = await json("/api/neopixel/profiles");
-      pixelProfiles = data.profiles || [];
-      pixelProfile.innerHTML = pixelProfiles.length
-        ? pixelProfiles.map(profile => `<option value="${profile.name}">${profile.name}</option>`).join("")
-        : `<option value="">No pixel profiles saved</option>`;
+    function profileLabel(profile) {
+      if (profile.kind === "solid") {
+        return `${profile.name} - solid (${profile.red}, ${profile.green}, ${profile.blue})`;
+      }
+      return `${profile.name} - 16 pixels`;
+    }
+    function selectedProfile(select) {
+      const [kind, ...nameParts] = String(select.value || "").split(":");
+      const name = nameParts.join(":");
+      return neopixelProfiles.find(item => item.kind === kind && item.name === name);
+    }
+    async function applySelectedLightProfile() {
+      const profile = selectedProfile(profileSelect);
+      if (!profile) return;
+      if (profile.kind === "pixel") {
+        await json("/api/neopixel/display", {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({pixels: profile.pixels}),
+        });
+        pixelMessage.textContent = `Applied ${profile.name}`;
+        return;
+      }
+      await json("/api/control/light_profile", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({name: profile.name}),
+      });
     }
     function renderPixels() {
       pixelGrid.innerHTML = pixels.map((pixel, index) => `
@@ -291,9 +327,9 @@ window.SorterPages = {
       }
     };
     pixelLoadProfile.onclick = () => {
-      const profile = pixelProfiles.find(item => item.name === pixelProfile.value);
+      const profile = selectedProfile(pixelProfile);
       if (!profile) {
-        pixelMessage.textContent = "Choose a saved pixel profile";
+        pixelMessage.textContent = "Choose a saved profile";
         return;
       }
       profile.pixels.forEach((pixel, index) => pixels[index] = pixel.map(clampChannel));
@@ -302,6 +338,25 @@ window.SorterPages = {
       renderPixels();
       syncPixelInputs();
       pixelMessage.textContent = `Loaded ${profile.name}`;
+    };
+    pixelDeleteProfile.onclick = async () => {
+      const profile = selectedProfile(pixelProfile);
+      if (!profile) {
+        pixelMessage.textContent = "Choose a saved profile";
+        return;
+      }
+      if (!confirm(`Delete ${profile.name}?`)) return;
+      try {
+        await json("/api/neopixel/profiles", {
+          method:"DELETE",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({kind: profile.kind, name: profile.name}),
+        });
+        pixelMessage.textContent = `Deleted ${profile.name}`;
+        await loadProfiles();
+      } catch (error) {
+        pixelMessage.textContent = error.message;
+      }
     };
     pixelSaveProfile.onclick = async () => {
       try {
@@ -312,8 +367,9 @@ window.SorterPages = {
         });
         pixelMessage.textContent = `Saved ${result.profile.name}`;
         pixelProfileName.value = "";
-        await loadPixelProfiles();
-        pixelProfile.value = result.profile.name;
+        await loadProfiles();
+        pixelProfile.value = `pixel:${result.profile.name}`;
+        profileSelect.value = `pixel:${result.profile.name}`;
       } catch (error) {
         pixelMessage.textContent = error.message;
       }
@@ -358,7 +414,7 @@ window.SorterPages = {
       calibrationForm.elements.probe_enabled.checked = Boolean(status.calibration.probe_enabled);
       statusRoot.innerHTML = cards.map(([k,v]) => `<article class="status-card"><div class="muted">${k}</div><strong>${v}</strong></article>`).join("");
     }
-    renderPixels(); syncPixelInputs(); loadProfiles(); loadPixelProfiles(); refresh(); setInterval(refresh, 1200);
+    renderPixels(); syncPixelInputs(); loadProfiles(); refresh(); setInterval(refresh, 1200);
   },
   movement() {
     const statusRoot = document.querySelector("#movement-status");
