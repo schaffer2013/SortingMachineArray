@@ -132,6 +132,7 @@ input[type="checkbox"] { width:auto; justify-self:start; }
   color:var(--text); text-shadow:0 1px 3px rgba(0,0,0,.55); box-shadow: inset 0 0 0 2px rgba(255,255,255,.14);
 }
 .pixel-button.selected { outline:3px solid var(--accent); outline-offset:2px; }
+.pixel-button.primary { box-shadow: inset 0 0 0 3px var(--text), 0 0 0 2px var(--accent); }
 .checkbox-row { display:flex; gap:14px; flex-wrap:wrap; margin:12px 0; }
 .checkbox-row label { display:flex; gap:8px; align-items:center; margin:0; }
 .checkbox-row input { width:auto; }

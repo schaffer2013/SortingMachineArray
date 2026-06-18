@@ -119,6 +119,7 @@ window.SorterPages = {
     const pixelMessage = document.querySelector("#pixel-message");
     const pixels = Array.from({length: 16}, () => [0, 0, 32]);
     let selectedPixel = 0;
+    let selectedPixels = new Set([0]);
     let copiedPixel = [0, 0, 32];
     document.querySelectorAll("[data-control]").forEach(button => button.onclick = async () => {
       const action = button.dataset.control;
@@ -189,16 +190,17 @@ window.SorterPages = {
       pixelGrid.innerHTML = pixels.map((pixel, index) => `
         <button
           type="button"
-          class="pixel-button${index === selectedPixel ? " selected" : ""}"
+          class="pixel-button${selectedPixels.has(index) ? " selected" : ""}${index === selectedPixel ? " primary" : ""}"
           data-pixel-index="${index}"
           style="background:${rgbToHex(pixel)}; --angle:${index * 22.5}deg"
           title="LED ${index}">
           ${index}
         </button>`).join("");
       pixelGrid.querySelectorAll("[data-pixel-index]").forEach(button => {
-        button.onclick = () => selectPixel(Number(button.dataset.pixelIndex));
+        button.onclick = event => selectPixel(Number(button.dataset.pixelIndex), event);
       });
-      pixelEditorPill.textContent = `LED ${selectedPixel}`;
+      pixelEditorPill.textContent = selectedPixels.size === 1 ? `LED ${selectedPixel}` : `${selectedPixels.size} LEDs`;
+      pixelCopy.disabled = selectedPixels.size !== 1;
     }
     function syncPixelInputs() {
       const pixel = pixels[selectedPixel];
@@ -209,13 +211,23 @@ window.SorterPages = {
       pixelBlue.value = pixel[2];
       pixelCopyPreview.value = rgbToHex(copiedPixel);
     }
-    function selectPixel(index) {
+    function selectPixel(index, event = null) {
       selectedPixel = Math.max(0, Math.min(15, Number(index) || 0));
+      if (event?.ctrlKey || event?.metaKey || event?.shiftKey) {
+        if (selectedPixels.has(selectedPixel) && selectedPixels.size > 1) {
+          selectedPixels.delete(selectedPixel);
+        } else {
+          selectedPixels.add(selectedPixel);
+        }
+      } else {
+        selectedPixels = new Set([selectedPixel]);
+      }
       syncPixelInputs();
       renderPixels();
     }
     function setSelectedPixel(rgb) {
-      pixels[selectedPixel] = rgb.map(clampChannel);
+      const color = rgb.map(clampChannel);
+      selectedPixels.forEach(index => pixels[index] = [...color]);
       syncPixelInputs();
       renderPixels();
     }
@@ -225,13 +237,21 @@ window.SorterPages = {
       input.oninput = () => setSelectedPixel([pixelRed.value, pixelGreen.value, pixelBlue.value]);
     });
     pixelCopy.onclick = () => {
+      if (selectedPixels.size !== 1) {
+        pixelMessage.textContent = "Select exactly one LED to copy";
+        return;
+      }
       copiedPixel = [...pixels[selectedPixel]];
       syncPixelInputs();
       pixelMessage.textContent = `Copied LED ${selectedPixel}`;
     };
     pixelPaste.onclick = () => {
-      setSelectedPixel([...copiedPixel]);
-      pixelMessage.textContent = `Pasted to LED ${selectedPixel}`;
+      selectedPixels.forEach(index => pixels[index] = [...copiedPixel]);
+      syncPixelInputs();
+      renderPixels();
+      pixelMessage.textContent = selectedPixels.size === 1
+        ? `Pasted to LED ${selectedPixel}`
+        : `Pasted to ${selectedPixels.size} LEDs`;
     };
     pixelFill.onclick = () => {
       const color = [...pixels[selectedPixel]];
