@@ -170,22 +170,9 @@ window.SorterPages = {
   camera() {
     const feed = document.querySelector("#camera-live-feed");
     const refreshButton = document.querySelector("#camera-refresh");
-    const cropStage = document.querySelector("#camera-crop-stage");
-    const cropOverlay = document.querySelector("#camera-crop-overlay");
-    const cropToggle = document.querySelector("#camera-crop-toggle");
-    const cropPreview = document.querySelector("#camera-crop-preview");
-    const cropMeta = document.querySelector("#camera-crop-meta");
     const statusRoot = document.querySelector("#camera-move-status");
     const statePill = document.querySelector("#camera-move-state");
     const message = document.querySelector("#camera-move-message");
-    const cardAspect = 63 / 88;
-    const cropImage = new Image();
-    let cropEnabled = false;
-    let cropFrameLoading = false;
-    let cropPointer = null;
-    let cropFrame = {width: 0, height: 0};
-    let crop = {x: 0.28, y: 0.08, width: 0.44, height: 0.82};
-    const cropContext = cropPreview?.getContext("2d");
     const controlPayload = action => {
       if (action === "move_xy" || action === "move_camera_xy") {
         return {
@@ -197,187 +184,6 @@ window.SorterPages = {
       if (action === "move_c") return {c_mm: Number(document.querySelector("#camera-move-c").value)};
       return {};
     };
-      const visibleImageBounds = () => {
-        if (!cropStage || !feed) return null;
-        const stageRect = cropStage.getBoundingClientRect();
-        const feedRect = feed.getBoundingClientRect();
-        const imageWidth = cropFrame.width || feed.naturalWidth || feedRect.width;
-        const imageHeight = cropFrame.height || feed.naturalHeight || feedRect.height;
-        if (!imageWidth || !imageHeight || !feedRect.width || !feedRect.height) return null;
-        const imageAspect = imageWidth / imageHeight;
-        const feedAspect = feedRect.width / feedRect.height;
-        let width = feedRect.width;
-        let height = feedRect.height;
-        let left = feedRect.left - stageRect.left;
-        let top = feedRect.top - stageRect.top;
-        if (feedAspect > imageAspect) {
-          width = height * imageAspect;
-          left += (feedRect.width - width) / 2;
-        } else {
-          height = width / imageAspect;
-          top += (feedRect.height - height) / 2;
-        }
-        return {left, top, width, height, imageWidth, imageHeight};
-      };
-      const normalizeCrop = nextCrop => {
-        const bounds = visibleImageBounds();
-        const imageAspect = bounds ? bounds.imageWidth / bounds.imageHeight : 4 / 3;
-        let height = Number(nextCrop.height) || 0.6;
-        let width = height * cardAspect / imageAspect;
-        if (nextCrop.width) {
-          width = Number(nextCrop.width);
-          height = width * imageAspect / cardAspect;
-        }
-        const minWidth = 0.08;
-        const minHeight = minWidth * imageAspect / cardAspect;
-        if (width < minWidth) {
-          width = minWidth;
-          height = minHeight;
-        }
-        if (width > 0.96) {
-          width = 0.96;
-          height = width * imageAspect / cardAspect;
-        }
-        if (height > 0.96) {
-          height = 0.96;
-          width = height * cardAspect / imageAspect;
-        }
-        const x = Math.max(0, Math.min(1 - width, Number(nextCrop.x) || 0));
-        const y = Math.max(0, Math.min(1 - height, Number(nextCrop.y) || 0));
-        return {x, y, width, height};
-      };
-      const initializeCrop = () => {
-        const bounds = visibleImageBounds();
-        const imageAspect = bounds ? bounds.imageWidth / bounds.imageHeight : 4 / 3;
-        const height = 0.82;
-        const width = Math.min(0.82, height * cardAspect / imageAspect);
-        crop = normalizeCrop({x: (1 - width) / 2, y: (1 - height) / 2, width});
-      };
-      const renderCropOverlay = () => {
-        if (!cropOverlay) return;
-        const bounds = visibleImageBounds();
-        if (!cropEnabled || !bounds) {
-          cropOverlay.hidden = true;
-          return;
-        }
-        cropOverlay.hidden = false;
-        crop = normalizeCrop(crop);
-        cropOverlay.style.left = `${bounds.left + crop.x * bounds.width}px`;
-        cropOverlay.style.top = `${bounds.top + crop.y * bounds.height}px`;
-        cropOverlay.style.width = `${crop.width * bounds.width}px`;
-        cropOverlay.style.height = `${crop.height * bounds.height}px`;
-      };
-      const pointerToCropPoint = event => {
-        const bounds = visibleImageBounds();
-        if (!bounds) return null;
-        const stageRect = cropStage.getBoundingClientRect();
-        const x = Math.max(0, Math.min(1, (event.clientX - stageRect.left - bounds.left) / bounds.width));
-        const y = Math.max(0, Math.min(1, (event.clientY - stageRect.top - bounds.top) / bounds.height));
-        return {x, y, bounds};
-      };
-      const updateCropPreview = () => {
-        if (!cropContext || !cropPreview) return;
-        cropContext.clearRect(0, 0, cropPreview.width, cropPreview.height);
-        if (!cropEnabled) {
-          cropMeta.textContent = "Overlay hidden";
-          return;
-        }
-        if (!cropImage.complete || !cropFrame.width || !cropFrame.height) {
-          cropMeta.textContent = "Loading camera frame";
-          return;
-        }
-        const sourceX = Math.round(crop.x * cropFrame.width);
-        const sourceY = Math.round(crop.y * cropFrame.height);
-        const sourceWidth = Math.round(crop.width * cropFrame.width);
-        const sourceHeight = Math.round(crop.height * cropFrame.height);
-        cropContext.drawImage(cropImage, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, cropPreview.width, cropPreview.height);
-        cropMeta.textContent = `${sourceWidth} x ${sourceHeight} px -> ${cropPreview.width} x ${cropPreview.height}`;
-      };
-      const refreshCropFrame = () => {
-        if (!cropEnabled || cropFrameLoading) return;
-        cropFrameLoading = true;
-        cropImage.src = `/api/camera/frame.jpg?t=${Date.now()}`;
-      };
-      cropImage.onload = () => {
-        cropFrameLoading = false;
-        cropFrame = {width: cropImage.naturalWidth, height: cropImage.naturalHeight};
-        if (!crop.width || !crop.height) initializeCrop();
-        renderCropOverlay();
-        updateCropPreview();
-      };
-      cropImage.onerror = () => {
-        cropFrameLoading = false;
-        if (cropEnabled) cropMeta.textContent = "Camera frame unavailable";
-      };
-      cropToggle.onclick = () => {
-        cropEnabled = !cropEnabled;
-        cropToggle.textContent = cropEnabled ? "Hide" : "Show";
-        cropToggle.setAttribute("aria-pressed", String(cropEnabled));
-        if (cropEnabled) {
-          initializeCrop();
-          refreshCropFrame();
-        }
-        renderCropOverlay();
-        updateCropPreview();
-      };
-      cropOverlay?.addEventListener("pointerdown", event => {
-        if (!cropEnabled) return;
-        const point = pointerToCropPoint(event);
-        if (!point) return;
-        cropPointer = {
-          id: event.pointerId,
-          mode: event.target.dataset.cropHandle ? "resize" : "drag",
-          handle: event.target.dataset.cropHandle || null,
-          startPoint: point,
-          startCrop: {...crop},
-        };
-        cropOverlay.setPointerCapture(event.pointerId);
-      });
-      cropOverlay?.addEventListener("pointermove", event => {
-        if (!cropPointer || cropPointer.id !== event.pointerId) return;
-        const point = pointerToCropPoint(event);
-        if (!point) return;
-        if (cropPointer.mode === "drag") {
-          const dx = point.x - cropPointer.startPoint.x;
-          const dy = point.y - cropPointer.startPoint.y;
-          crop = normalizeCrop({
-            ...cropPointer.startCrop,
-            x: cropPointer.startCrop.x + dx,
-            y: cropPointer.startCrop.y + dy,
-          });
-        } else {
-          const imageAspect = point.bounds.imageWidth / point.bounds.imageHeight;
-          const anchorX = cropPointer.handle.includes("w")
-            ? cropPointer.startCrop.x + cropPointer.startCrop.width
-            : cropPointer.startCrop.x;
-          const anchorY = cropPointer.handle.includes("n")
-            ? cropPointer.startCrop.y + cropPointer.startCrop.height
-            : cropPointer.startCrop.y;
-          const pixelWidth = Math.max(
-            Math.abs(point.x - anchorX) * point.bounds.imageWidth,
-            Math.abs(point.y - anchorY) * point.bounds.imageHeight * cardAspect,
-          );
-          const width = pixelWidth / point.bounds.imageWidth;
-          const height = width * imageAspect / cardAspect;
-          crop = normalizeCrop({
-            x: cropPointer.handle.includes("w") ? anchorX - width : anchorX,
-            y: cropPointer.handle.includes("n") ? anchorY - height : anchorY,
-            width,
-          });
-        }
-        renderCropOverlay();
-        updateCropPreview();
-      });
-      cropOverlay?.addEventListener("pointerup", event => {
-        if (cropPointer?.id === event.pointerId) cropPointer = null;
-      });
-      cropOverlay?.addEventListener("pointercancel", event => {
-        if (cropPointer?.id === event.pointerId) cropPointer = null;
-      });
-      window.addEventListener("resize", () => {
-        renderCropOverlay();
-        updateCropPreview();
-      });
     async function sendControl(action, payload = controlPayload(action), sourceButton = null) {
       if (sourceButton) sourceButton.disabled = true;
       message.textContent = `Sending ${action.replaceAll("_", " ")}...`;
@@ -397,7 +203,6 @@ window.SorterPages = {
     }
     refreshButton.onclick = () => {
       feed.src = `/camera/stream?t=${Date.now()}`;
-      refreshCropFrame();
     };
     document.querySelectorAll("[data-camera-control]").forEach(button => {
       button.onclick = () => sendControl(button.dataset.cameraControl, controlPayload(button.dataset.cameraControl), button);
@@ -441,7 +246,6 @@ window.SorterPages = {
       ].map(([k,v]) => `<article class="status-card"><div class="muted">${k}</div><strong>${v}</strong></article>`).join("");
     }
     refresh(); setInterval(refresh, 1200);
-    setInterval(refreshCropFrame, 1000);
   },
   dashboard() {
     const summary = document.querySelector("#status-summary");
