@@ -75,6 +75,26 @@
     <pre id="serial-response" class="code-block"></pre>
   </article>
 </section>
+<details class="panel serial-log-panel">
+  <summary class="panel-heading">
+    <div>
+      <p class="eyebrow">Serial audit</p>
+      <h2>Requested commands</h2>
+    </div>
+    <span class="pill">Last 500 lines</span>
+  </summary>
+  <div id="serial-command-log" class="serial-command-log"></div>
+</details>
+<details class="panel serial-log-panel">
+  <summary class="panel-heading">
+    <div>
+      <p class="eyebrow">Serial audit</p>
+      <h2>Status polls</h2>
+    </div>
+    <span class="pill">Last 500 lines</span>
+  </summary>
+  <div id="serial-poll-log" class="serial-command-log"></div>
+</details>
 {% endblock %}
 {% block scripts %}
 <script>window.SorterPages.system();</script>

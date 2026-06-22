@@ -159,6 +159,24 @@ input[type="checkbox"] { width:auto; justify-self:start; }
 .code-block {
   margin:0; overflow:auto; white-space:pre-wrap; background:var(--code-bg); border-radius:16px; padding:16px; border:1px solid var(--line);
 }
+.serial-log-panel summary.panel-heading { cursor:pointer; margin:0; list-style:none; }
+.serial-log-panel summary.panel-heading::-webkit-details-marker { display:none; }
+.serial-command-log { display:grid; gap:8px; margin-top:14px; }
+.serial-log-page { display:grid; gap:8px; }
+.serial-log-pager {
+  display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-bottom:8px;
+}
+.serial-log-entry {
+  background:var(--panel-soft); border:1px solid var(--line); border-radius:12px; overflow:hidden;
+}
+.serial-log-entry summary {
+  display:grid; grid-template-columns:auto auto minmax(0,1fr) auto; gap:10px; align-items:center; cursor:pointer; padding:10px 12px;
+}
+.serial-log-entry code { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.serial-command-title { justify-self:end; color:var(--muted); text-align:right; }
+.serial-log-entry pre {
+  margin:0; overflow:auto; white-space:pre-wrap; background:var(--code-bg); border-top:1px solid var(--line); padding:12px;
+}
 .table-wrap { overflow:auto; }
 table { width:100%; border-collapse:collapse; min-width: 720px; }
 th, td { text-align:left; border-bottom:1px solid var(--line); padding:12px 10px; }

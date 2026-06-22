@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Sorter Console{% endblock %}</title>
     <script>
-      document.documentElement.dataset.theme = localStorage.getItem("sorter-theme") || "dark";
+      document.documentElement.dataset.theme = localStorage.getItem("sorter-theme") || "light";
     </script>
     <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
   </head>

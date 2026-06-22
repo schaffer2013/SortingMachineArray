@@ -5,7 +5,14 @@ const json = async (url, options = {}) => {
   return body;
 };
 const pretty = value => JSON.stringify(value, null, 2);
-const getTheme = () => localStorage.getItem("sorter-theme") || "dark";
+const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, character => ({
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  "\"": "&quot;",
+  "'": "&#39;",
+}[character]));
+const getTheme = () => localStorage.getItem("sorter-theme") || "light";
 const setTheme = theme => {
   const normalized = theme === "light" ? "light" : "dark";
   localStorage.setItem("sorter-theme", normalized);
@@ -54,6 +61,98 @@ const rgbToHex = ([red, green, blue]) =>
 const hexToRgb = hex => {
   const clean = String(hex || "#000000").replace("#", "").padEnd(6, "0").slice(0, 6);
   return [0, 2, 4].map(offset => parseInt(clean.slice(offset, offset + 2), 16) || 0);
+};
+const GCODE_COMMAND_TITLES = {
+  G0: "Linear Move",
+  G1: "Linear Move",
+  G2: "Arc or Circle Move",
+  G3: "Arc or Circle Move",
+  G4: "Dwell",
+  G10: "Retract",
+  G11: "Recover",
+  G20: "Inch Units",
+  G21: "Millimeter Units",
+  G28: "Auto Home",
+  G29: "Bed Leveling",
+  G30: "Single Z-Probe",
+  G90: "Absolute Positioning",
+  G91: "Relative Positioning",
+  G92: "Set Position",
+  M17: "Enable Steppers",
+  M18: "Disable steppers",
+  M84: "Disable steppers",
+  M92: "Set Axis Steps-per-unit",
+  M111: "Debug Level",
+  M112: "Full Shutdown",
+  M114: "Get Current Position",
+  M115: "Firmware Info",
+  M118: "Serial print",
+  M119: "Endstop States",
+  M120: "Enable Endstops",
+  M121: "Disable Endstops",
+  M122: "TMC Debugging",
+  M150: "Set RGB(W) Color",
+  M211: "Software Endstops",
+  M280: "Servo Position",
+  M400: "Finish Moves",
+  M401: "Deploy Probe",
+  M402: "Stow Probe",
+  M410: "Quickstop",
+  M500: "Save Settings",
+  M501: "Restore Settings",
+  M502: "Factory Reset",
+  M503: "Report Settings",
+  M906: "Stepper Motor Current",
+  M914: "TMC Bump Sensitivity",
+  M999: "STOP Restart",
+};
+const commandTitle = command => {
+  const code = String(command || "").trim().split(/\s+/)[0]?.toUpperCase();
+  return GCODE_COMMAND_TITLES[code] || "";
+};
+const SERIAL_LOG_PAGE_SIZE = 25;
+const serialLogPages = {command: 0, poll: 0};
+const renderSerialLog = (root, entries, emptyText, logKey) => {
+  const newestFirst = [...entries].reverse();
+  const totalPages = Math.max(1, Math.ceil(newestFirst.length / SERIAL_LOG_PAGE_SIZE));
+  serialLogPages[logKey] = Math.min(serialLogPages[logKey] || 0, totalPages - 1);
+  const pageIndex = serialLogPages[logKey];
+  const pageEntries = newestFirst.slice(
+    pageIndex * SERIAL_LOG_PAGE_SIZE,
+    (pageIndex + 1) * SERIAL_LOG_PAGE_SIZE,
+  );
+  const rows = pageEntries.map(entry => {
+        const response = entry.response?.length ? entry.response.join("\n") : "(no immediate response)";
+        const error = entry.error ? `\nERROR: ${entry.error}` : "";
+        const title = commandTitle(entry.command);
+        return `
+          <details class="serial-log-entry">
+            <summary>
+              <span>${escapeHtml(entry.sent_at)}</span>
+              <strong class="${entry.ok ? "status-ready" : "status-partial"}">${entry.ok ? "OK" : "ERR"}</strong>
+              <code>${escapeHtml(entry.command)}</code>
+              <span class="serial-command-title">${escapeHtml(title)}</span>
+            </summary>
+            <pre>${escapeHtml(`${response}${error}`)}</pre>
+          </details>
+        `;
+      }).join("");
+  root.innerHTML = entries.length
+    ? `
+        <div class="serial-log-pager">
+          <button class="secondary" type="button" data-serial-log="${logKey}" data-page-delta="-1" ${pageIndex === 0 ? "disabled" : ""}>Previous</button>
+          <span class="muted">Page ${pageIndex + 1} of ${totalPages}</span>
+          <button class="secondary" type="button" data-serial-log="${logKey}" data-page-delta="1" ${pageIndex >= totalPages - 1 ? "disabled" : ""}>Next</button>
+        </div>
+        <div class="serial-log-page">${rows}</div>
+      `
+    : `<p class="muted">${escapeHtml(emptyText)}</p>`;
+  root.querySelectorAll("[data-page-delta]").forEach(button => {
+    button.onclick = () => {
+      serialLogPages[logKey] = Math.max(0, Math.min(totalPages - 1, pageIndex + Number(button.dataset.pageDelta)));
+      renderSerialLog(root, entries, emptyText, logKey);
+    };
+  });
 };
 
 window.SorterPages = {
@@ -438,7 +537,9 @@ window.SorterPages = {
       if (action === "move_c") return {c_mm: Number(document.querySelector("#movement-c").value)};
       return {};
     };
-    async function sendControl(action, payload = controlPayload(action)) {
+    async function sendControl(action, payload = controlPayload(action), sourceButton = null) {
+      if (sourceButton) sourceButton.disabled = true;
+      message.textContent = `Sending ${action.replaceAll("_", " ")}...`;
       try {
         const result = await json(`/api/control/${action}`, {
           method:"POST",
@@ -448,11 +549,13 @@ window.SorterPages = {
         message.textContent = result.message || "";
       } catch (error) {
         message.textContent = error.message;
+      } finally {
+        if (sourceButton) sourceButton.disabled = false;
+        refresh();
       }
-      refresh();
     }
     document.querySelectorAll("[data-control]").forEach(button => {
-      button.onclick = () => sendControl(button.dataset.control);
+      button.onclick = () => sendControl(button.dataset.control, controlPayload(button.dataset.control), button);
     });
     document.querySelectorAll("[data-jog-axis]").forEach(button => {
       button.onclick = () => {
@@ -460,20 +563,20 @@ window.SorterPages = {
         const sign = Number(button.dataset.jogSign);
         if (axis === "x" || axis === "y") {
           const step = Number(document.querySelector("#xy-step").value) * sign;
-          sendControl("jog_xy", axis === "x" ? {dx_mm: step, dy_mm: 0} : {dx_mm: 0, dy_mm: step});
+          sendControl("jog_xy", axis === "x" ? {dx_mm: step, dy_mm: 0} : {dx_mm: 0, dy_mm: step}, button);
         } else if (axis === "z") {
           const step = Number(document.querySelector("#z-step").value) * sign;
-          sendControl("jog_z", {dz_mm: step});
+          sendControl("jog_z", {dz_mm: step}, button);
         } else if (axis === "c") {
           const step = Number(document.querySelector("#c-step").value) * sign;
-          sendControl("jog_c", {dc_mm: step});
+          sendControl("jog_c", {dc_mm: step}, button);
         }
       };
     });
     document.querySelectorAll("[data-paired-zc]").forEach(button => {
       button.onclick = () => {
         const step = Number(document.querySelector("#zc-step").value) * Number(button.dataset.pairedZc);
-        sendControl("jog_zc_interface", {dz_mm: step});
+        sendControl("jog_zc_interface", {dz_mm: step}, button);
       };
     });
     function renderEndstops(endstops) {
@@ -486,7 +589,7 @@ window.SorterPages = {
         }).join("")
         : `<article class="status-card"><div class="muted">M119</div><strong>No live endstop data</strong></article>`;
     }
-    async function refreshEndstops() {
+    async function refreshEndstops(auto = false) {
       try {
         const status = await json("/api/status");
         if (!isHardwareLive(status)) {
@@ -495,14 +598,14 @@ window.SorterPages = {
           bltouchPill.className = "pill warn-pill";
           return;
         }
-        const data = await json("/api/serial/endstops");
+        const data = await json(`/api/serial/endstops${auto ? "?poll=true" : ""}`);
         renderEndstops(data.endstops || {});
         if (data.endstops?.z_probe) {
           bltouchPill.textContent = `z_probe ${data.endstops.z_probe}`;
           bltouchPill.className = data.endstops.z_probe === "triggered" ? "pill warn-pill" : "pill good-pill";
         }
       } catch (error) {
-        bltouchMessage.textContent = error.message;
+        if (!auto) bltouchMessage.textContent = error.message;
       }
     }
     async function sendBltouch(action) {
@@ -516,14 +619,14 @@ window.SorterPages = {
         bltouchMessage.textContent = error.message;
       }
     }
-    endstopRefresh.onclick = refreshEndstops;
+    endstopRefresh.onclick = () => refreshEndstops(false);
     document.querySelectorAll("[data-bltouch]").forEach(button => {
       button.onclick = () => sendBltouch(button.dataset.bltouch);
     });
     bltouchProbe.onclick = () => {
       if (confirm("Run single probe G30 at the current XY position?")) sendBltouch("probe");
     };
-    bltouchState.onclick = refreshEndstops;
+    bltouchState.onclick = () => refreshEndstops(false);
     async function refresh() {
       const status = await json("/api/status");
       renderRuntimeBanner(status);
@@ -553,7 +656,7 @@ window.SorterPages = {
       ].map(([k,v]) => `<article class="status-card"><div class="muted">${k}</div><strong>${v}</strong></article>`).join("");
       renderEndstops(status.serial_board?.last_endstops || {});
     }
-    refresh(); setInterval(refresh, 1200); setInterval(refreshEndstops, 2500);
+    refresh(); setInterval(refresh, 1200); setInterval(() => refreshEndstops(true), 2500);
   },
   recognition() {
     const query = document.querySelector("#card-query");
@@ -618,6 +721,8 @@ window.SorterPages = {
     const serialForm = document.querySelector("#serial-command-form");
     const serialCommand = document.querySelector("#serial-command");
     const serialResponse = document.querySelector("#serial-response");
+    const serialCommandLog = document.querySelector("#serial-command-log");
+    const serialPollLog = document.querySelector("#serial-poll-log");
     const render = data => {
       pill.textContent = data.update_available ? "Update available" : "Current";
       pill.className = data.update_available ? "pill warn-pill" : "pill good-pill";
@@ -694,6 +799,8 @@ window.SorterPages = {
       serialBaud.value = status.baud_rate || serialBaud.value || 115200;
       serialMessage.textContent = data.message || data.auto?.message || status.last_error || "";
       serialResponse.textContent = status.last_response?.length ? status.last_response.join("\n") : serialResponse.textContent;
+      renderSerialLog(serialCommandLog, status.serial_command_log || [], "No requested serial commands sent in this session.", "command");
+      renderSerialLog(serialPollLog, status.serial_poll_log || [], "No serial status polls sent in this session.", "poll");
     }
     async function refreshSerial(auto = false) {
       serialMessage.textContent = auto ? "Looking for controller..." : "Refreshing ports...";

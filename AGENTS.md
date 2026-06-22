@@ -15,6 +15,8 @@
   - pull submodules recursively to bring them up to date
   - commit and push the resulting submodule pointer change directly from `main`
 - If there is any doubt about whether a change is "tiny," create a branch instead of working on `main`.
+- Commit completed changes before changing context when practical, using explicit path staging and a concise message.
+- When the work context changes, ask whether to switch branches, merge the current branch, or leave the current branch active if that choice is not already clear.
 
 ## Software version tracking
 

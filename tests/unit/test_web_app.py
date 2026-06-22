@@ -124,6 +124,88 @@ def test_serial_api_lists_connects_sends_and_disconnects():
     assert disconnect["connected"] is False
 
 
+def test_serial_session_records_recent_command_log():
+    session = web_app_module.SerialBoardSession()
+    session.transport = RecordingTransport()
+    session.port = "COM8"
+    session.connection_state = "verified"
+    session.last_success_monotonic = web_app_module.time.monotonic()
+
+    first = session.send_command("M119")
+    second = session.send_command("M114")
+
+    log = second["serial_command_log"]
+    assert first["serial_command_log"][0]["command"] == "M119"
+    assert log[-2]["command"] == "M119"
+    assert log[-2]["response"] == ["M119 response", "ok"]
+    assert log[-2]["ok"] is True
+    assert log[-2]["sent_at"].endswith("Z")
+    assert log[-1]["command"] == "M114"
+    assert log[-1]["response"] == ["M114 response", "ok"]
+
+
+def test_serial_session_records_status_polls_separately():
+    session = web_app_module.SerialBoardSession()
+    session.transport = RecordingTransport()
+    session.port = "COM8"
+    session.connection_state = "verified"
+    session.last_success_monotonic = web_app_module.time.monotonic()
+
+    session.send_command("M119")
+    session.read_endstops()
+    session.send_status_poll("M114")
+
+    status = session.status()
+    command_log = status["serial_command_log"]
+    poll_log = status["serial_poll_log"]
+    assert [entry["command"] for entry in command_log] == ["M119"]
+    assert [entry["command"] for entry in poll_log] == ["M119", "M114"]
+
+
+def test_serial_session_skips_automatic_polls_when_busy():
+    session = web_app_module.SerialBoardSession()
+    session.transport = RecordingTransport()
+    session.port = "COM8"
+    session.connection_state = "verified"
+    session.last_success_monotonic = web_app_module.time.monotonic()
+    session.last_endstops = {"x_min": "open"}
+
+    session.command_lock.acquire()
+    try:
+        status_poll = session.send_status_poll("M114")
+        endstop_poll = session.read_endstops(poll=True)
+    finally:
+        session.command_lock.release()
+
+    assert status_poll["ok"] is False
+    assert status_poll["message"] == "Skipped status poll; serial board is busy"
+    assert endstop_poll["ok"] is False
+    assert endstop_poll["message"] == "Skipped endstop poll; serial board is busy"
+    assert endstop_poll["endstops"] == {"x_min": "open"}
+    assert session.status()["serial_poll_log"] == []
+
+
+def test_serial_session_keeps_last_500_lines_per_log():
+    session = web_app_module.SerialBoardSession()
+    session.transport = RecordingTransport()
+    session.port = "COM8"
+    session.connection_state = "verified"
+    session.last_success_monotonic = web_app_module.time.monotonic()
+
+    for index in range(505):
+        session.send_command(f"M118 E1 test-{index}")
+        session.send_status_poll("M114")
+
+    status = session.status()
+    command_log = status["serial_command_log"]
+    poll_log = status["serial_poll_log"]
+    assert len(command_log) == 500
+    assert command_log[0]["command"] == "M118 E1 test-5"
+    assert command_log[-1]["command"] == "M118 E1 test-504"
+    assert len(poll_log) == 500
+    assert all(entry["command"] == "M114" for entry in poll_log)
+
+
 def test_runtime_mode_defaults_to_hardware_and_can_select_simulation():
     client = _client()
 
@@ -171,6 +253,8 @@ def test_hardware_panels_are_grouped_by_domain():
     assert b"16-LED ring editor" in machine.data
     assert b'id="endstop-state"' in movement.data
     assert b'id="bltouch-probe"' in movement.data
+    assert b'data-control="home_x"' in movement.data
+    assert b'data-control="home_c"' in movement.data
     assert b'id="serial-command-form"' in system.data
     assert b'id="runtime-mode"' in system.data
     assert b'id="theme-mode"' in system.data
@@ -294,6 +378,26 @@ def test_connected_serial_board_takes_over_movement_controls():
     assert "G1 X5.000 Y0.000 F600" in runtime.serial_board.sent_commands
     assert status["runtime_target"] == "hardware_serial"
     assert status["pose"]["x_mm"] == 5.0
+
+
+def test_hardware_home_controls_send_axis_specific_and_grouped_sequences():
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    runtime = app.config["runtime"]
+    runtime.serial_board = FakeSerialBoard()
+    runtime.serial_board.connect("COM8", 115200)
+    client = app.test_client()
+
+    home_c = client.post("/api/control/home_c", json={})
+    home_all = client.post("/api/control/home", json={})
+
+    assert home_c.status_code == 200
+    assert home_all.status_code == 200
+    assert "G28 C" in runtime.serial_board.sent_commands
+    assert runtime.serial_board.sent_commands[-3:] == ["G28 Z C", "G28 X Y", "M114"]
 
 
 def test_serial_error_clears_live_connection(monkeypatch):
@@ -573,6 +677,8 @@ class FakeSerialBoard:
             "last_error": self.last_error,
             "last_response": self.last_response,
             "last_endstops": self.last_endstops,
+            "serial_command_log": [],
+            "serial_poll_log": [],
             "live_pose": self.live_pose,
         }
 
@@ -614,6 +720,9 @@ class FakeSerialBoard:
             self.last_response = ["ok"]
         return {"ok": True, "message": f"Sent {command}", "response": self.last_response, **self.status()}
 
+    def send_status_poll(self, command):
+        return self.send_command(command)
+
     def send_commands(self, commands, *, message):
         responses = []
         for command in commands:
@@ -631,7 +740,7 @@ class FakeSerialBoard:
             responses.extend(result["response"])
         return {"ok": True, "message": message, "response": responses, **self.status()}
 
-    def read_endstops(self):
+    def read_endstops(self, *, poll=False):
         self.send_command("M119")
         self.last_endstops = {"x_min": "open", "z_max": "triggered"}
         return {"ok": True, "message": "Read endstop states", "endstops": self.last_endstops, **self.status()}
@@ -664,3 +773,16 @@ class FakeSerialBoard:
             "response": self.last_response,
             **self.status(),
         }
+
+
+class RecordingTransport:
+    def __init__(self):
+        self.commands = []
+        self.closed = False
+
+    def send_command(self, command, *, wait_for_ok=True):
+        self.commands.append(command)
+        return [f"{command} response", "ok"]
+
+    def close(self):
+        self.closed = True

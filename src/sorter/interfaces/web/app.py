@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import asdict
 from datetime import datetime, UTC
 from importlib.metadata import PackageNotFoundError, version
@@ -29,6 +30,10 @@ from sorter.ports.camera import Frame
 HARDWARE_CONTROL_ACTIONS = {
     "initialize",
     "home",
+    "home_x",
+    "home_y",
+    "home_z",
+    "home_c",
     "wait_idle",
     "move_xy",
     "jog_xy",
@@ -47,6 +52,10 @@ HARDWARE_CONTROL_ACTIONS = {
 MOTION_CONTROL_ACTIONS = {
     "initialize",
     "home",
+    "home_x",
+    "home_y",
+    "home_z",
+    "home_c",
     "wait_idle",
     "move_xy",
     "jog_xy",
@@ -68,11 +77,18 @@ class SerialBoardSession:
         self.last_error: str | None = None
         self.last_response: list[str] = []
         self.last_endstops: dict[str, str] = {}
+        self.serial_command_log: deque[dict[str, Any]] = deque(maxlen=500)
+        self.serial_poll_log: deque[dict[str, Any]] = deque(maxlen=500)
         self.live_pose: dict[str, float] = {}
         self.last_success_monotonic: float | None = None
         self.connection_state = "disconnected"
         self.state_lock = threading.RLock()
         self.command_lock = threading.Lock()
+
+    def _acquire_command(self, *, poll: bool = False) -> bool:
+        if poll:
+            return self.command_lock.acquire(blocking=False)
+        return self.command_lock.acquire(timeout=10.0)
 
     def status(self) -> dict[str, Any]:
         with self.state_lock:
@@ -96,6 +112,8 @@ class SerialBoardSession:
                 "last_error": self.last_error,
                 "last_response": self.last_response,
                 "last_endstops": self.last_endstops,
+                "serial_command_log": list(self.serial_command_log),
+                "serial_poll_log": list(self.serial_poll_log),
                 "live_pose": self.live_pose,
             }
 
@@ -129,7 +147,7 @@ class SerialBoardSession:
         return {"ok": False, "message": message, **self.status()}
 
     def connect(self, port: str, baud_rate: int = 115200) -> dict[str, Any]:
-        if not self.command_lock.acquire(blocking=False):
+        if not self._acquire_command():
             raise RuntimeError("Serial board is busy with another command")
         try:
             with self.state_lock:
@@ -141,8 +159,10 @@ class SerialBoardSession:
                 self.baud_rate = int(baud_rate)
             transport = MarlinSerialTransport(serial_port=port, baud_rate=int(baud_rate), timeout_seconds=60.0)
             try:
+                sent_at = _utc_now_iso()
                 response = transport.send_command("M115")
             except Exception as exc:
+                self._record_serial_command("M115", sent_at, [], ok=False, error=str(exc))
                 transport.close()
                 with self.state_lock:
                     self.transport = None
@@ -156,6 +176,7 @@ class SerialBoardSession:
                 self.lights = NeoPixelLightsAdapter(transport=transport)
                 self.last_error = None
                 self.last_response = response
+                self._record_serial_command("M115", sent_at, response, ok=True)
                 self.last_success_monotonic = time.monotonic()
                 self.connection_state = "verified"
             return {"ok": True, "message": f"Connected to {port}", **self.status()}
@@ -163,7 +184,7 @@ class SerialBoardSession:
             self.command_lock.release()
 
     def disconnect(self) -> dict[str, Any]:
-        if not self.command_lock.acquire(blocking=False):
+        if not self._acquire_command():
             raise RuntimeError("Serial board is busy with another command")
         try:
             with self.state_lock:
@@ -180,7 +201,7 @@ class SerialBoardSession:
             self.command_lock.release()
 
     def send_command(self, command: str) -> dict[str, Any]:
-        if not self.command_lock.acquire(blocking=False):
+        if not self._acquire_command():
             raise RuntimeError("Serial board is busy with another command")
         try:
             result = self._send_command_locked(command)
@@ -188,16 +209,30 @@ class SerialBoardSession:
             self.command_lock.release()
         return {**result, **self.status()}
 
-    def _send_command_locked(self, command: str) -> dict[str, Any]:
+    def send_status_poll(self, command: str) -> dict[str, Any]:
+        if not self._acquire_command(poll=True):
+            return {"ok": False, "message": "Skipped status poll; serial board is busy", **self.status()}
+        try:
+            result = self._send_command_locked(command, log_kind="poll")
+        finally:
+            self.command_lock.release()
+        return {**result, **self.status()}
+
+    def _send_command_locked(self, command: str, *, log_kind: str = "command") -> dict[str, Any]:
+        clean_command = command.strip()
+        if not clean_command:
+            raise ValueError("Marlin command cannot be empty")
         with self.state_lock:
             transport = self.transport
         if transport is None:
             raise ValueError("Serial board is not connected")
+        sent_at = _utc_now_iso()
         try:
-            response = transport.send_command(command)
+            response = transport.send_command(clean_command)
         except Exception as exc:
             with self.state_lock:
                 self.last_error = str(exc)
+                self._record_serial_command(clean_command, sent_at, [], ok=False, error=str(exc), log_kind=log_kind)
                 self.connection_state = "error"
                 if self.transport is not None:
                     self.transport.close()
@@ -208,14 +243,15 @@ class SerialBoardSession:
         with self.state_lock:
             self.last_error = None
             self.last_response = response
+            self._record_serial_command(clean_command, sent_at, response, ok=True, log_kind=log_kind)
             self.last_success_monotonic = time.monotonic()
             self.connection_state = "verified"
             if pose:
                 self.live_pose.update(pose)
-        return {"ok": True, "message": f"Sent {command.strip()}", "response": response, **self.status()}
+        return {"ok": True, "message": f"Sent {clean_command}", "response": response, **self.status()}
 
     def send_commands(self, commands: list[str], *, message: str) -> dict[str, Any]:
-        if not self.command_lock.acquire(blocking=False):
+        if not self._acquire_command():
             raise RuntimeError("Serial board is busy with another command")
         try:
             responses: list[str] = []
@@ -226,11 +262,18 @@ class SerialBoardSession:
             self.command_lock.release()
         return {"ok": True, "message": message, "response": responses, **self.status()}
 
-    def read_endstops(self) -> dict[str, Any]:
-        if not self.command_lock.acquire(blocking=False):
+    def read_endstops(self, *, poll: bool = False) -> dict[str, Any]:
+        if not self._acquire_command(poll=poll):
+            if poll:
+                return {
+                    "ok": False,
+                    "message": "Skipped endstop poll; serial board is busy",
+                    "endstops": self.last_endstops,
+                    **self.status(),
+                }
             raise RuntimeError("Serial board is busy with another command")
         try:
-            result = self._send_command_locked("M119")
+            result = self._send_command_locked("M119", log_kind="poll")
             endstops = _parse_m119(result["response"])
             with self.state_lock:
                 self.last_endstops = endstops
@@ -254,19 +297,18 @@ class SerialBoardSession:
         return result
 
     def set_lights_status(self, status: str) -> None:
-        if not self.command_lock.acquire(blocking=False):
+        if not self._acquire_command():
             raise RuntimeError("Serial board is busy with another command")
         try:
             with self.state_lock:
                 lights = self.lights
-                transport = self.transport
             if lights is not None:
-                lights.set_status(status)
-                with self.state_lock:
-                    self.last_error = None
-                    self.last_response = list(getattr(transport, "command_log", []))[-1:]
-                    self.last_success_monotonic = time.monotonic()
-                    self.connection_state = "verified"
+                red, green, blue = lights.STATUS_RGB.get(status, lights.STATUS_RGB["warning"])
+                lights.last_status = status
+                lights.last_profile = status
+                lights.last_rgb = (red, green, blue)
+                lights.last_command = f"M150 R{red} U{green} B{blue}"
+                self._send_command_locked(lights.last_command)
         except Exception as exc:
             with self.state_lock:
                 self.last_error = str(exc)
@@ -280,19 +322,18 @@ class SerialBoardSession:
             self.command_lock.release()
 
     def set_lights_rgb(self, red: int, green: int, blue: int, *, profile_name: str | None = None) -> None:
-        if not self.command_lock.acquire(blocking=False):
+        if not self._acquire_command():
             raise RuntimeError("Serial board is busy with another command")
         try:
             with self.state_lock:
                 lights = self.lights
-                transport = self.transport
             if lights is not None:
-                lights.set_rgb(red, green, blue, profile_name=profile_name)
-                with self.state_lock:
-                    self.last_error = None
-                    self.last_response = list(getattr(transport, "command_log", []))[-1:]
-                    self.last_success_monotonic = time.monotonic()
-                    self.connection_state = "verified"
+                r, g, b = (_clamp_channel(red), _clamp_channel(green), _clamp_channel(blue))
+                lights.last_status = profile_name or "custom"
+                lights.last_profile = profile_name or "custom"
+                lights.last_rgb = (r, g, b)
+                lights.last_command = f"M150 R{r} U{g} B{b}"
+                self._send_command_locked(lights.last_command)
         except Exception as exc:
             with self.state_lock:
                 self.last_error = str(exc)
@@ -308,7 +349,7 @@ class SerialBoardSession:
     def set_neopixel_pixels(self, pixels: list[tuple[int, int, int]]) -> dict[str, Any]:
         if len(pixels) != 16:
             raise ValueError("NeoPixel display requires exactly 16 pixels")
-        if not self.command_lock.acquire(blocking=False):
+        if not self._acquire_command():
             raise RuntimeError("Serial board is busy with another command")
         try:
             responses: list[str] = []
@@ -323,6 +364,28 @@ class SerialBoardSession:
         finally:
             self.command_lock.release()
 
+    def _record_serial_command(
+        self,
+        command: str,
+        sent_at: str,
+        response: list[str],
+        *,
+        ok: bool,
+        error: str | None = None,
+        log_kind: str = "command",
+    ) -> None:
+        entry = {
+            "sent_at": sent_at,
+            "command": command,
+            "response": list(response),
+            "ok": ok,
+            "error": error,
+        }
+        if log_kind == "poll":
+            self.serial_poll_log.append(entry)
+        else:
+            self.serial_command_log.append(entry)
+
 
 def _port_auto_score(port: dict[str, str]) -> tuple[int, str]:
     text = " ".join([port.get("device", ""), port.get("description", ""), port.get("hwid", "")]).lower()
@@ -334,6 +397,10 @@ def _port_auto_score(port: dict[str, str]) -> tuple[int, str]:
     if "unknown" in text:
         score -= 5
     return (score, port.get("device", ""))
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def _parse_m119(lines: list[str]) -> dict[str, str]:
@@ -585,6 +652,19 @@ class WebRuntime:
                     f"C at {self.calibration.c_home_mm:.2f} mm"
                 ),
             }
+        if action in {"home_x", "home_y", "home_z", "home_c"}:
+            snapshot = self.orchestrator.world.snapshot
+            axis = action.removeprefix("home_")
+            if axis == "x":
+                snapshot.pose.x_mm = 0.0
+            elif axis == "y":
+                snapshot.pose.y_mm = 0.0
+            elif axis == "z":
+                snapshot.pose.z_mm = self.calibration.z_home_mm
+            elif axis == "c":
+                snapshot.pose.c_mm = self.calibration.c_home_mm
+            self.machine_initialized = False
+            return {"ok": True, "message": f"Homed {axis.upper()} axis"}
         if action == "wait_idle":
             self.orchestrator.motion.wait_until_idle()
             return {"ok": True, "message": "Motion idle"}
@@ -715,11 +795,14 @@ class WebRuntime:
     def _hardware_serial_control(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         if action == "initialize":
             return self.serial_board.send_commands(
-                ["G28 Z", "G28 C", "G28 X Y", "M114"],
+                ["G28 Z C", "G28 X Y", "M114"],
                 message="Live board initialized and homed",
             )
         if action == "home":
-            return self.serial_board.send_commands(["G28", "M114"], message="Live board axes homed")
+            return self.serial_board.send_commands(["G28 Z C", "G28 X Y", "M114"], message="Live board axes homed")
+        if action in {"home_x", "home_y", "home_z", "home_c"}:
+            axis = action.removeprefix("home_").upper()
+            return self.serial_board.send_commands([f"G28 {axis}", "M114"], message=f"Live board homed {axis}")
         if action == "wait_idle":
             return self.serial_board.send_commands(["M400", "M114"], message="Live board idle")
         if action in {"move_xy", "move_camera_xy"}:
@@ -1331,14 +1414,15 @@ def create_web_app(
     @app.get("/api/serial/endstops")
     def api_serial_endstops():
         try:
-            return jsonify(runtime.serial_board.read_endstops())
+            poll = request.args.get("poll") == "true"
+            return jsonify(runtime.serial_board.read_endstops(poll=poll))
         except Exception as exc:
             return jsonify({"ok": False, "message": str(exc), **runtime.serial_board.status()}), 400
 
     @app.post("/api/serial/heartbeat")
     def api_serial_heartbeat():
         try:
-            return jsonify(runtime.serial_board.send_command("M114"))
+            return jsonify(runtime.serial_board.send_status_poll("M114"))
         except Exception as exc:
             return jsonify({"ok": False, "message": str(exc), **runtime.serial_board.status()}), 400
 
