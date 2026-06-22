@@ -235,6 +235,21 @@ def test_serial_api_lists_connects_sends_and_disconnects():
     assert disconnect["connected"] is False
 
 
+def test_serial_port_preference_prioritizes_marlin_ports():
+    marlin_port = {"device": "/dev/ttyACM0", "description": "Marlin USB", "hwid": "USB VID:PID"}
+    bluetooth_port = {"device": "/dev/rfcomm0", "description": "Bluetooth", "hwid": "BTHENUM"}
+    plain_usb_port = {"device": "/dev/ttyUSB0", "description": "USB Serial", "hwid": "USB VID:PID"}
+
+    ordered = sorted(
+        [plain_usb_port, bluetooth_port, marlin_port],
+        key=web_app_module._port_auto_score,
+        reverse=True,
+    )
+
+    assert web_app_module._port_mentions_marlin(marlin_port) is True
+    assert ordered[0] == marlin_port
+
+
 def test_serial_session_records_recent_command_log():
     session = web_app_module.SerialBoardSession()
     session.transport = RecordingTransport()
