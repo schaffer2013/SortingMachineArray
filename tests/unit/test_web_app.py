@@ -397,11 +397,17 @@ def test_hardware_panels_are_grouped_by_domain():
     client = _client()
 
     machine = client.get("/machine")
+    recognition = client.get("/recognition")
     movement = client.get("/movement")
     system = client.get("/system")
 
     assert b'id="pixel-grid"' in machine.data
     assert b"16-LED ring editor" in machine.data
+    assert b'id="lighting-opt-mode"' in machine.data
+    assert b'value="24"' in machine.data
+    assert b'value="95"' in machine.data
+    assert b'name="moss_threshold" type="number" min="1" max="80" step="1" value="80"' in recognition.data
+    assert b'name="crop_left" type="number" min="0" max="98" step="1" value="18"' in recognition.data
     assert b'id="endstop-state"' in movement.data
     assert b'id="bltouch-probe"' in movement.data
     assert b'data-control="home_x"' in movement.data
@@ -411,6 +417,12 @@ def test_hardware_panels_are_grouped_by_domain():
     assert b'id="theme-mode"' in system.data
     assert b'id="endstop-state"' not in system.data
     assert b'id="bltouch-probe"' not in system.data
+
+
+def test_expected_card_mode_alias_maps_to_reevaluation():
+    assert web_app_module._normalize_web_recognition_mode("expected_card") == "reevaluation"
+    assert web_app_module._normalize_web_recognition_mode("expected-card") == "reevaluation"
+    assert web_app_module._normalize_web_recognition_mode("confirmation") == "confirmation"
 
 
 def test_neopixel_pixel_display_requires_hardware_and_sends_all_pixels():
