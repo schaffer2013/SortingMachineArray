@@ -129,6 +129,52 @@ def test_lighting_optimizer_sweeps_camera_frames_and_applies_best(tmp_path):
     assert status["lights_rgb"] == [96, 96, 96]
 
 
+def test_lighting_optimizer_scores_requested_crop(tmp_path):
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.config["runtime"].runtime_mode = "simulation"
+    app.testing = True
+    orchestrator.camera = SplitBrightnessCamera(orchestrator.lights, tmp_path)
+    client = app.test_client()
+
+    response = client.post(
+        "/api/lights/optimize",
+        json={
+            "max_samples": 6,
+            "settle_ms": 0,
+            "target_brightness": 96,
+            "crop": {"left": 0, "top": 0, "right": 50, "bottom": 100},
+        },
+    )
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["best"]["red"] == 96
+    assert payload["crop"] == {"left": 0.0, "top": 0.0, "right": 0.5, "bottom": 1.0}
+
+
+def test_lighting_score_penalizes_glare():
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    runtime = app.config["runtime"]
+
+    balanced = Image.new("RGB", (40, 40), (96, 96, 96))
+    glare = Image.new("RGB", (40, 40), (96, 96, 96))
+    for x in range(20, 40):
+        for y in range(40):
+            glare.putpixel((x, y), (255, 245, 245))
+
+    balanced_score = runtime._score_lighting_frame(balanced, target_brightness=96)
+    glare_score = runtime._score_lighting_frame(glare, target_brightness=96)
+
+    assert glare_score["glare_fraction"] > balanced_score["glare_fraction"]
+    assert glare_score["score"] < balanced_score["score"]
+
+
 def test_serial_api_lists_connects_sends_and_disconnects():
     settings = _sim_truth_settings()
     orchestrator = build_sim_orchestrator(settings)
@@ -744,6 +790,33 @@ class BrightnessCamera:
             metadata={},
             captured_at_utc="2026-01-01T00:00:00Z",
             camera_id="brightness-test",
+            source_mode="test",
+        )
+
+
+class SplitBrightnessCamera:
+    def __init__(self, lights, capture_dir: Path):
+        self.lights = lights
+        self.capture_dir = capture_dir
+        self.index = 0
+
+    def capture_frame(self):
+        red, green, blue = getattr(self.lights, "last_rgb", (0, 0, 0))
+        brightness = max(0, min(255, int((red + green + blue) / 3)))
+        path = self.capture_dir / f"split-lighting-{self.index}.jpg"
+        self.index += 1
+        image = Image.new("RGB", (80, 40), (250, 250, 250))
+        for x in range(0, 40):
+            for y in range(40):
+                image.putpixel((x, y), (brightness, brightness, brightness))
+        image.save(path)
+        return Frame(
+            frame_id=f"split-lighting-{self.index}",
+            path=str(path),
+            pile_id=None,
+            metadata={},
+            captured_at_utc="2026-01-01T00:00:00Z",
+            camera_id="split-brightness-test",
             source_mode="test",
         )
 

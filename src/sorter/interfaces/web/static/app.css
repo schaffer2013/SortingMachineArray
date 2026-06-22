@@ -126,6 +126,7 @@ input, select {
 input[type="checkbox"] { width:auto; justify-self:start; }
 .form-grid { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:12px; align-items:end; }
 .form-grid.three-up { grid-template-columns: repeat(3, minmax(0,1fr)); }
+.form-grid.four-up { grid-template-columns: repeat(4, minmax(0,1fr)); }
 .axis-controls { display:grid; gap:10px; }
 .jog-pad {
   display:grid; grid-template-columns: repeat(3, minmax(64px, 1fr)); gap:10px; align-items:stretch;
@@ -222,5 +223,6 @@ th { color:var(--muted); font-size:.82rem; text-transform:uppercase; letter-spac
       rotate(calc(-1 * var(--angle)));
   }
   .form-grid, .metric-list { grid-template-columns: 1fr; }
-  .form-grid.three-up { grid-template-columns: 1fr; }
+  .form-grid.three-up,
+  .form-grid.four-up { grid-template-columns: 1fr; }
 }

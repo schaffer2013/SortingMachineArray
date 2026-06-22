@@ -917,6 +917,7 @@ class WebRuntime:
         max_samples = max(3, min(24, int(payload.get("max_samples", 12))))
         settle_ms = max(0, min(2000, int(payload.get("settle_ms", 150))))
         target_brightness = max(20.0, min(235.0, float(payload.get("target_brightness", 122))))
+        crop = _normalize_crop_payload(payload.get("crop"))
         candidates = self._lighting_candidates(max_samples)
         results: list[dict[str, Any]] = []
         best: dict[str, Any] | None = None
@@ -926,6 +927,7 @@ class WebRuntime:
             if settle_ms:
                 time.sleep(settle_ms / 1000)
             image = self._capture_optimizer_image()
+            image = _crop_image(image, crop)
             score = self._score_lighting_frame(image, target_brightness=target_brightness)
             sample = {
                 "red": red,
@@ -947,6 +949,7 @@ class WebRuntime:
             "samples": results,
             "target_brightness": target_brightness,
             "settle_ms": settle_ms,
+            "crop": crop,
             "status": self.status(),
         }
 
@@ -998,18 +1001,35 @@ class WebRuntime:
         mean = float(gray_stat.mean[0])
         contrast = float(gray_stat.stddev[0])
         channel_spread = float(max(rgb_stat.mean) - min(rgb_stat.mean))
+        pixels = list(sample.getdata())
+        pixel_count = max(1, len(pixels))
+        clipped_pixels = sum(
+            1
+            for red, green, blue in pixels
+            if red >= 245 or green >= 245 or blue >= 245 or max(red, green, blue) - min(red, green, blue) >= 185
+        )
+        glare_fraction = clipped_pixels / pixel_count
         exposure_error = abs(mean - target_brightness)
         exposure_score = max(0.0, 1.0 - (exposure_error / 128.0))
         contrast_score = min(1.0, contrast / 64.0)
         color_balance_score = max(0.0, 1.0 - (channel_spread / 128.0))
         clipping_penalty = 0.25 if mean < 28.0 or mean > 227.0 else 0.0
-        score = (exposure_score * 0.58) + (contrast_score * 0.30) + (color_balance_score * 0.12) - clipping_penalty
+        glare_penalty = min(0.45, glare_fraction * 3.5)
+        score = (
+            (exposure_score * 0.52)
+            + (contrast_score * 0.28)
+            + (color_balance_score * 0.12)
+            + ((1.0 - min(1.0, glare_fraction * 8.0)) * 0.08)
+            - clipping_penalty
+            - glare_penalty
+        )
         return {
             "score": round(max(0.0, score), 4),
             "mean_brightness": round(mean, 2),
             "contrast": round(contrast, 2),
             "channel_spread": round(channel_spread, 2),
             "exposure_error": round(exposure_error, 2),
+            "glare_fraction": round(glare_fraction, 4),
         }
 
     def _hardware_serial_control(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1275,6 +1295,7 @@ class WebRuntime:
 
     def recognize_camera_image(self, request_payload: dict[str, Any]) -> dict[str, Any]:
         image = self.latest_camera_image()
+        image = _crop_image(image, _normalize_crop_payload(request_payload.get("crop")))
         with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as handle:
             temp_path = Path(handle.name)
         image.save(temp_path, format="JPEG", quality=92)
@@ -1689,6 +1710,12 @@ def create_web_app(
             "use_tracked_pool": request.form.get("use_tracked_pool") == "true",
             "track_result": request.form.get("track_result") == "true",
         }
+        crop = _crop_payload_from_form(request.form)
+        if crop is not None:
+            payload["crop"] = crop
+        moss_threshold = request.form.get("moss_threshold", "").strip()
+        if moss_threshold:
+            payload["moss_threshold"] = moss_threshold
         expected_name = request.form.get("expected_name", "").strip()
         expected_set = request.form.get("expected_set", "").strip()
         expected_collector = request.form.get("expected_collector", "").strip()
@@ -1897,6 +1924,61 @@ def create_web_app(
 
 def _clamp_channel(value: int) -> int:
     return max(0, min(255, int(value)))
+
+
+def _crop_payload_from_form(form: Any) -> dict[str, float] | None:
+    values: dict[str, float] = {}
+    for key in ("left", "top", "right", "bottom"):
+        raw = form.get(f"crop_{key}", "")
+        if str(raw).strip() == "":
+            return None
+        try:
+            values[key] = float(raw)
+        except (TypeError, ValueError):
+            return None
+    return _normalize_crop_payload(values)
+
+
+def _normalize_crop_payload(raw_crop: Any) -> dict[str, float] | None:
+    if not isinstance(raw_crop, dict):
+        return None
+    try:
+        left = float(raw_crop.get("left", 0.0))
+        top = float(raw_crop.get("top", 0.0))
+        right = float(raw_crop.get("right", 1.0))
+        bottom = float(raw_crop.get("bottom", 1.0))
+    except (TypeError, ValueError):
+        return None
+    if max(left, top, right, bottom) > 1.0:
+        left /= 100.0
+        top /= 100.0
+        right /= 100.0
+        bottom /= 100.0
+    left = max(0.0, min(0.98, left))
+    top = max(0.0, min(0.98, top))
+    right = max(left + 0.01, min(1.0, right))
+    bottom = max(top + 0.01, min(1.0, bottom))
+    if left <= 0.0 and top <= 0.0 and right >= 1.0 and bottom >= 1.0:
+        return None
+    return {
+        "left": round(left, 4),
+        "top": round(top, 4),
+        "right": round(right, 4),
+        "bottom": round(bottom, 4),
+    }
+
+
+def _crop_image(image: Image.Image, crop: dict[str, float] | None) -> Image.Image:
+    if crop is None:
+        return image
+    width, height = image.size
+    left = int(width * crop["left"])
+    top = int(height * crop["top"])
+    right = int(width * crop["right"])
+    bottom = int(height * crop["bottom"])
+    if right <= left or bottom <= top:
+        return image
+    return image.crop((left, top, right, bottom))
 
 
 def _format_mm(value: float) -> str:
