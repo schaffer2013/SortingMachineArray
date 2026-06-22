@@ -18,6 +18,8 @@ fi
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install -e '.[hardware]'
 python -m pip install -e './third_party/fuzzy-enigma-card-recognition[moss]'
+# rapidocr-onnxruntime >=1.4 does not currently publish for the Pi's Python 3.13 runtime.
+python -m pip install 'rapidocr-onnxruntime==1.2.3'
 python -m pip install 'paddleocr>=3.7'
 
 export SORTER_MODE=hardware
