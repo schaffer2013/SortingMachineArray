@@ -34,7 +34,13 @@
       </div>
       <span id="lighting-optimizer-pill" class="pill">Idle</span>
     </div>
-    <div class="form-grid three-up">
+    <div class="form-grid four-up">
+      <label>Mode
+        <select id="lighting-opt-mode">
+          <option value="single_led">Single LED</option>
+          <option value="solid_ring">Solid ring</option>
+        </select>
+      </label>
       <label>Samples
         <input id="lighting-opt-samples" type="number" min="3" max="24" step="1" value="12">
       </label>

@@ -38,6 +38,22 @@ class NeoPixelLightsAdapter:
         self.last_rgb = (r, g, b)
         self._send_rgb(r, g, b)
 
+    def set_pixels(self, pixels: list[list[int]] | list[tuple[int, int, int]], *, profile_name: str | None = None) -> None:
+        if len(pixels) != 16:
+            raise ValueError("NeoPixel display requires exactly 16 pixels")
+        self.last_status = profile_name or "custom-pixels"
+        self.last_profile = profile_name or "custom-pixels"
+        self.last_pixels = [
+            [_clamp_channel(pixel[0]), _clamp_channel(pixel[1]), _clamp_channel(pixel[2])]
+            for pixel in pixels
+        ]
+        lit_pixels = [pixel for pixel in self.last_pixels if any(pixel)]
+        if len(lit_pixels) == 1:
+            self.last_rgb = tuple(lit_pixels[0])
+        for index, (red, green, blue) in enumerate(self.last_pixels):
+            self.last_command = f"M150 I{index} R{red} U{green} B{blue}"
+            self.transport.send_command(self.last_command)
+
     def _send_rgb(self, red: int, green: int, blue: int) -> None:
         self.last_command = f"M150 R{red} U{green} B{blue}"
         self.transport.send_command(self.last_command)

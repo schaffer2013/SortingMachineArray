@@ -64,6 +64,21 @@ def test_motion_and_lights_share_one_marlin_transport() -> None:
     assert lights.last_command == "M150 R0 U16 B0"
 
 
+def test_neopixel_lights_can_send_indexed_pixels() -> None:
+    transport = RecordingMarlinTransport()
+    lights = NeoPixelLightsAdapter(transport=transport)
+    pixels = [[0, 0, 0] for _ in range(16)]
+    pixels[3] = [12, 34, 56]
+
+    lights.set_pixels(pixels, profile_name="single-led")
+
+    assert transport.command_log[0] == "M150 I0 R0 U0 B0"
+    assert transport.command_log[3] == "M150 I3 R12 U34 B56"
+    assert transport.command_log[-1] == "M150 I15 R0 U0 B0"
+    assert lights.last_profile == "single-led"
+    assert lights.last_rgb == (12, 34, 56)
+
+
 def test_home_axes_reports_z_and_c_at_configured_max() -> None:
     motion = MarlinMotionAdapter(z_home_mm=245.0, c_home_mm=41.5)
 

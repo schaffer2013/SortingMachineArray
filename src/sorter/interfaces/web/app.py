@@ -917,7 +917,15 @@ class WebRuntime:
         max_samples = max(3, min(24, int(payload.get("max_samples", 12))))
         settle_ms = max(0, min(2000, int(payload.get("settle_ms", 150))))
         target_brightness = max(20.0, min(235.0, float(payload.get("target_brightness", 122))))
+        mode = str(payload.get("mode") or "solid_ring").strip().lower()
         crop = _normalize_crop_payload(payload.get("crop"))
+        if mode in {"single_led", "single-led", "pixel", "one_led", "one-led"}:
+            return self._optimize_single_led_lighting(
+                max_samples=max_samples,
+                settle_ms=settle_ms,
+                target_brightness=target_brightness,
+                crop=crop,
+            )
         candidates = self._lighting_candidates(max_samples)
         results: list[dict[str, Any]] = []
         best: dict[str, Any] | None = None
@@ -945,6 +953,56 @@ class WebRuntime:
         return {
             "ok": True,
             "message": f"Optimized lighting to RGB {best['red']}, {best['green']}, {best['blue']}",
+            "mode": "solid_ring",
+            "best": best,
+            "samples": results,
+            "target_brightness": target_brightness,
+            "settle_ms": settle_ms,
+            "crop": crop,
+            "status": self.status(),
+        }
+
+    def _optimize_single_led_lighting(
+        self,
+        *,
+        max_samples: int,
+        settle_ms: int,
+        target_brightness: float,
+        crop: dict[str, float] | None,
+    ) -> dict[str, Any]:
+        candidates = self._single_led_lighting_candidates(max_samples)
+        results: list[dict[str, Any]] = []
+        best: dict[str, Any] | None = None
+        previous_rgb = tuple(getattr(self.orchestrator.lights, "last_rgb", (0, 0, 16)) or (0, 0, 16))
+        for candidate in candidates:
+            self._set_light_pixels(candidate["pixels"], profile_name="optimizing-single-led")
+            if settle_ms:
+                time.sleep(settle_ms / 1000)
+            image = self._capture_optimizer_image()
+            image = _crop_image(image, crop)
+            score = self._score_lighting_frame(image, target_brightness=target_brightness)
+            sample = {
+                "led_index": candidate["led_index"],
+                "red": candidate["red"],
+                "green": candidate["green"],
+                "blue": candidate["blue"],
+                "pixels": candidate["pixels"],
+                **score,
+            }
+            results.append(sample)
+            if best is None or sample["score"] > best["score"]:
+                best = sample
+        if best is None:
+            self._set_light_rgb(*previous_rgb, profile_name="custom")
+            raise RuntimeError("No single-LED lighting candidates were sampled")
+        self._set_light_pixels(best["pixels"], profile_name="optimized-single-led")
+        return {
+            "ok": True,
+            "message": (
+                f"Optimized lighting to LED {best['led_index']} RGB "
+                f"{best['red']}, {best['green']}, {best['blue']}"
+            ),
+            "mode": "single_led",
             "best": best,
             "samples": results,
             "target_brightness": target_brightness,
@@ -974,6 +1032,29 @@ class WebRuntime:
             return
         self.orchestrator.lights.set_status(profile_name)
 
+    def _set_light_pixels(self, pixels: list[list[int]], *, profile_name: str) -> None:
+        if len(pixels) != 16:
+            raise ValueError("NeoPixel display requires exactly 16 pixels")
+        normalized = [
+            [_clamp_channel(pixel[0]), _clamp_channel(pixel[1]), _clamp_channel(pixel[2])]
+            for pixel in pixels
+        ]
+        if self.runtime_mode == "hardware" and not self.hardware_runtime:
+            if not self.serial_board.status()["connected"]:
+                raise ValueError("Hardware runtime selected, but the serial board is not verified live")
+            self.serial_board.set_neopixel_pixels([tuple(pixel) for pixel in normalized])
+        else:
+            setter = getattr(self.orchestrator.lights, "set_pixels", None)
+            if callable(setter):
+                setter(normalized, profile_name=profile_name)
+                return
+        setattr(self.orchestrator.lights, "last_profile", profile_name)
+        setattr(self.orchestrator.lights, "status", profile_name)
+        setattr(self.orchestrator.lights, "last_pixels", normalized)
+        lit_pixels = [pixel for pixel in normalized if any(pixel)]
+        if len(lit_pixels) == 1:
+            setattr(self.orchestrator.lights, "last_rgb", tuple(lit_pixels[0]))
+
     def _lighting_candidates(self, max_samples: int) -> list[tuple[int, int, int]]:
         levels = [24, 48, 72, 96, 128, 160, 192, 224]
         candidates: list[tuple[int, int, int]] = []
@@ -991,6 +1072,35 @@ class WebRuntime:
             seen.add(normalized)
             unique.append(normalized)
         return unique[:max_samples]
+
+    def _single_led_lighting_candidates(self, max_samples: int) -> list[dict[str, Any]]:
+        color_passes = [
+            (96, 96, 96),
+            (64, 64, 64),
+            (128, 128, 128),
+            (96, 84, 60),
+            (67, 83, 96),
+            (160, 160, 160),
+        ]
+        candidates: list[dict[str, Any]] = []
+        seen: set[tuple[int, int, int, int]] = set()
+        for red, green, blue in color_passes:
+            for led_index in range(16):
+                normalized = (_clamp_channel(red), _clamp_channel(green), _clamp_channel(blue))
+                key = (led_index, *normalized)
+                if key in seen:
+                    continue
+                seen.add(key)
+                pixels = [[0, 0, 0] for _ in range(16)]
+                pixels[led_index] = [normalized[0], normalized[1], normalized[2]]
+                candidates.append({
+                    "led_index": led_index,
+                    "red": normalized[0],
+                    "green": normalized[1],
+                    "blue": normalized[2],
+                    "pixels": pixels,
+                })
+        return candidates[:max_samples]
 
     def _score_lighting_frame(self, image: Image.Image, *, target_brightness: float) -> dict[str, float]:
         sample = image.convert("RGB")
