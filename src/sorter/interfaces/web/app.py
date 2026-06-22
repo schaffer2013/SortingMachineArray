@@ -1372,6 +1372,10 @@ def create_web_app(
     def dashboard():
         return render_template("dashboard.html")
 
+    @app.get("/camera")
+    def camera():
+        return render_template("camera.html")
+
     @app.get("/machine")
     def machine():
         return render_template("machine.html")

@@ -50,6 +50,7 @@ body {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 .app-shell { width: min(1320px, calc(100% - 32px)); margin: 0 auto 40px; }
+.app-shell.camera-shell { width: min(1800px, calc(100% - 24px)); }
 .topbar {
   display: flex; justify-content: space-between; align-items: end; gap: 20px;
   padding: 24px 0 20px;
@@ -89,12 +90,26 @@ body {
   display:grid; grid-template-columns: minmax(0, 1.4fr) minmax(320px, .8fr); gap:16px; margin-bottom:16px;
 }
 .dashboard-grid { grid-template-columns: minmax(0, 1.5fr) minmax(280px, .7fr); }
+.camera-control-grid {
+  display:grid; grid-template-columns: minmax(0, 2.35fr) minmax(320px, .65fr); gap:16px; align-items:start;
+}
 .movement-grid { display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap:16px; margin:16px 0; }
 .wide { min-width: 0; }
 .camera-feed {
   display:block; width:100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 16px;
   border: 1px solid var(--line); background: var(--code-bg);
 }
+.large-camera-feed { min-height: clamp(520px, calc(100vh - 190px), 980px); object-fit: contain; }
+.camera-panel, .compact-motion-panel { min-width:0; }
+.camera-motion-tools { display:grid; gap:16px; }
+.compact-status { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.compact-status .status-card { padding:11px; }
+.compact-status strong { font-size:.98rem; overflow-wrap:anywhere; }
+.compact-jog-group label { max-width:160px; }
+.compact-jog-pad { max-width:none; }
+.compact-jog-pad button { min-height:50px; }
+.compact-axis-grid { gap:10px; }
+.compact-axis-grid button { min-height:44px; }
 .button-row { display:flex; gap:10px; flex-wrap:wrap; margin: 14px 0; }
 button {
   border:0; border-radius: 999px; padding: 11px 16px; background: var(--accent); color: var(--button-text);
@@ -190,8 +205,9 @@ th { color:var(--muted); font-size:.82rem; text-transform:uppercase; letter-spac
   .app-layout { grid-template-columns: 1fr; }
   .app-layout nav { position:static; display:flex; overflow:auto; }
   .app-layout a { white-space:nowrap; }
-  .hero-grid, .dashboard-grid, .two-column { grid-template-columns: 1fr; }
+  .hero-grid, .dashboard-grid, .two-column, .camera-control-grid { grid-template-columns: 1fr; }
   .movement-grid { grid-template-columns: 1fr; }
+  .large-camera-feed { min-height:auto; }
   .pixel-button {
     transform:
       translate(-50%, -50%)

@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Camera - Sorter Console{% endblock %}
+{% block shell_class %}camera-shell{% endblock %}
+{% block content %}
+<section class="camera-control-grid">
+  <article class="panel camera-panel">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">Camera</p>
+        <h2>Live view</h2>
+      </div>
+      <button id="camera-refresh" type="button" class="secondary">Refresh</button>
+    </div>
+    <img id="camera-live-feed" class="camera-feed large-camera-feed" src="/camera/stream" alt="Live camera feed">
+  </article>
+
+  <article class="panel compact-motion-panel">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">Four-axis motion</p>
+        <h2>Move panel</h2>
+      </div>
+      <span id="camera-move-state" class="pill">Loading</span>
+    </div>
+
+    <div id="camera-move-status" class="status-cards compact-status"></div>
+    <p id="camera-move-message" class="muted"></p>
+
+    <div class="camera-motion-tools">
+      <div class="compact-jog-group">
+        <label>XY step mm<input id="camera-xy-step" type="number" step="0.1" value="10"></label>
+        <div class="jog-pad compact-jog-pad" aria-label="XY jog controls">
+          <span></span>
+          <button data-camera-jog-axis="y" data-camera-jog-sign="1">Y+</button>
+          <span></span>
+          <button data-camera-jog-axis="x" data-camera-jog-sign="-1">X-</button>
+          <button class="secondary" data-camera-control="wait_idle">Idle</button>
+          <button data-camera-jog-axis="x" data-camera-jog-sign="1">X+</button>
+          <span></span>
+          <button data-camera-jog-axis="y" data-camera-jog-sign="-1">Y-</button>
+          <span></span>
+        </div>
+      </div>
+
+      <div class="form-grid compact-axis-grid">
+        <label>Z step mm<input id="camera-z-step" type="number" step="0.1" value="1"></label>
+        <label>C step mm<input id="camera-c-step" type="number" step="0.1" value="1"></label>
+        <button class="secondary" data-camera-jog-axis="z" data-camera-jog-sign="1">Z+</button>
+        <button class="secondary" data-camera-jog-axis="z" data-camera-jog-sign="-1">Z-</button>
+        <button class="secondary" data-camera-jog-axis="c" data-camera-jog-sign="1">C+</button>
+        <button class="secondary" data-camera-jog-axis="c" data-camera-jog-sign="-1">C-</button>
+      </div>
+
+      <div class="form-grid compact-axis-grid">
+        <label>X mm<input id="camera-move-x" type="number" step="0.1" value="100"></label>
+        <label>Y mm<input id="camera-move-y" type="number" step="0.1" value="100"></label>
+        <button data-camera-control="move_xy">Move XY</button>
+        <button class="secondary" data-camera-control="move_camera_xy">Camera XY</button>
+        <label>Z mm<input id="camera-move-z" type="number" step="0.1" value="5"></label>
+        <label>C mm<input id="camera-move-c" type="number" step="0.1" value="0"></label>
+        <button data-camera-control="move_z">Move Z</button>
+        <button data-camera-control="move_c">Move C</button>
+      </div>
+    </div>
+  </article>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>window.SorterPages.camera();</script>
+{% endblock %}

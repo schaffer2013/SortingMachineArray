@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
   </head>
   <body>
-    <div class="app-shell">
+    <div class="app-shell {% block shell_class %}{% endblock %}">
       <header class="topbar">
         <div>
           <p class="eyebrow">SortingMachineArray</p>
@@ -21,6 +21,7 @@
       <div class="app-layout">
         <nav>
           <a class="{{ 'active' if request.path == '/' else '' }}" href="/">Dashboard</a>
+          <a class="{{ 'active' if request.path == '/camera' else '' }}" href="/camera">Camera</a>
           <a class="{{ 'active' if request.path == '/movement' else '' }}" href="/movement">Movement</a>
           <a class="{{ 'active' if request.path == '/machine' else '' }}" href="/machine">Machine</a>
           <a class="{{ 'active' if request.path == '/recognition' else '' }}" href="/recognition">Recognition</a>

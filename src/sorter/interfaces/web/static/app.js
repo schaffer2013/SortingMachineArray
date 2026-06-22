@@ -164,6 +164,86 @@ const renderSerialLog = (root, entries, emptyText, logKey) => {
 };
 
 window.SorterPages = {
+  camera() {
+    const feed = document.querySelector("#camera-live-feed");
+    const refreshButton = document.querySelector("#camera-refresh");
+    const statusRoot = document.querySelector("#camera-move-status");
+    const statePill = document.querySelector("#camera-move-state");
+    const message = document.querySelector("#camera-move-message");
+    const controlPayload = action => {
+      if (action === "move_xy" || action === "move_camera_xy") {
+        return {
+          x_mm: Number(document.querySelector("#camera-move-x").value),
+          y_mm: Number(document.querySelector("#camera-move-y").value),
+        };
+      }
+      if (action === "move_z") return {z_mm: Number(document.querySelector("#camera-move-z").value)};
+      if (action === "move_c") return {c_mm: Number(document.querySelector("#camera-move-c").value)};
+      return {};
+    };
+    async function sendControl(action, payload = controlPayload(action), sourceButton = null) {
+      if (sourceButton) sourceButton.disabled = true;
+      message.textContent = `Sending ${action.replaceAll("_", " ")}...`;
+      try {
+        const result = await json(`/api/control/${action}`, {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify(payload),
+        });
+        message.textContent = result.message || "";
+      } catch (error) {
+        message.textContent = error.message;
+      } finally {
+        if (sourceButton) sourceButton.disabled = false;
+        refresh();
+      }
+    }
+    refreshButton.onclick = () => {
+      feed.src = `/camera/stream?t=${Date.now()}`;
+    };
+    document.querySelectorAll("[data-camera-control]").forEach(button => {
+      button.onclick = () => sendControl(button.dataset.cameraControl, controlPayload(button.dataset.cameraControl), button);
+    });
+    document.querySelectorAll("[data-camera-jog-axis]").forEach(button => {
+      button.onclick = () => {
+        const axis = button.dataset.cameraJogAxis;
+        const sign = Number(button.dataset.cameraJogSign);
+        if (axis === "x" || axis === "y") {
+          const step = Number(document.querySelector("#camera-xy-step").value) * sign;
+          sendControl("jog_xy", axis === "x" ? {dx_mm: step, dy_mm: 0} : {dx_mm: 0, dy_mm: step}, button);
+        } else if (axis === "z") {
+          const step = Number(document.querySelector("#camera-z-step").value) * sign;
+          sendControl("jog_z", {dz_mm: step}, button);
+        } else if (axis === "c") {
+          const step = Number(document.querySelector("#camera-c-step").value) * sign;
+          sendControl("jog_c", {dc_mm: step}, button);
+        }
+      };
+    });
+    async function refresh() {
+      const status = await json("/api/status");
+      renderRuntimeBanner(status);
+      const hardwareMode = isHardwareMode(status);
+      const hardwareLive = isHardwareLive(status);
+      const controllerFault = Boolean(status.serial_board?.controller_fault);
+      statePill.textContent = controllerFault
+        ? "CONTROLLER FAULT"
+        : hardwareLive
+          ? "LIVE HARDWARE"
+          : isSimulationMode(status) ? "SIMULATION" : "HARDWARE NOT CONNECTED";
+      statePill.className = hardwareLive && !controllerFault ? "pill good-pill" : "pill warn-pill";
+      setButtonsDisabled(document, "[data-camera-control], [data-camera-jog-axis]", hardwareMode && (!hardwareLive || controllerFault));
+      statusRoot.innerHTML = [
+        ["X", `${Number(status.pose.x_mm || 0).toFixed(2)} mm`],
+        ["Y", `${Number(status.pose.y_mm || 0).toFixed(2)} mm`],
+        ["Z", `${Number(status.pose.z_mm || 0).toFixed(2)} mm`],
+        ["C", `${Number(status.pose.c_mm || 0).toFixed(2)} mm`],
+        ["Controller", controllerStateText(status)],
+        ["Command", status.active_command || "--"],
+      ].map(([k,v]) => `<article class="status-card"><div class="muted">${k}</div><strong>${v}</strong></article>`).join("");
+    }
+    refresh(); setInterval(refresh, 1200);
+  },
   dashboard() {
     const summary = document.querySelector("#status-summary");
     const piles = document.querySelector("#pile-grid");
