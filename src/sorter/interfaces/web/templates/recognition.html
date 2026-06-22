@@ -28,12 +28,6 @@
         <label>Expected set<input name="expected_set"></label>
         <label>Collector #<input name="expected_collector"></label>
       </div>
-      <div class="form-grid four-up">
-        <label>Crop left %<input name="crop_left" type="number" min="0" max="98" step="1" value="18"></label>
-        <label>Crop top %<input name="crop_top" type="number" min="0" max="98" step="1" value="6"></label>
-        <label>Crop right %<input name="crop_right" type="number" min="1" max="100" step="1" value="60"></label>
-        <label>Crop bottom %<input name="crop_bottom" type="number" min="1" max="100" step="1" value="92"></label>
-      </div>
       <div class="checkbox-row">
         <label><input type="checkbox" name="prefer_visual_small_pool"> Prefer visual small pool</label>
         <label><input type="checkbox" name="use_tracked_pool"> Use tracked pool</label>
@@ -50,11 +44,39 @@
   <div class="panel-heading">
     <div>
       <p class="eyebrow">Live source</p>
-      <h2>Camera feed</h2>
+      <h2>Camera crop</h2>
     </div>
     <button id="recognition-camera-refresh" type="button" class="secondary">Refresh</button>
   </div>
-  <img id="recognition-camera-feed" class="camera-feed recognition-camera-feed" src="/camera/stream" alt="Live camera feed">
+  <div class="camera-feed-layout">
+    <div id="recognition-crop-stage" class="camera-crop-stage">
+      <img id="recognition-camera-feed" class="camera-feed recognition-camera-feed" src="/camera/stream" alt="Live camera feed">
+      <div id="recognition-crop-overlay" class="camera-crop-overlay skew-crop-overlay" hidden>
+        <svg class="crop-quadrilateral" aria-hidden="true">
+          <polygon class="crop-polygon"></polygon>
+          <line class="crop-rule" data-crop-rule="vertical-first"></line>
+          <line class="crop-rule" data-crop-rule="vertical-second"></line>
+          <line class="crop-rule" data-crop-rule="horizontal-first"></line>
+          <line class="crop-rule" data-crop-rule="horizontal-second"></line>
+        </svg>
+        <span class="crop-handle nw" data-crop-handle="nw" title="Top left corner"></span>
+        <span class="crop-handle ne" data-crop-handle="ne" title="Top right corner"></span>
+        <span class="crop-handle se" data-crop-handle="se" title="Bottom right corner"></span>
+        <span class="crop-handle sw" data-crop-handle="sw" title="Bottom left corner"></span>
+      </div>
+    </div>
+    <aside class="crop-preview-panel">
+      <div class="panel-heading compact-heading">
+        <div>
+          <p class="eyebrow">Crop</p>
+          <h2>Card ratio</h2>
+        </div>
+        <button id="recognition-crop-toggle" type="button" class="secondary" aria-pressed="true">Hide</button>
+      </div>
+      <canvas id="recognition-crop-preview" class="camera-crop-preview" width="630" height="880"></canvas>
+      <p id="recognition-crop-meta" class="muted">Loading camera frame</p>
+    </aside>
+  </div>
 </section>
 <section class="panel">
   <p class="eyebrow">Output</p>

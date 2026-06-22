@@ -166,6 +166,276 @@ const renderSerialLog = (root, entries, emptyText, logKey) => {
   });
 };
 
+const createSkewCropTool = ({feed, cropStage, cropOverlay, cropToggle, cropPreview, cropMeta}) => {
+  const noop = {
+    refreshFrame: async () => false,
+    captureBlob: async () => null,
+  };
+  if (!feed || !cropStage || !cropOverlay || !cropPreview) return noop;
+  const cropImage = new Image();
+  const sourceCanvas = document.createElement("canvas");
+  const sourceContext = sourceCanvas.getContext("2d", {willReadFrequently: true});
+  const previewContext = cropPreview.getContext("2d");
+  const polygon = cropOverlay.querySelector(".crop-polygon");
+  const svg = cropOverlay.querySelector(".crop-quadrilateral");
+  const lines = {
+    verticalFirst: cropOverlay.querySelector('[data-crop-rule="vertical-first"]'),
+    verticalSecond: cropOverlay.querySelector('[data-crop-rule="vertical-second"]'),
+    horizontalFirst: cropOverlay.querySelector('[data-crop-rule="horizontal-first"]'),
+    horizontalSecond: cropOverlay.querySelector('[data-crop-rule="horizontal-second"]'),
+  };
+  const corners = ["nw", "ne", "se", "sw"];
+  let enabled = true;
+  let loading = false;
+  let framePromise = null;
+  let pointer = null;
+  let frame = {width: 0, height: 0};
+  let crop = {
+    nw: {x: 0.28, y: 0.08},
+    ne: {x: 0.72, y: 0.08},
+    se: {x: 0.72, y: 0.90},
+    sw: {x: 0.28, y: 0.90},
+  };
+  const clamp01 = value => Math.max(0, Math.min(1, Number(value) || 0));
+  const normalizeCrop = value => Object.fromEntries(corners.map(corner => [corner, {
+    x: clamp01(value[corner]?.x),
+    y: clamp01(value[corner]?.y),
+  }]));
+  const cloneCrop = value => Object.fromEntries(corners.map(corner => [corner, {...value[corner]}]));
+  const bounds = () => {
+    const stageRect = cropStage.getBoundingClientRect();
+    const feedRect = feed.getBoundingClientRect();
+    const imageWidth = frame.width || feed.naturalWidth || feedRect.width;
+    const imageHeight = frame.height || feed.naturalHeight || feedRect.height;
+    if (!imageWidth || !imageHeight || !feedRect.width || !feedRect.height) return null;
+    const imageAspect = imageWidth / imageHeight;
+    const feedAspect = feedRect.width / feedRect.height;
+    let width = feedRect.width;
+    let height = feedRect.height;
+    let left = feedRect.left - stageRect.left;
+    let top = feedRect.top - stageRect.top;
+    if (feedAspect > imageAspect) {
+      width = height * imageAspect;
+      left += (feedRect.width - width) / 2;
+    } else {
+      height = width / imageAspect;
+      top += (feedRect.height - height) / 2;
+    }
+    return {left, top, width, height, imageWidth, imageHeight};
+  };
+  const lerp = (start, end, amount) => ({
+    x: start.x + (end.x - start.x) * amount,
+    y: start.y + (end.y - start.y) * amount,
+  });
+  const setLine = (line, start, end) => {
+    if (!line) return;
+    line.setAttribute("x1", start.x);
+    line.setAttribute("y1", start.y);
+    line.setAttribute("x2", end.x);
+    line.setAttribute("y2", end.y);
+  };
+  const shiftedCrop = (source, dx, dy) => {
+    const xs = corners.map(corner => source[corner].x);
+    const ys = corners.map(corner => source[corner].y);
+    const shiftX = Math.max(-Math.min(...xs), Math.min(1 - Math.max(...xs), dx));
+    const shiftY = Math.max(-Math.min(...ys), Math.min(1 - Math.max(...ys), dy));
+    return Object.fromEntries(corners.map(corner => [corner, {
+      x: source[corner].x + shiftX,
+      y: source[corner].y + shiftY,
+    }]));
+  };
+  const pointFromEvent = event => {
+    const currentBounds = bounds();
+    if (!currentBounds) return null;
+    const stageRect = cropStage.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(1, (event.clientX - stageRect.left - currentBounds.left) / currentBounds.width)),
+      y: Math.max(0, Math.min(1, (event.clientY - stageRect.top - currentBounds.top) / currentBounds.height)),
+    };
+  };
+  const renderOverlay = () => {
+    const currentBounds = bounds();
+    if (!enabled || !currentBounds) {
+      cropOverlay.hidden = true;
+      return;
+    }
+    cropOverlay.hidden = false;
+    crop = normalizeCrop(crop);
+    cropOverlay.style.left = `${currentBounds.left}px`;
+    cropOverlay.style.top = `${currentBounds.top}px`;
+    cropOverlay.style.width = `${currentBounds.width}px`;
+    cropOverlay.style.height = `${currentBounds.height}px`;
+    svg?.setAttribute("viewBox", `0 0 ${currentBounds.width} ${currentBounds.height}`);
+    const points = Object.fromEntries(corners.map(corner => [corner, {
+      x: crop[corner].x * currentBounds.width,
+      y: crop[corner].y * currentBounds.height,
+    }]));
+    polygon?.setAttribute("points", corners.map(corner => `${points[corner].x},${points[corner].y}`).join(" "));
+    setLine(lines.verticalFirst, lerp(points.nw, points.ne, 1 / 3), lerp(points.sw, points.se, 1 / 3));
+    setLine(lines.verticalSecond, lerp(points.nw, points.ne, 2 / 3), lerp(points.sw, points.se, 2 / 3));
+    setLine(lines.horizontalFirst, lerp(points.nw, points.sw, 1 / 3), lerp(points.ne, points.se, 1 / 3));
+    setLine(lines.horizontalSecond, lerp(points.nw, points.sw, 2 / 3), lerp(points.ne, points.se, 2 / 3));
+    cropOverlay.querySelectorAll("[data-crop-handle]").forEach(handle => {
+      const point = points[handle.dataset.cropHandle];
+      handle.style.left = `${point.x}px`;
+      handle.style.top = `${point.y}px`;
+    });
+  };
+  const projectiveMapForUnitSquare = points => {
+    const [topLeft, topRight, bottomRight, bottomLeft] = points;
+    const dx1 = topRight.x - bottomRight.x;
+    const dy1 = topRight.y - bottomRight.y;
+    const dx2 = bottomLeft.x - bottomRight.x;
+    const dy2 = bottomLeft.y - bottomRight.y;
+    const dx3 = topLeft.x - topRight.x + bottomRight.x - bottomLeft.x;
+    const dy3 = topLeft.y - topRight.y + bottomRight.y - bottomLeft.y;
+    let g = 0;
+    let h = 0;
+    if (Math.abs(dx3) > 0.000001 || Math.abs(dy3) > 0.000001) {
+      const determinant = dx1 * dy2 - dx2 * dy1;
+      if (Math.abs(determinant) < 0.000001) return null;
+      g = (dx3 * dy2 - dx2 * dy3) / determinant;
+      h = (dx1 * dy3 - dx3 * dy1) / determinant;
+    }
+    return {
+      a: topRight.x - topLeft.x + g * topRight.x,
+      b: bottomLeft.x - topLeft.x + h * bottomLeft.x,
+      c: topLeft.x,
+      d: topRight.y - topLeft.y + g * topRight.y,
+      e: bottomLeft.y - topLeft.y + h * bottomLeft.y,
+      f: topLeft.y,
+      g,
+      h,
+    };
+  };
+  const transformPoint = (matrix, x, y) => {
+    const denominator = matrix.g * x + matrix.h * y + 1;
+    return {
+      x: (matrix.a * x + matrix.b * y + matrix.c) / denominator,
+      y: (matrix.d * x + matrix.e * y + matrix.f) / denominator,
+    };
+  };
+  const drawPreview = () => {
+    if (!sourceContext || !previewContext || !frame.width || !frame.height) return false;
+    sourceCanvas.width = frame.width;
+    sourceCanvas.height = frame.height;
+    sourceContext.drawImage(cropImage, 0, 0, frame.width, frame.height);
+    const source = sourceContext.getImageData(0, 0, frame.width, frame.height);
+    const output = previewContext.createImageData(cropPreview.width, cropPreview.height);
+    const sourcePoints = corners.map(corner => ({
+      x: crop[corner].x * (frame.width - 1),
+      y: crop[corner].y * (frame.height - 1),
+    }));
+    const matrix = projectiveMapForUnitSquare(sourcePoints);
+    if (!matrix) return false;
+    for (let y = 0; y < cropPreview.height; y += 1) {
+      const normalizedY = cropPreview.height > 1 ? y / (cropPreview.height - 1) : 0;
+      for (let x = 0; x < cropPreview.width; x += 1) {
+        const normalizedX = cropPreview.width > 1 ? x / (cropPreview.width - 1) : 0;
+        const sourcePoint = transformPoint(matrix, normalizedX, normalizedY);
+        const sourceX = Math.max(0, Math.min(frame.width - 1, Math.round(sourcePoint.x)));
+        const sourceY = Math.max(0, Math.min(frame.height - 1, Math.round(sourcePoint.y)));
+        const sourceIndex = (sourceY * frame.width + sourceX) * 4;
+        const outputIndex = (y * cropPreview.width + x) * 4;
+        output.data[outputIndex] = source.data[sourceIndex];
+        output.data[outputIndex + 1] = source.data[sourceIndex + 1];
+        output.data[outputIndex + 2] = source.data[sourceIndex + 2];
+        output.data[outputIndex + 3] = source.data[sourceIndex + 3];
+      }
+    }
+    previewContext.putImageData(output, 0, 0);
+    return true;
+  };
+  const updatePreview = () => {
+    previewContext?.clearRect(0, 0, cropPreview.width, cropPreview.height);
+    if (!enabled) {
+      if (cropMeta) cropMeta.textContent = "Overlay hidden";
+      return;
+    }
+    if (!cropImage.complete || !frame.width || !frame.height) {
+      if (cropMeta) cropMeta.textContent = "Loading camera frame";
+      return;
+    }
+    const rendered = drawPreview();
+    if (cropMeta) cropMeta.textContent = rendered ? `4-point crop -> ${cropPreview.width} x ${cropPreview.height}` : "Move corners apart to preview crop";
+  };
+  const refreshFrame = async () => {
+    if (!enabled) return false;
+    if (loading && framePromise) return framePromise;
+    loading = true;
+    framePromise = new Promise(resolve => {
+      cropImage.onload = () => {
+        loading = false;
+        frame = {width: cropImage.naturalWidth, height: cropImage.naturalHeight};
+        renderOverlay();
+        updatePreview();
+        resolve(true);
+      };
+      cropImage.onerror = () => {
+        loading = false;
+        if (cropMeta) cropMeta.textContent = "Camera frame unavailable";
+        resolve(false);
+      };
+      cropImage.src = `/api/camera/frame.jpg?t=${Date.now()}`;
+    });
+    return framePromise;
+  };
+  const captureBlob = async () => {
+    if (!enabled) return null;
+    if (!frame.width || !frame.height) {
+      const loaded = await refreshFrame();
+      if (!loaded) return null;
+    }
+    if (!drawPreview()) return null;
+    return new Promise(resolve => cropPreview.toBlob(resolve, "image/png"));
+  };
+  cropToggle?.addEventListener("click", () => {
+    enabled = !enabled;
+    cropToggle.textContent = enabled ? "Hide" : "Show";
+    cropToggle.setAttribute("aria-pressed", String(enabled));
+    renderOverlay();
+    updatePreview();
+    if (enabled) refreshFrame();
+  });
+  cropOverlay.addEventListener("pointerdown", event => {
+    if (!enabled) return;
+    const point = pointFromEvent(event);
+    if (!point) return;
+    pointer = {
+      id: event.pointerId,
+      mode: event.target.dataset.cropHandle ? "corner" : "drag",
+      handle: event.target.dataset.cropHandle || null,
+      startPoint: point,
+      startCrop: cloneCrop(crop),
+    };
+    cropOverlay.setPointerCapture(event.pointerId);
+  });
+  cropOverlay.addEventListener("pointermove", event => {
+    if (!pointer || pointer.id !== event.pointerId) return;
+    const point = pointFromEvent(event);
+    if (!point) return;
+    crop = pointer.mode === "drag"
+      ? shiftedCrop(pointer.startCrop, point.x - pointer.startPoint.x, point.y - pointer.startPoint.y)
+      : normalizeCrop({...pointer.startCrop, [pointer.handle]: {x: point.x, y: point.y}});
+    renderOverlay();
+    updatePreview();
+  });
+  cropOverlay.addEventListener("pointerup", event => {
+    if (pointer?.id === event.pointerId) pointer = null;
+  });
+  cropOverlay.addEventListener("pointercancel", event => {
+    if (pointer?.id === event.pointerId) pointer = null;
+  });
+  window.addEventListener("resize", () => {
+    renderOverlay();
+    updatePreview();
+  });
+  renderOverlay();
+  updatePreview();
+  refreshFrame();
+  return {refreshFrame, captureBlob};
+};
+
 window.SorterPages = {
   camera() {
     const feed = document.querySelector("#camera-live-feed");
@@ -1022,9 +1292,18 @@ window.SorterPages = {
     const result = document.querySelector("#recognition-result");
     const cameraFeed = document.querySelector("#recognition-camera-feed");
     const cameraRefresh = document.querySelector("#recognition-camera-refresh");
+    const cropTool = createSkewCropTool({
+      feed: cameraFeed,
+      cropStage: document.querySelector("#recognition-crop-stage"),
+      cropOverlay: document.querySelector("#recognition-crop-overlay"),
+      cropToggle: document.querySelector("#recognition-crop-toggle"),
+      cropPreview: document.querySelector("#recognition-crop-preview"),
+      cropMeta: document.querySelector("#recognition-crop-meta"),
+    });
     let recognitionSource = "upload";
     cameraRefresh.onclick = () => {
       cameraFeed.src = `/camera/stream?t=${Date.now()}`;
+      cropTool.refreshFrame();
     };
     document.querySelectorAll("[data-recognition-source]").forEach(button => {
       button.onclick = () => {
@@ -1047,6 +1326,17 @@ window.SorterPages = {
         data.set(name, form.elements[name].checked ? "true" : "false");
       });
       result.textContent = recognitionSource === "camera" ? "Capturing live frame..." : "Recognizing...";
+      if (recognitionSource === "camera") {
+        await cropTool.refreshFrame();
+        const cropBlob = await cropTool.captureBlob();
+        if (!cropBlob) {
+          result.textContent = "Camera crop unavailable";
+          return;
+        }
+        data.set("source", "upload");
+        data.set("image", cropBlob, "live-card-crop.png");
+        result.textContent = "Recognizing cropped live frame...";
+      }
       const response = await fetch("/api/recognition/run", {method:"POST", body:data});
       const body = await response.json();
       result.textContent = body.ok ? pretty(body.result) : body.message;
