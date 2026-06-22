@@ -157,6 +157,7 @@ body {
 .compact-axis-grid { gap:10px; }
 .compact-axis-grid button { min-height:44px; }
 .button-row { display:flex; gap:10px; flex-wrap:wrap; margin: 14px 0; }
+.compact-button-row { margin:0; }
 button {
   border:0; border-radius: 999px; padding: 11px 16px; background: var(--accent); color: var(--button-text);
   font-weight:700; cursor:pointer;
