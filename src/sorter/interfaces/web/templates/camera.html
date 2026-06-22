@@ -11,7 +11,32 @@
       </div>
       <button id="camera-refresh" type="button" class="secondary">Refresh</button>
     </div>
-    <img id="camera-live-feed" class="camera-feed large-camera-feed" src="/camera/stream" alt="Live camera feed">
+    <div class="camera-feed-layout">
+      <div id="camera-crop-stage" class="camera-crop-stage">
+        <img id="camera-live-feed" class="camera-feed large-camera-feed" src="/camera/stream" alt="Live camera feed">
+        <div id="camera-crop-overlay" class="camera-crop-overlay" hidden>
+          <span class="crop-rule rule-v first"></span>
+          <span class="crop-rule rule-v second"></span>
+          <span class="crop-rule rule-h first"></span>
+          <span class="crop-rule rule-h second"></span>
+          <span class="crop-handle nw" data-crop-handle="nw"></span>
+          <span class="crop-handle ne" data-crop-handle="ne"></span>
+          <span class="crop-handle sw" data-crop-handle="sw"></span>
+          <span class="crop-handle se" data-crop-handle="se"></span>
+        </div>
+      </div>
+      <aside class="crop-preview-panel">
+        <div class="panel-heading compact-heading">
+          <div>
+            <p class="eyebrow">Crop</p>
+            <h2>Card ratio</h2>
+          </div>
+          <button id="camera-crop-toggle" type="button" class="secondary" aria-pressed="false">Show</button>
+        </div>
+        <canvas id="camera-crop-preview" class="camera-crop-preview" width="630" height="880"></canvas>
+        <p id="camera-crop-meta" class="muted">Overlay hidden</p>
+      </aside>
+    </div>
   </article>
 
   <article class="panel compact-motion-panel">
