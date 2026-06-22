@@ -22,7 +22,13 @@
 
 - Track the software version for each commit as `x.y.z-SHA`, where `x.y.z` comes from the project version in `pyproject.toml` and `SHA` is the short Git commit SHA.
 - When making a release-oriented or operator-visible change, confirm that the web System tab reports the expected `x.y.z-SHA` after the commit is created.
-- Increment `x.y.z` intentionally when the user requests a version bump or when the change should be treated as a new packaged software version; otherwise the commit SHA uniquely identifies the build.
+- Every merge to `main` must include a critical SemVer evaluation: decide whether the change is patch, minor, major, or documentation-only before completing the merge.
+- Increment the `pyproject.toml` version for every merge to `main` that changes software behavior, runtime operation, deployment, configuration, or operator-visible output; use a patch bump unless the evaluation justifies a minor or major bump.
+- Documentation-only merges may skip the version bump only when they do not change software behavior, runtime operation, deployment behavior, configuration consumed by the app, or operator-visible output.
+- Treat patch bumps as the default for compatible bug fixes, reliability improvements, tuning, documentation/configuration changes that affect operation, deployment fixes, and other routine mainline changes.
+- Treat minor bumps as compatible feature additions or meaningful new capabilities, such as new recognition workflows, new hardware controls, new integration behavior, or new calibration capabilities.
+- Treat major bumps as breaking or operator-impacting changes, such as incompatible API contracts, hardware assumptions, calibration/data formats, deployment requirements, or behavior that makes older setup/data unsafe or incompatible.
+- In merge notes or the commit/PR description, record the version decision and the reason, for example `Version: patch -> 0.1.7 because this fixes camera recognition setup without changing contracts`, or `Version: documentation-only -> no bump because this updates contributor workflow notes only`.
 
 ## Raspberry Pi deployment verification
 
