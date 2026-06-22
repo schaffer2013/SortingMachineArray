@@ -1172,14 +1172,31 @@ class WebRuntime:
         }
 
     def recognize_uploaded_image(self, image_path: Path, request_payload: dict[str, Any]) -> dict[str, Any]:
+        return self._recognize_image(image_path, request_payload, camera_id="web_upload", source_mode="manual_web")
+
+    def recognize_camera_image(self, request_payload: dict[str, Any]) -> dict[str, Any]:
+        image = self.latest_camera_image()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as handle:
+            temp_path = Path(handle.name)
+        image.save(temp_path, format="JPEG", quality=92)
+        return self._recognize_image(temp_path, request_payload, camera_id="web_camera", source_mode="camera_web")
+
+    def _recognize_image(
+        self,
+        image_path: Path,
+        request_payload: dict[str, Any],
+        *,
+        camera_id: str,
+        source_mode: str,
+    ) -> dict[str, Any]:
         frame = Frame(
             frame_id=f"web-{int(time.time() * 1000)}",
             path=str(image_path),
             pile_id=None,
             metadata={"recognition_request": request_payload},
             captured_at_utc=datetime.now(UTC).isoformat(),
-            camera_id="web_upload",
-            source_mode="manual_web",
+            camera_id=camera_id,
+            source_mode=source_mode,
         )
         result = self.orchestrator.recognizer.recognize_top_card(frame)
         payload = asdict(result)
@@ -1441,13 +1458,7 @@ def create_web_app(
 
     @app.post("/api/recognition/run")
     def api_recognition_run():
-        upload = request.files.get("image")
-        if upload is None or not upload.filename:
-            return jsonify({"ok": False, "message": "Image upload required"}), 400
-        suffix = Path(upload.filename).suffix or ".png"
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
-            temp_path = Path(handle.name)
-        upload.save(temp_path)
+        source = request.form.get("source", "upload")
         payload = {
             "mode": request.form.get("mode", "greenfield"),
             "backend": request.form.get("backend") or None,
@@ -1465,7 +1476,17 @@ def create_web_app(
                 "collector_number": expected_collector or None,
             }
         try:
-            result = runtime.recognize_uploaded_image(temp_path, payload)
+            if source == "camera":
+                result = runtime.recognize_camera_image(payload)
+            else:
+                upload = request.files.get("image")
+                if upload is None or not upload.filename:
+                    return jsonify({"ok": False, "message": "Image upload required"}), 400
+                suffix = Path(upload.filename).suffix or ".png"
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
+                    temp_path = Path(handle.name)
+                upload.save(temp_path)
+                result = runtime.recognize_uploaded_image(temp_path, payload)
             return jsonify({"ok": True, "result": result})
         except Exception as exc:
             return jsonify({"ok": False, "message": str(exc)}), 500

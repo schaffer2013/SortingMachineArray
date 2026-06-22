@@ -757,6 +757,17 @@ window.SorterPages = {
     const validation = document.querySelector("#card-validation");
     const form = document.querySelector("#recognition-form");
     const result = document.querySelector("#recognition-result");
+    const cameraFeed = document.querySelector("#recognition-camera-feed");
+    const cameraRefresh = document.querySelector("#recognition-camera-refresh");
+    let recognitionSource = "upload";
+    cameraRefresh.onclick = () => {
+      cameraFeed.src = `/camera/stream?t=${Date.now()}`;
+    };
+    document.querySelectorAll("[data-recognition-source]").forEach(button => {
+      button.onclick = () => {
+        recognitionSource = button.dataset.recognitionSource;
+      };
+    });
     query.oninput = async () => {
       const data = await json(`/api/card/validate?q=${encodeURIComponent(query.value)}`);
       validation.innerHTML = data.valid
@@ -768,10 +779,11 @@ window.SorterPages = {
     form.onsubmit = async event => {
       event.preventDefault();
       const data = new FormData(form);
+      data.set("source", recognitionSource);
       ["prefer_visual_small_pool","use_tracked_pool","track_result"].forEach(name => {
         data.set(name, form.elements[name].checked ? "true" : "false");
       });
-      result.textContent = "Recognizing…";
+      result.textContent = recognitionSource === "camera" ? "Capturing live frame..." : "Recognizing...";
       const response = await fetch("/api/recognition/run", {method:"POST", body:data});
       const body = await response.json();
       result.textContent = body.ok ? pretty(body.result) : body.message;

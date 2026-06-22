@@ -12,7 +12,7 @@
     <p class="eyebrow">Manual review</p>
     <h2>Recognize an image</h2>
     <form id="recognition-form">
-      <label>Image<input name="image" type="file" accept="image/*" required></label>
+      <label>Image<input name="image" type="file" accept="image/*"></label>
       <div class="form-grid">
         <label>Backend<input name="backend" placeholder="moss_machine"></label>
         <label>Mode
@@ -31,9 +31,22 @@
         <label><input type="checkbox" name="use_tracked_pool"> Use tracked pool</label>
         <label><input type="checkbox" name="track_result"> Track result</label>
       </div>
-      <button>Run recognition</button>
+      <div class="button-row">
+        <button data-recognition-source="upload">Run upload</button>
+        <button class="secondary" data-recognition-source="camera">Use live camera</button>
+      </div>
     </form>
   </article>
+</section>
+<section class="panel">
+  <div class="panel-heading">
+    <div>
+      <p class="eyebrow">Live source</p>
+      <h2>Camera feed</h2>
+    </div>
+    <button id="recognition-camera-refresh" type="button" class="secondary">Refresh</button>
+  </div>
+  <img id="recognition-camera-feed" class="camera-feed recognition-camera-feed" src="/camera/stream" alt="Live camera feed">
 </section>
 <section class="panel">
   <p class="eyebrow">Output</p>

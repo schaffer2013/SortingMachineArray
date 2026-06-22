@@ -100,6 +100,7 @@ body {
   border: 1px solid var(--line); background: var(--code-bg);
 }
 .large-camera-feed { min-height: clamp(520px, calc(100vh - 190px), 980px); object-fit: contain; }
+.recognition-camera-feed { max-height: min(52vh, 620px); object-fit: contain; }
 .camera-panel, .compact-motion-panel { min-width:0; }
 .camera-motion-tools { display:grid; gap:16px; }
 .compact-status { grid-template-columns: repeat(2, minmax(0, 1fr)); }
