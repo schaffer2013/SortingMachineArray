@@ -24,6 +24,31 @@
 - When making a release-oriented or operator-visible change, confirm that the web System tab reports the expected `x.y.z-SHA` after the commit is created.
 - Increment `x.y.z` intentionally when the user requests a version bump or when the change should be treated as a new packaged software version; otherwise the commit SHA uniquely identifies the build.
 
+## Raspberry Pi deployment verification
+
+- Before deploying to the board, make sure the development machine is clean and on the intended commit:
+  - `git status --short --branch`
+  - `git rev-parse --short HEAD`
+- Make sure GitHub has the same commit before asking the Pi to update:
+  - `git push origin main`
+  - `git fetch origin main`
+  - `git rev-parse --short main`
+  - `git rev-parse --short origin/main`
+- Check the board's current and remote view from the web API:
+  - `Invoke-WebRequest -UseBasicParsing -Uri 'http://sortingmachine.local:8000/api/system?refresh=true'`
+  - Confirm `current_sha`, `remote_sha`, `commits_behind`, `dirty`, and `can_update`.
+- Pull the GitHub `main` commit onto the board through the web API:
+  - `Invoke-WebRequest -UseBasicParsing -Method POST -Uri 'http://sortingmachine.local:8000/api/system/update'`
+  - Confirm the response reports the expected `version` and `current_sha`.
+- If the update response says `restart_required: true`, restart the Pi web service before testing new routes or UI:
+  - `ssh raspberry@sortingmachine 'sudo systemctl restart sortingmachine-web'`
+  - If SSH is unavailable, have the operator run `sudo systemctl restart sortingmachine-web` on the Pi.
+- After restart, verify the running web process, not just the working copy:
+  - reload the relevant page, such as `http://sortingmachine.local:8000/camera`
+  - call `http://sortingmachine.local:8000/api/system`
+  - confirm the System tab/API reports the expected `x.y.z-SHA`.
+- Treat deployment as incomplete until all three locations agree: development `main`, `origin/main`, and the Pi System API.
+
 ## Collection integration
 
 - Before implementing or changing anything that interfaces with the collection or registration service, review the current collection API contract in:
