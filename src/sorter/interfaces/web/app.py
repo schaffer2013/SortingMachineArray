@@ -144,7 +144,7 @@ class SerialBoardSession:
                     "hwid": port.hwid or "",
                 }
             )
-        return ports
+        return sorted(ports, key=lambda item: not _port_mentions_marlin(item))
 
     def auto_connect(self) -> dict[str, Any]:
         if self.status()["session_open"]:
@@ -418,6 +418,8 @@ class SerialBoardSession:
 def _port_auto_score(port: dict[str, str]) -> tuple[int, str]:
     text = " ".join([port.get("device", ""), port.get("description", ""), port.get("hwid", "")]).lower()
     score = 0
+    if "marlin" in text:
+        score += 100
     if "usb" in text:
         score += 10
     if "bluetooth" in text or "bthenum" in text:
@@ -425,6 +427,11 @@ def _port_auto_score(port: dict[str, str]) -> tuple[int, str]:
     if "unknown" in text:
         score -= 5
     return (score, port.get("device", ""))
+
+
+def _port_mentions_marlin(port: dict[str, str]) -> bool:
+    text = " ".join([port.get("device", ""), port.get("description", ""), port.get("hwid", "")]).lower()
+    return "marlin" in text
 
 
 def _utc_now_iso() -> str:
