@@ -24,13 +24,16 @@ const renderRuntimeBanner = status => {
   const banner = document.querySelector("#runtime-banner");
   if (!banner || !status) return;
   const faulted = Boolean(status.serial_board?.controller_fault);
-  const live = isHardwareLive(status);
+  const serialLive = isVerifiedSerialController(status);
+  const directHardware = status.runtime_target === "hardware_direct";
   const simulation = status.runtime_target === "simulation";
-  banner.className = live && !faulted ? "runtime-banner live" : "runtime-banner sim";
+  banner.className = (serialLive || directHardware) && !faulted ? "runtime-banner live" : "runtime-banner sim";
   banner.textContent = faulted
     ? "CONTROLLER FAULT: reset or power-cycle controller"
-    : live
-    ? `LIVE HARDWARE: ${status.serial_board?.port || "direct Pi adapters"}`
+    : serialLive
+    ? `LIVE HARDWARE: ${status.serial_board?.port}`
+    : directHardware
+      ? "HARDWARE RUNTIME: direct Pi adapters"
     : simulation
       ? "SIMULATION"
       : "HARDWARE NOT CONNECTED";
@@ -55,9 +58,9 @@ setInterval(refreshRuntimeBanner, 2000);
 const isHardwareMode = status => status.runtime_mode === "hardware";
 const isSimulationMode = status => status.runtime_mode === "simulation";
 const isHardwareLive = status => status.runtime_target === "hardware_serial" || status.runtime_target === "hardware_direct";
+const isVerifiedSerialController = status => status.runtime_target === "hardware_serial" && Boolean(status.serial_board?.connected);
 const controllerStateText = status => {
   if (status.serial_board?.controller_fault) return status.serial_board?.last_error || "Faulted; reset controller";
-  if (status.runtime_target === "hardware_direct" && !status.serial_board?.session_open) return "direct Pi adapters";
   return status.serial_board?.connection_state || "--";
 };
 const setButtonsDisabled = (root, selector, disabled) => {

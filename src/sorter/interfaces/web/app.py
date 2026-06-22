@@ -558,7 +558,7 @@ class WebRuntime:
                     "SIMULATION runtime selected"
                     if self.runtime_mode == "simulation"
                     else (
-                        "Hardware backend connected through direct Pi adapters"
+                        "Hardware runtime using direct Pi adapters"
                         if self.hardware_runtime
                         else f"Live board connected on {serial_status['port']}"
                         if live_connected
