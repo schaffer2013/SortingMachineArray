@@ -469,6 +469,7 @@ class WebRuntime:
         slow_ms: int = 0,
         light_profiles_path: Path | None = None,
         calibration_path: Path | None = None,
+        runtime_mode: str = "hardware",
     ):
         self.orchestrator = orchestrator
         self.calibration = calibration
@@ -484,12 +485,13 @@ class WebRuntime:
         self.repo_root = _repo_root()
         self.light_profiles = self._load_light_profiles()
         self.serial_board = SerialBoardSession()
-        self.runtime_mode = "hardware"
+        self.runtime_mode = runtime_mode
+        self.hardware_runtime = bool(getattr(orchestrator, "hardware_runtime", False))
         self.lock = threading.RLock()
 
     def start_run(self) -> dict[str, Any]:
         with self.lock:
-            if self.runtime_mode != "simulation":
+            if self.runtime_mode != "simulation" and not self.hardware_runtime:
                 return {
                     "ok": False,
                     "message": "Automated runs require Simulation runtime until the hardware run path is implemented",
@@ -529,7 +531,7 @@ class WebRuntime:
             live_connected = self.runtime_mode == "hardware" and bool(serial_status["connected"])
             session_open = bool(serial_status.get("session_open"))
             runtime_target = "simulation" if self.runtime_mode == "simulation" else (
-                "hardware_serial" if live_connected else "hardware_unavailable"
+                "hardware_direct" if self.hardware_runtime else ("hardware_serial" if live_connected else "hardware_unavailable")
             )
             pose = asdict(snapshot.pose)
             if live_connected:
@@ -556,7 +558,9 @@ class WebRuntime:
                     "SIMULATION runtime selected"
                     if self.runtime_mode == "simulation"
                     else (
-                        f"Live board connected on {serial_status['port']}"
+                        "Hardware backend connected through direct Pi adapters"
+                        if self.hardware_runtime
+                        else f"Live board connected on {serial_status['port']}"
                         if live_connected
                         else (
                         f"Serial session is {serial_status.get('connection_state')} on {serial_status.get('port')}; not verified live"
@@ -778,6 +782,8 @@ class WebRuntime:
         raise ValueError(f"Unsupported control action: {action}")
 
     def _hardware_control(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if self.hardware_runtime:
+            return self._direct_hardware_control(action, payload)
         serial_status = self.serial_board.status()
         if action in {"vacuum_on", "vacuum_off"}:
             raise ValueError("Vacuum hardware control is not wired yet; select Simulation runtime to use simulated vacuum")
@@ -803,6 +809,94 @@ class WebRuntime:
                 self.orchestrator.lights.set_status(profile_name)
             return {"ok": True, "message": f"Applied live board light profile {profile_name}"}
         raise ValueError(f"Unsupported hardware control action: {action}")
+
+    def _direct_hardware_control(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if action in MOTION_CONTROL_ACTIONS:
+            return self._direct_motion_control(action, payload)
+        if action == "vacuum_on":
+            self.orchestrator.vacuum.on()
+            self.orchestrator.world.snapshot.pose.vacuum_on = True
+            return {"ok": True, "message": "Vacuum enabled"}
+        if action == "vacuum_off":
+            self.orchestrator.vacuum.off()
+            self.orchestrator.world.snapshot.pose.vacuum_on = False
+            return {"ok": True, "message": "Vacuum disabled"}
+        if action == "lights":
+            status = str(payload.get("status", "idle"))
+            self.orchestrator.lights.set_status(status)
+            return {"ok": True, "message": f"Lights set to {status}"}
+        if action == "light_profile":
+            profile_name = str(payload["name"])
+            profile = self.light_profiles.get(profile_name)
+            if profile is None:
+                raise ValueError(f"Unknown light profile: {profile_name}")
+            setter = getattr(self.orchestrator.lights, "set_rgb", None)
+            if not callable(setter):
+                raise ValueError("Direct hardware lights do not support RGB profiles")
+            setter(profile["red"], profile["green"], profile["blue"], profile_name=profile_name)
+            return {"ok": True, "message": f"Applied light profile {profile_name}"}
+        raise ValueError(f"Unsupported direct hardware action: {action}")
+
+    def _direct_motion_control(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+        snapshot = self.orchestrator.world.snapshot
+        if action == "initialize":
+            return self.initialize_machine()
+        if action == "home":
+            self.orchestrator.motion.home_axes()
+            snapshot.pose.x_mm = 0.0
+            snapshot.pose.y_mm = 0.0
+            snapshot.pose.z_mm = self.calibration.z_home_mm
+            snapshot.pose.c_mm = self.calibration.c_home_mm
+            self.machine_initialized = False
+            return {"ok": True, "message": "Axes homed"}
+        if action in {"home_x", "home_y", "home_z", "home_c"}:
+            axis = action.removeprefix("home_").upper()
+            self.orchestrator.motion.transport.send_command(f"G28 {axis}")
+            if axis == "X":
+                snapshot.pose.x_mm = 0.0
+            elif axis == "Y":
+                snapshot.pose.y_mm = 0.0
+            elif axis == "Z":
+                snapshot.pose.z_mm = self.calibration.z_home_mm
+            elif axis == "C":
+                snapshot.pose.c_mm = self.calibration.c_home_mm
+            self.machine_initialized = False
+            return {"ok": True, "message": f"Homed {axis} axis"}
+        if action == "wait_idle":
+            self.orchestrator.motion.wait_until_idle()
+            return {"ok": True, "message": "Motion idle"}
+        if action == "move_xy":
+            x_mm = float(payload["x_mm"])
+            y_mm = float(payload["y_mm"])
+            self.orchestrator.move_vac_xy_when_safe(self.calibration, x_mm, y_mm)
+            return {"ok": True, "message": f"Moved vacuum XY to ({x_mm:.2f}, {y_mm:.2f})"}
+        if action == "move_camera_xy":
+            x_mm = float(payload["x_mm"])
+            y_mm = float(payload["y_mm"])
+            self.orchestrator.move_camera_to_vacuum_xy_when_safe(self.calibration, x_mm, y_mm)
+            return {"ok": True, "message": f"Moved camera over ({x_mm:.2f}, {y_mm:.2f})"}
+        if action == "move_z":
+            z_mm = float(payload["z_mm"])
+            self.orchestrator.move_vac_z(z_mm)
+            return {"ok": True, "message": f"Moved vacuum Z to {z_mm:.2f}"}
+        if action == "move_c":
+            c_mm = float(payload["c_mm"])
+            self._move_c(c_mm)
+            return {"ok": True, "message": f"Moved suction C to {c_mm:.2f}"}
+        if action == "jog_xy":
+            return self.control("move_xy", {
+                "x_mm": float(snapshot.pose.x_mm) + float(payload.get("dx_mm", 0.0)),
+                "y_mm": float(snapshot.pose.y_mm) + float(payload.get("dy_mm", 0.0)),
+            })
+        if action == "jog_z":
+            return self.control("move_z", {"z_mm": float(snapshot.pose.z_mm) + float(payload.get("dz_mm", 0.0))})
+        if action == "jog_c":
+            return self.control("move_c", {"c_mm": float(snapshot.pose.c_mm) + float(payload.get("dc_mm", 0.0))})
+        if action == "jog_zc_interface":
+            dz_mm = float(payload.get("dz_mm", 0.0))
+            self._move_zc(float(snapshot.pose.z_mm) + dz_mm, float(snapshot.pose.c_mm) - dz_mm)
+            return {"ok": True, "message": "Moved Z/C interface"}
+        raise ValueError(f"Unsupported direct motion action: {action}")
 
     def apply_neopixel_display(self, payload: dict[str, Any]) -> dict[str, Any]:
         if self.runtime_mode != "hardware":
@@ -1261,6 +1355,7 @@ def create_web_app(
     slow_ms: int = 0,
     light_profiles_path: Path | None = None,
     calibration_path: Path | None = None,
+    runtime_mode: str = "hardware",
 ) -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
     runtime = WebRuntime(
@@ -1269,6 +1364,7 @@ def create_web_app(
         slow_ms=slow_ms,
         light_profiles_path=light_profiles_path,
         calibration_path=calibration_path,
+        runtime_mode=runtime_mode,
     )
     app.config["runtime"] = runtime
 

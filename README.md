@@ -51,7 +51,24 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 	- recent run history
 	- capability map that distinguishes ready vs partial hardware-facing features
 
-The current web console is immediately useful in `sim` mode. The camera stream endpoint is already exposed, but the present `PiCamera2Adapter` is still a hardware stub, so true live Pi-camera frames require the hardware capture path to be completed.
+The current web console is immediately useful in `sim` mode. In `hardware` mode, the Pi camera adapter captures still frames to `data/vision/captures/` and passes those image paths into the real recognizer backend.
+
+## Raspberry Pi real hardware service
+
+- Install the always-on Pi service from a Raspberry Pi shell:
+	- `bash scripts/install-rpi-webserver.sh`
+- The service is named `sortingmachine-web` and starts at boot after the network is online.
+- Every service start pulls `origin/main`, updates submodules, installs the editable parent package, installs the vendored recognizer with OCR/Moss extras, then runs:
+	- `SORTER_MODE=hardware python -m sorter.interfaces.web_runner`
+- Default hardware environment:
+	- `SORTER_RECOGNIZER_BACKEND=moss_machine`
+	- `SORTER_FUZZY_ENIGMA_SIM_TRUTH_FALLBACK=0`
+	- `SORTER_MARLIN_SERIAL_PORT=/dev/ttyACM0`
+	- `SORTER_MARLIN_BAUD_RATE=115200`
+	- `SORTER_VACUUM_RELAY_PIN=17`
+- The hardware web runtime uses the Marlin serial transport, PiCamera2 image capture, GPIO vacuum relay control, NeoPixel light commands through Marlin, local catalog metadata, and SQLite run storage. It rejects `SORTER_RECOGNIZER_BACKEND=sim_truth` in hardware mode.
+- Open the console from another machine at:
+	- `http://sortingmachine.local:8000`
 
 
 

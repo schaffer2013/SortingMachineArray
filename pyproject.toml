@@ -17,6 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 hardware = [
   "pyserial>=3.5",
+  "gpiozero>=2.0",
 ]
 dev = [
   "pytest>=8.0.0",
