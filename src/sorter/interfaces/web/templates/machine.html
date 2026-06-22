@@ -27,6 +27,37 @@
 </section>
 <section class="two-column">
   <article class="panel">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">Automated lighting</p>
+        <h2>Optimize from camera</h2>
+      </div>
+      <span id="lighting-optimizer-pill" class="pill">Idle</span>
+    </div>
+    <div class="form-grid three-up">
+      <label>Samples
+        <input id="lighting-opt-samples" type="number" min="3" max="24" step="1" value="12">
+      </label>
+      <label>Target brightness
+        <input id="lighting-opt-target" type="number" min="20" max="235" step="1" value="122">
+      </label>
+      <label>Settle ms
+        <input id="lighting-opt-settle" type="number" min="0" max="2000" step="25" value="150">
+      </label>
+    </div>
+    <div class="button-row">
+      <button id="lighting-opt-run" type="button">Run optimizer</button>
+    </div>
+    <p id="lighting-opt-message" class="muted"></p>
+  </article>
+  <article class="panel">
+    <p class="eyebrow">Optimizer result</p>
+    <h2>Best candidate</h2>
+    <div id="lighting-opt-result" class="status-cards"></div>
+  </article>
+</section>
+<section class="two-column">
+  <article class="panel">
     <p class="eyebrow">NeoPixel ring</p>
     <h2>Saved light profiles</h2>
     <label>Profile

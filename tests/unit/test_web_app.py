@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 import re
 
 import pytest
+from PIL import Image
 
 from sorter.bootstrap import build_sim_orchestrator
 from sorter.config.calibration import CalibrationProfile
 from sorter.config.settings import AppSettings
 from sorter.interfaces.web import app as web_app_module
 from sorter.interfaces.web import create_web_app
+from sorter.ports.camera import Frame
 
 
 def _client(runtime_mode: str = "hardware"):
@@ -98,6 +101,32 @@ def test_light_profile_is_sent_to_connected_serial_board(tmp_path):
 
     assert response.status_code == 200
     assert runtime.serial_board.rgb_commands == [(1, 2, 42, "inspection-blue")]
+
+
+def test_lighting_optimizer_sweeps_camera_frames_and_applies_best(tmp_path):
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.config["runtime"].runtime_mode = "simulation"
+    app.testing = True
+    orchestrator.camera = BrightnessCamera(orchestrator.lights, tmp_path)
+    client = app.test_client()
+
+    response = client.post(
+        "/api/lights/optimize",
+        json={"max_samples": 6, "settle_ms": 0, "target_brightness": 96},
+    )
+    payload = response.get_json()
+    status = client.get("/api/status").get_json()
+
+    assert response.status_code == 200
+    assert payload["best"]["red"] == 96
+    assert payload["best"]["green"] == 96
+    assert payload["best"]["blue"] == 96
+    assert len(payload["samples"]) == 6
+    assert status["lights_profile"] == "optimized"
+    assert status["lights_rgb"] == [96, 96, 96]
 
 
 def test_serial_api_lists_connects_sends_and_disconnects():
@@ -694,6 +723,29 @@ def test_web_home_sets_vertical_axes_to_configured_max():
 
 def _pose_coordinates(pose):
     return {key: pose[key] for key in ("x_mm", "y_mm", "z_mm")}
+
+
+class BrightnessCamera:
+    def __init__(self, lights, capture_dir: Path):
+        self.lights = lights
+        self.capture_dir = capture_dir
+        self.index = 0
+
+    def capture_frame(self):
+        red, green, blue = getattr(self.lights, "last_rgb", (0, 0, 0))
+        brightness = max(0, min(255, int((red + green + blue) / 3)))
+        path = self.capture_dir / f"lighting-{self.index}.jpg"
+        self.index += 1
+        Image.new("RGB", (48, 48), (brightness, brightness, brightness)).save(path)
+        return Frame(
+            frame_id=f"lighting-{self.index}",
+            path=str(path),
+            pile_id=None,
+            metadata={},
+            captured_at_utc="2026-01-01T00:00:00Z",
+            camera_id="brightness-test",
+            source_mode="test",
+        )
 
 
 class FakeSerialBoard:

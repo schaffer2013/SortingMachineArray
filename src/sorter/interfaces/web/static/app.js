@@ -312,6 +312,10 @@ window.SorterPages = {
     const pixelDeleteProfile = document.querySelector("#pixel-delete-profile");
     const pixelSaveProfile = document.querySelector("#pixel-save-profile");
     const pixelMessage = document.querySelector("#pixel-message");
+    const optimizerRun = document.querySelector("#lighting-opt-run");
+    const optimizerPill = document.querySelector("#lighting-optimizer-pill");
+    const optimizerMessage = document.querySelector("#lighting-opt-message");
+    const optimizerResult = document.querySelector("#lighting-opt-result");
     const pixels = Array.from({length: 16}, () => [0, 0, 32]);
     let neopixelProfiles = [];
     let selectedPixel = 0;
@@ -564,6 +568,53 @@ window.SorterPages = {
         pixelMessage.textContent = error.message;
       }
     };
+    optimizerRun.onclick = async () => {
+      optimizerRun.disabled = true;
+      optimizerPill.textContent = "Running";
+      optimizerPill.className = "pill warn-pill";
+      optimizerMessage.textContent = "Sweeping generated RGB candidates and scoring camera frames...";
+      try {
+        const result = await json("/api/lights/optimize", {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({
+            max_samples: Number(document.querySelector("#lighting-opt-samples").value),
+            target_brightness: Number(document.querySelector("#lighting-opt-target").value),
+            settle_ms: Number(document.querySelector("#lighting-opt-settle").value),
+          }),
+        });
+        optimizerMessage.textContent = result.message || "Lighting optimized";
+        optimizerPill.textContent = "Applied";
+        optimizerPill.className = "pill good-pill";
+        renderOptimizerResult(result);
+        refresh();
+      } catch (error) {
+        optimizerMessage.textContent = error.message;
+        optimizerPill.textContent = "Blocked";
+        optimizerPill.className = "pill warn-pill";
+      } finally {
+        optimizerRun.disabled = false;
+      }
+    };
+    function renderOptimizerResult(result) {
+      const best = result.best;
+      const ranked = [...(result.samples || [])].sort((a, b) => Number(b.score) - Number(a.score)).slice(0, 5);
+      optimizerResult.innerHTML = best ? `
+        <article class="status-card">
+          <div class="muted">Best RGB</div>
+          <strong><span class="color-swatch" style="background:${rgbToHex([best.red, best.green, best.blue])}"></span>${best.red}, ${best.green}, ${best.blue}</strong>
+        </article>
+        <article class="status-card"><div class="muted">Score</div><strong>${Number(best.score).toFixed(4)}</strong></article>
+        <article class="status-card"><div class="muted">Brightness</div><strong>${Number(best.mean_brightness).toFixed(2)}</strong></article>
+        <article class="status-card"><div class="muted">Contrast</div><strong>${Number(best.contrast).toFixed(2)}</strong></article>
+        ${ranked.map(sample => `
+          <article class="status-card">
+            <div class="muted">Candidate score ${Number(sample.score).toFixed(4)}</div>
+            <strong><span class="color-swatch" style="background:${rgbToHex([sample.red, sample.green, sample.blue])}"></span>${sample.red}, ${sample.green}, ${sample.blue}</strong>
+          </article>
+        `).join("")}
+      ` : `<article class="status-card"><div class="muted">Optimizer</div><strong>No samples yet</strong></article>`;
+    }
     async function refresh() {
       const status = await json("/api/status");
       renderRuntimeBanner(status);
@@ -578,6 +629,7 @@ window.SorterPages = {
         button.disabled = hardwareMode;
       });
       pixelApply.disabled = hardwareMode && !hardwareLive;
+      optimizerRun.disabled = hardwareMode && !hardwareLive;
       const cards = [
         ["Lifecycle", status.lifecycle],
         ["Runtime", status.runtime_message],

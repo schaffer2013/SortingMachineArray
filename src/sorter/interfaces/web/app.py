@@ -17,7 +17,7 @@ import tomllib
 from typing import Any
 
 from flask import Flask, Response, jsonify, render_template, request, send_file
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageStat
 
 from sorter.application.orchestrator import Orchestrator
 from sorter.adapters.hardware.marlin_transport import MarlinSerialTransport
@@ -913,6 +913,105 @@ class WebRuntime:
             pixels.append((int(raw_pixel[0]), int(raw_pixel[1]), int(raw_pixel[2])))
         return self.serial_board.set_neopixel_pixels(pixels)
 
+    def optimize_lighting(self, payload: dict[str, Any]) -> dict[str, Any]:
+        max_samples = max(3, min(24, int(payload.get("max_samples", 12))))
+        settle_ms = max(0, min(2000, int(payload.get("settle_ms", 150))))
+        target_brightness = max(20.0, min(235.0, float(payload.get("target_brightness", 122))))
+        candidates = self._lighting_candidates(max_samples)
+        results: list[dict[str, Any]] = []
+        best: dict[str, Any] | None = None
+        previous_rgb = tuple(getattr(self.orchestrator.lights, "last_rgb", (0, 0, 16)) or (0, 0, 16))
+        for red, green, blue in candidates:
+            self._set_light_rgb(red, green, blue, profile_name="optimizing")
+            if settle_ms:
+                time.sleep(settle_ms / 1000)
+            image = self._capture_optimizer_image()
+            score = self._score_lighting_frame(image, target_brightness=target_brightness)
+            sample = {
+                "red": red,
+                "green": green,
+                "blue": blue,
+                **score,
+            }
+            results.append(sample)
+            if best is None or sample["score"] > best["score"]:
+                best = sample
+        if best is None:
+            self._set_light_rgb(*previous_rgb, profile_name="custom")
+            raise RuntimeError("No lighting candidates were sampled")
+        self._set_light_rgb(best["red"], best["green"], best["blue"], profile_name="optimized")
+        return {
+            "ok": True,
+            "message": f"Optimized lighting to RGB {best['red']}, {best['green']}, {best['blue']}",
+            "best": best,
+            "samples": results,
+            "target_brightness": target_brightness,
+            "settle_ms": settle_ms,
+            "status": self.status(),
+        }
+
+    def _capture_optimizer_image(self) -> Image.Image:
+        frame = self.orchestrator.camera.capture_frame()
+        if frame.path is None:
+            raise RuntimeError("Camera adapter did not return a frame path")
+        image_path = Path(frame.path)
+        if not image_path.exists():
+            raise RuntimeError(f"Captured frame path does not exist: {image_path}")
+        return Image.open(image_path).convert("RGB")
+
+    def _set_light_rgb(self, red: int, green: int, blue: int, *, profile_name: str) -> None:
+        r, g, b = (_clamp_channel(red), _clamp_channel(green), _clamp_channel(blue))
+        if self.runtime_mode == "hardware" and not self.hardware_runtime:
+            if not self.serial_board.status()["connected"]:
+                raise ValueError("Hardware runtime selected, but the serial board is not verified live")
+            self.serial_board.set_lights_rgb(r, g, b, profile_name=profile_name)
+        setter = getattr(self.orchestrator.lights, "set_rgb", None)
+        if callable(setter):
+            setter(r, g, b, profile_name=profile_name)
+            return
+        self.orchestrator.lights.set_status(profile_name)
+
+    def _lighting_candidates(self, max_samples: int) -> list[tuple[int, int, int]]:
+        levels = [24, 48, 72, 96, 128, 160, 192, 224]
+        candidates: list[tuple[int, int, int]] = []
+        for level in levels:
+            candidates.append((level, level, level))
+        for level in (72, 112, 160, 208):
+            candidates.append((level, int(level * 0.88), int(level * 0.62)))
+            candidates.append((int(level * 0.70), int(level * 0.86), level))
+        unique: list[tuple[int, int, int]] = []
+        seen: set[tuple[int, int, int]] = set()
+        for candidate in candidates:
+            normalized = tuple(_clamp_channel(channel) for channel in candidate)
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            unique.append(normalized)
+        return unique[:max_samples]
+
+    def _score_lighting_frame(self, image: Image.Image, *, target_brightness: float) -> dict[str, float]:
+        sample = image.convert("RGB")
+        sample.thumbnail((320, 320))
+        grayscale = sample.convert("L")
+        gray_stat = ImageStat.Stat(grayscale)
+        rgb_stat = ImageStat.Stat(sample)
+        mean = float(gray_stat.mean[0])
+        contrast = float(gray_stat.stddev[0])
+        channel_spread = float(max(rgb_stat.mean) - min(rgb_stat.mean))
+        exposure_error = abs(mean - target_brightness)
+        exposure_score = max(0.0, 1.0 - (exposure_error / 128.0))
+        contrast_score = min(1.0, contrast / 64.0)
+        color_balance_score = max(0.0, 1.0 - (channel_spread / 128.0))
+        clipping_penalty = 0.25 if mean < 28.0 or mean > 227.0 else 0.0
+        score = (exposure_score * 0.58) + (contrast_score * 0.30) + (color_balance_score * 0.12) - clipping_penalty
+        return {
+            "score": round(max(0.0, score), 4),
+            "mean_brightness": round(mean, 2),
+            "contrast": round(contrast, 2),
+            "channel_spread": round(channel_spread, 2),
+            "exposure_error": round(exposure_error, 2),
+        }
+
     def _hardware_serial_control(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         if action == "initialize":
             return self.serial_board.send_commands(
@@ -1756,6 +1855,13 @@ def create_web_app(
     def api_neopixel_display():
         try:
             return jsonify(runtime.apply_neopixel_display(request.get_json(silent=True) or {}))
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc), "status": runtime.status()}), 400
+
+    @app.post("/api/lights/optimize")
+    def api_lights_optimize():
+        try:
+            return jsonify(runtime.optimize_lighting(request.get_json(silent=True) or {}))
         except Exception as exc:
             return jsonify({"ok": False, "message": str(exc), "status": runtime.status()}), 400
 

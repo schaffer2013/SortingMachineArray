@@ -170,6 +170,10 @@ input[type="checkbox"] { width:auto; justify-self:start; }
   background:var(--panel-soft); border:1px solid var(--line); border-radius:18px; padding:16px;
 }
 .pile-card h3, .capability-card h3 { margin:0 0 10px; }
+.color-swatch {
+  display:inline-block; width:18px; height:18px; border-radius:50%; border:1px solid var(--line);
+  vertical-align:-3px; margin-right:8px;
+}
 .muted { color:var(--muted); }
 .stacked-copy { display:grid; gap:8px; }
 .code-block {
