@@ -1000,9 +1000,9 @@ window.SorterPages = {
       const data = await json("/api/capabilities");
       root.innerHTML = data.capabilities.map(item => `
         <article class="capability-card">
-          <p class="eyebrow status-${item.status}">${item.status}</p>
-          <h3>${item.name}</h3>
-          <p class="muted">${item.detail}</p>
+          <p class="eyebrow status-${escapeHtml(item.status)}">${escapeHtml(item.status)}</p>
+          <h3>${escapeHtml(item.name)}</h3>
+          <p class="muted">${escapeHtml(item.detail)}</p>
         </article>`).join("");
     })();
   },

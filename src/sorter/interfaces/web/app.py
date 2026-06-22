@@ -1278,18 +1278,142 @@ class WebRuntime:
         ]
 
     def capabilities(self) -> list[dict[str, str]]:
+        status = self.status()
+        serial_status = status.get("serial_board", {})
+        serial_connected = bool(serial_status.get("connected"))
+        hardware_direct = status.get("runtime_target") == "hardware_direct"
+        simulation = status.get("runtime_target") == "simulation"
+        camera_capability = self._camera_capability()
+        recognition_capability = self._recognition_capability()
+        collection_capability = self._collection_capability()
+        motion_ready = simulation or serial_connected
+        hardware_ready = hardware_direct and serial_connected
         return [
-            {"name": "Automated sorting run", "status": "ready", "detail": "End-to-end in sim via the orchestrator."},
-            {"name": "Live machine status", "status": "ready", "detail": "Phase, active command, pose, pile state, metrics."},
-            {"name": "Motion control", "status": "ready", "detail": "Home, XY, Z, and idle-wait controls via MotionPort."},
-            {"name": "Vacuum and lights", "status": "ready", "detail": "Manual I/O commands via VacuumPort and LightsPort."},
-            {"name": "Card recognition", "status": "ready", "detail": "Manual image recognition plus review/fallback metadata."},
-            {"name": "Card validation", "status": "ready", "detail": "Catalog-backed exact validation with suggestions."},
-            {"name": "Run history", "status": "ready", "detail": "SQLite-backed recent run summaries and metrics."},
-            {"name": "Camera preview", "status": "partial", "detail": "Web stream endpoint exists; current Pi adapter still needs real frame capture wiring."},
-            {"name": "Operator review workflow", "status": "partial", "detail": "Recognition evidence exists; explicit correction/confirmation is a next hardware milestone."},
-            {"name": "Hardware runtime", "status": "partial", "detail": "Adapters exist, but the repo currently documents sim as the supported end-to-end runtime."},
+            {
+                "name": "Automated sorting run",
+                "status": "ready" if simulation else "partial",
+                "detail": (
+                    "End-to-end automated run is active in simulation."
+                    if simulation
+                    else "Hardware runtime is live, but automated hardware runs remain supervised."
+                ),
+            },
+            {
+                "name": "Live machine status",
+                "status": "ready",
+                "detail": f"Runtime is {status.get('runtime_mode')}; phase {status.get('phase')}; command {status.get('active_command') or 'idle'}.",
+            },
+            {
+                "name": "Motion control",
+                "status": "ready" if motion_ready else "blocked",
+                "detail": (
+                    "XY/Z/C controls are available."
+                    if motion_ready
+                    else f"Serial controller is {serial_status.get('connection_state', 'disconnected')}; verify it on System before moving."
+                ),
+            },
+            {
+                "name": "Vacuum and lights",
+                "status": "ready" if simulation or hardware_direct else "partial",
+                "detail": (
+                    f"Vacuum is {'on' if status.get('vacuum_on') else 'off'}; lights profile is {status.get('lights_profile') or status.get('lights_status')}."
+                    if simulation or hardware_direct
+                    else "Manual I/O controls are present, but hardware runtime is not active."
+                ),
+            },
+            recognition_capability,
+            {"name": "Card validation", "status": "ready", "detail": "Catalog-backed exact validation with suggestions is available."},
+            {"name": "Run history", "status": "ready", "detail": "SQLite-backed recent run summaries and metrics are available."},
+            camera_capability,
+            {
+                "name": "Operator review workflow",
+                "status": "partial",
+                "detail": "Recognition evidence is shown here; use the collection service UI for correction and confirmation.",
+            },
+            {
+                "name": "Hardware runtime",
+                "status": "ready" if hardware_ready else ("partial" if hardware_direct else "blocked"),
+                "detail": (
+                    f"Direct Pi adapters are active and Marlin is verified on {serial_status.get('port')}."
+                    if hardware_ready
+                    else "Direct Pi adapters are active, but the Marlin controller is not verified."
+                    if hardware_direct
+                    else "Hardware runtime is not active."
+                ),
+            },
+            collection_capability,
         ]
+
+    def _camera_capability(self) -> dict[str, str]:
+        try:
+            frame = self.orchestrator.camera.capture_frame()
+        except Exception as exc:
+            return {
+                "name": "Camera preview",
+                "status": "blocked",
+                "detail": f"Camera capture failed: {exc}",
+            }
+        if frame.path and Path(frame.path).exists():
+            return {
+                "name": "Camera preview",
+                "status": "ready",
+                "detail": f"Live camera capture is returning frames from {frame.camera_id}.",
+            }
+        return {
+            "name": "Camera preview",
+            "status": "partial",
+            "detail": "Camera endpoint is available, but the active adapter did not return a frame path.",
+        }
+
+    def _recognition_capability(self) -> dict[str, str]:
+        last_recognition = getattr(self.orchestrator, "last_recognition", None) or self.last_manual_recognition or {}
+        failure_code = last_recognition.get("failure_code")
+        if failure_code == "database_missing" or self._moss_assets_missing():
+            return {
+                "name": "Card recognition",
+                "status": "blocked",
+                "detail": "Moss Machine database assets are missing; copy unified_card_database.db and phash_cards_1.db to the Moss cache on the Pi.",
+            }
+        if failure_code:
+            return {
+                "name": "Card recognition",
+                "status": "partial",
+                "detail": f"Recognition is callable, but the last attempt failed with {failure_code}.",
+            }
+        return {
+            "name": "Card recognition",
+            "status": "ready",
+            "detail": "Manual upload and live-camera recognition are available.",
+        }
+
+    def _moss_assets_missing(self) -> bool:
+        cache_dir = self.repo_root / "third_party" / "fuzzy-enigma-card-recognition" / "data" / "cache" / "moss-machine"
+        recognition_dir = (
+            self.repo_root
+            / "third_party"
+            / "fuzzy-enigma-card-recognition"
+            / "third_party"
+            / "moss-machine"
+            / "Current version"
+            / "recognition_data"
+        )
+        required = ("unified_card_database.db", "phash_cards_1.db")
+        return not all((cache_dir / name).exists() or (recognition_dir / name).exists() for name in required)
+
+    def _collection_capability(self) -> dict[str, str]:
+        collection_service = getattr(self.orchestrator, "collection_service", None)
+        adapter_name = type(collection_service).__name__ if collection_service is not None else "None"
+        if adapter_name == "NullCollectionServiceAdapter":
+            return {
+                "name": "Collection service",
+                "status": "blocked",
+                "detail": "Sorter is still using the no-op collection adapter; run the collection service separately and wire the HTTP adapter before machine submissions.",
+            }
+        return {
+            "name": "Collection service",
+            "status": "partial",
+            "detail": f"Configured adapter: {adapter_name}. Verify collection API health separately.",
+        }
 
     def _move_c(self, c_mm: float) -> None:
         mover = getattr(self.orchestrator.motion, "move_c", None)

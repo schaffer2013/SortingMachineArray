@@ -200,6 +200,7 @@ th { color:var(--muted); font-size:.82rem; text-transform:uppercase; letter-spac
 .intro-copy p:last-child { color:var(--muted); max-width: 76ch; }
 .status-ready { color: var(--good); }
 .status-partial { color: var(--warn); }
+.status-blocked { color: #ef4444; }
 @media (max-width: 820px) {
   .app-shell { width:min(100% - 20px, 1240px); }
   .topbar { display:grid; align-items:start; }
