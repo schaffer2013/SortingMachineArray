@@ -580,12 +580,34 @@ def test_live_serial_unknown_position_jog_uses_limited_relative_move():
     client = app.test_client()
 
     response = client.post("/api/control/jog_z", json={"dz_mm": -1.0})
-    too_large = client.post("/api/control/jog_z", json={"dz_mm": -3.0})
+    max_allowed = client.post("/api/control/jog_z", json={"dz_mm": -5.0})
+    too_large = client.post("/api/control/jog_z", json={"dz_mm": -6.0})
 
     assert response.status_code == 200
     assert runtime.serial_board.sent_commands[:5] == ["G91", "G1 Z-1.000 F300", "M400", "G90", "M114"]
+    assert max_allowed.status_code == 200
     assert too_large.status_code == 400
-    assert "exceeds 2.00 mm" in too_large.get_json()["message"]
+    assert "exceeds 5.00 mm" in too_large.get_json()["message"]
+
+
+def test_live_serial_homed_z_allows_large_jog():
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    runtime = app.config["runtime"]
+    runtime.serial_board = FakeSerialBoard()
+    runtime.serial_board.connect("COM8", 115200)
+    runtime.serial_board.live_pose["z"] = 100.0
+    client = app.test_client()
+
+    home = client.post("/api/control/home_z", json={})
+    jog = client.post("/api/control/jog_z", json={"dz_mm": -10.0})
+
+    assert home.status_code == 200
+    assert jog.status_code == 200
+    assert "G1 Z90.000 F300" in runtime.serial_board.sent_commands
 
 
 def test_live_serial_large_absolute_z_move_is_refused_without_confirmation():
@@ -626,6 +648,27 @@ def test_direct_hardware_z_jog_sends_relative_move_without_known_position():
 
     assert response.status_code == 200
     assert transport.command_log == ["G91", "G1 Z-1.000 F300", "M400", "G90"]
+
+
+def test_direct_hardware_homed_z_allows_large_jog():
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    transport = RecordingMarlinTransport()
+    orchestrator.motion = MarlinMotionAdapter(transport=transport)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    runtime = app.config["runtime"]
+    runtime.runtime_mode = "hardware"
+    runtime.hardware_runtime = True
+    client = app.test_client()
+
+    home = client.post("/api/control/home_z", json={})
+    jog = client.post("/api/control/jog_z", json={"dz_mm": -10.0})
+
+    assert home.status_code == 200
+    assert jog.status_code == 200
+    assert transport.command_log[-4:] == ["G91", "G1 Z-10.000 F300", "M400", "G90"]
 
 
 def test_control_requests_are_written_to_persistent_audit_log(tmp_path):
