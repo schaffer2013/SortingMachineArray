@@ -1814,7 +1814,7 @@ def create_web_app(
     def api_recognition_run():
         source = request.form.get("source", "upload")
         payload = {
-            "mode": request.form.get("mode", "greenfield"),
+            "mode": _normalize_web_recognition_mode(request.form.get("mode", "greenfield")),
             "backend": request.form.get("backend") or None,
             "prefer_visual_small_pool": request.form.get("prefer_visual_small_pool") == "true",
             "use_tracked_pool": request.form.get("use_tracked_pool") == "true",
@@ -2047,6 +2047,13 @@ def _crop_payload_from_form(form: Any) -> dict[str, float] | None:
         except (TypeError, ValueError):
             return None
     return _normalize_crop_payload(values)
+
+
+def _normalize_web_recognition_mode(raw_mode: Any) -> str:
+    mode = str(raw_mode or "greenfield").strip().lower()
+    if mode in {"expected_card", "expected-card"}:
+        return "reevaluation"
+    return mode or "greenfield"
 
 
 def _normalize_crop_payload(raw_crop: Any) -> dict[str, float] | None:
