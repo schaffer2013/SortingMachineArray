@@ -185,6 +185,29 @@ def test_serial_session_skips_automatic_polls_when_busy():
     assert session.status()["serial_poll_log"] == []
 
 
+def test_serial_session_reports_connection_transition_without_open_session():
+    session = web_app_module.SerialBoardSession()
+    session.port = "COM8"
+    session.connection_state = "connecting"
+
+    status = session.status()
+
+    assert status["connected"] is False
+    assert status["session_open"] is False
+    assert status["connection_state"] == "connecting"
+    assert status["port"] == "COM8"
+
+
+def test_serial_session_disconnect_is_idempotent():
+    session = web_app_module.SerialBoardSession()
+
+    result = session.disconnect()
+
+    assert result["ok"] is True
+    assert result["message"] == "Already disconnected"
+    assert result["connection_state"] == "disconnected"
+
+
 def test_serial_session_keeps_last_500_lines_per_log():
     session = web_app_module.SerialBoardSession()
     session.transport = RecordingTransport()

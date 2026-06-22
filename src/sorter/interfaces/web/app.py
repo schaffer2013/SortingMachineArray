@@ -101,7 +101,7 @@ class SerialBoardSession:
                 else:
                     state = "verified"
             else:
-                state = self.connection_state if session_open else "disconnected"
+                state = self.connection_state if session_open or self.connection_state in {"connecting", "disconnecting", "error"} else "disconnected"
             return {
                 "connected": verified,
                 "session_open": session_open,
@@ -157,6 +157,8 @@ class SerialBoardSession:
                 self.lights = None
                 self.port = port
                 self.baud_rate = int(baud_rate)
+                self.connection_state = "connecting"
+                self.last_error = None
             transport = MarlinSerialTransport(serial_port=port, baud_rate=int(baud_rate), timeout_seconds=60.0)
             try:
                 sent_at = _utc_now_iso()
@@ -191,11 +193,19 @@ class SerialBoardSession:
                 transport = self.transport
                 self.transport = None
                 self.lights = None
+                self.connection_state = "disconnecting"
+            if transport is None:
+                with self.state_lock:
+                    self.port = None
+                    self.connection_state = "disconnected"
+                    self.last_error = None
+                return {"ok": True, "message": "Already disconnected", **self.status()}
+            if transport is not None:
+                transport.close()
+            with self.state_lock:
                 self.port = None
                 self.connection_state = "disconnected"
                 self.last_error = None
-            if transport is not None:
-                transport.close()
             return {"ok": True, "message": "Disconnected", **self.status()}
         finally:
             self.command_lock.release()
@@ -1400,7 +1410,10 @@ def create_web_app(
 
     @app.post("/api/serial/disconnect")
     def api_serial_disconnect():
-        return jsonify(runtime.serial_board.disconnect())
+        try:
+            return jsonify(runtime.serial_board.disconnect())
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc), **runtime.serial_board.status()}), 400
 
     @app.post("/api/serial/send")
     def api_serial_send():

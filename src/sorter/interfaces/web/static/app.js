@@ -723,6 +723,7 @@ window.SorterPages = {
     const serialResponse = document.querySelector("#serial-response");
     const serialCommandLog = document.querySelector("#serial-command-log");
     const serialPollLog = document.querySelector("#serial-poll-log");
+    let serialOperationActive = false;
     const render = data => {
       pill.textContent = data.update_available ? "Update available" : "Current";
       pill.className = data.update_available ? "pill warn-pill" : "pill good-pill";
@@ -780,15 +781,22 @@ window.SorterPages = {
     };
     function renderSerial(data) {
       const status = data.status || data;
+      const state = status.connection_state || "disconnected";
       serialPill.textContent = status.connected
         ? `Verified ${status.port}`
         : status.session_open
-          ? `${status.connection_state || "Unverified"} ${status.port || ""}`
-          : "Disconnected";
+          ? `${state} ${status.port || ""}`
+          : state === "connecting"
+            ? `Connecting ${status.port || ""}`
+            : "Disconnected";
       serialPill.className = status.connected ? "pill good-pill" : "pill warn-pill";
-      serialConnect.disabled = Boolean(status.session_open) || Boolean(status.busy);
-      serialDisconnect.disabled = !status.session_open || Boolean(status.busy);
-      serialForm.querySelector("button").disabled = !status.session_open || Boolean(status.busy);
+      const busy = Boolean(status.busy) || serialOperationActive;
+      serialConnect.disabled = Boolean(status.session_open) || busy;
+      serialDisconnect.disabled = !status.session_open || busy;
+      serialRefresh.disabled = busy;
+      serialPort.disabled = busy || Boolean(status.session_open);
+      serialBaud.disabled = busy || Boolean(status.session_open);
+      serialForm.querySelector("button").disabled = !status.session_open || busy;
       if (data.ports) {
         const selected = status.port || serialPort.value;
         serialPort.innerHTML = data.ports.length
@@ -802,27 +810,44 @@ window.SorterPages = {
       renderSerialLog(serialCommandLog, status.serial_command_log || [], "No requested serial commands sent in this session.", "command");
       renderSerialLog(serialPollLog, status.serial_poll_log || [], "No serial status polls sent in this session.", "poll");
     }
+    async function withSerialOperation(messageText, operation) {
+      if (serialOperationActive) return;
+      serialOperationActive = true;
+      let errorMessage = "";
+      serialMessage.textContent = messageText;
+      serialConnect.disabled = true;
+      serialDisconnect.disabled = true;
+      serialRefresh.disabled = true;
+      serialPort.disabled = true;
+      serialBaud.disabled = true;
+      serialForm.querySelector("button").disabled = true;
+      try {
+        const result = await operation();
+        renderSerial(result);
+        refreshRuntime();
+      } catch (error) {
+        errorMessage = error.message;
+      } finally {
+        serialOperationActive = false;
+        await refreshSerial(false);
+        if (errorMessage) serialMessage.textContent = errorMessage;
+      }
+    }
     async function refreshSerial(auto = false) {
+      if (serialOperationActive) return;
       serialMessage.textContent = auto ? "Looking for controller..." : "Refreshing ports...";
       renderSerial(await json(`/api/serial/ports${auto ? "?auto=true" : ""}`));
     }
     serialRefresh.onclick = () => refreshSerial(false);
-    serialConnect.onclick = async () => {
-      try {
-        renderSerial(await json("/api/serial/connect", {
+    serialConnect.onclick = () => {
+      withSerialOperation("Connecting to controller...", () => json("/api/serial/connect", {
           method:"POST",
           headers:{"Content-Type":"application/json"},
           body:JSON.stringify({port: serialPort.value, baud_rate: Number(serialBaud.value || 115200)}),
         }));
-        refreshRuntime();
-      } catch (error) {
-        serialMessage.textContent = error.message;
-        refreshSerial(false);
-      }
     };
-    serialDisconnect.onclick = async () => {
-      renderSerial(await json("/api/serial/disconnect", {method:"POST"}));
-      refreshRuntime();
+    serialDisconnect.onclick = () => {
+      withSerialOperation("Disconnecting controller...", () => json("/api/serial/disconnect", {method:"POST"}));
     };
     serialForm.onsubmit = async event => {
       event.preventDefault();
@@ -840,7 +865,16 @@ window.SorterPages = {
     };
     refresh(true);
     refreshRuntime();
-    refreshSerial(true);
+    refreshSerial(false);
+    setInterval(async () => {
+      try {
+        if (!serialOperationActive) {
+          const status = await json("/api/status");
+          renderSerial(status.serial_board || {});
+        }
+      } catch (error) {
+      }
+    }, 2500);
     setInterval(async () => {
       try {
         const status = await json("/api/status");
