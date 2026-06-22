@@ -17,7 +17,8 @@ fi
 . .venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install -e '.[hardware]'
-python -m pip install -e './third_party/fuzzy-enigma-card-recognition[ocr,moss]'
+python -m pip install -e './third_party/fuzzy-enigma-card-recognition[moss]'
+python -m pip install 'paddleocr>=3.7'
 
 export SORTER_MODE=hardware
 export SORTER_RECOGNIZER_BACKEND="${SORTER_RECOGNIZER_BACKEND:-moss_machine}"

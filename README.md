@@ -58,7 +58,7 @@ The current web console is immediately useful in `sim` mode. In `hardware` mode,
 - Install the always-on Pi service from a Raspberry Pi shell:
 	- `bash scripts/install-rpi-webserver.sh`
 - The service is named `sortingmachine-web` and starts at boot after the network is online.
-- Every service start pulls `origin/main`, updates submodules, installs the editable parent package, installs the vendored recognizer with OCR/Moss extras, then runs:
+- Every service start pulls `origin/main`, updates submodules, installs the editable parent package, installs the vendored recognizer with Moss support plus PaddleOCR, then runs:
 	- `SORTER_MODE=hardware python -m sorter.interfaces.web_runner`
 - Default hardware environment:
 	- `SORTER_RECOGNIZER_BACKEND=moss_machine`

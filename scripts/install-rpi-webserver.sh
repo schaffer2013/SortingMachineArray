@@ -21,7 +21,8 @@ python3 -m venv --system-site-packages .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
 python -m pip install -e '.[hardware]'
-python -m pip install -e './third_party/fuzzy-enigma-card-recognition[ocr,moss]'
+python -m pip install -e './third_party/fuzzy-enigma-card-recognition[moss]'
+python -m pip install 'paddleocr>=3.7'
 chmod +x scripts/start-rpi-webserver.sh
 
 cat > /tmp/${SERVICE_NAME}.service <<SERVICE
