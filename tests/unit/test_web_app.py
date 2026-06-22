@@ -155,6 +155,37 @@ def test_lighting_optimizer_scores_requested_crop(tmp_path):
     assert payload["crop"] == {"left": 0.0, "top": 0.0, "right": 0.5, "bottom": 1.0}
 
 
+def test_lighting_optimizer_can_select_single_led(tmp_path):
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    runtime = app.config["runtime"]
+    runtime.serial_board = FakeSerialBoard()
+    runtime.serial_board.connect("COM8", 115200)
+    orchestrator.camera = SingleLedCamera(orchestrator.lights, tmp_path, preferred_led=2)
+    client = app.test_client()
+
+    response = client.post(
+        "/api/lights/optimize",
+        json={
+            "mode": "single_led",
+            "max_samples": 4,
+            "settle_ms": 0,
+            "target_brightness": 96,
+        },
+    )
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["mode"] == "single_led"
+    assert payload["best"]["led_index"] == 2
+    assert payload["best"]["pixels"][2] == [96, 96, 96]
+    assert sum(1 for pixel in payload["best"]["pixels"] if any(pixel)) == 1
+    assert runtime.serial_board.pixel_displays[-1] == payload["best"]["pixels"]
+
+
 def test_lighting_score_penalizes_glare():
     settings = _sim_truth_settings()
     orchestrator = build_sim_orchestrator(settings)
@@ -817,6 +848,31 @@ class SplitBrightnessCamera:
             metadata={},
             captured_at_utc="2026-01-01T00:00:00Z",
             camera_id="split-brightness-test",
+            source_mode="test",
+        )
+
+
+class SingleLedCamera:
+    def __init__(self, lights, capture_dir: Path, *, preferred_led: int):
+        self.lights = lights
+        self.capture_dir = capture_dir
+        self.preferred_led = preferred_led
+        self.index = 0
+
+    def capture_frame(self):
+        pixels = getattr(self.lights, "last_pixels", [[0, 0, 0] for _ in range(16)])
+        lit_index = next((index for index, pixel in enumerate(pixels) if any(pixel)), None)
+        brightness = 96 if lit_index == self.preferred_led else 32
+        path = self.capture_dir / f"single-led-{self.index}.jpg"
+        self.index += 1
+        Image.new("RGB", (48, 48), (brightness, brightness, brightness)).save(path)
+        return Frame(
+            frame_id=f"single-led-{self.index}",
+            path=str(path),
+            pile_id=None,
+            metadata={},
+            captured_at_utc="2026-01-01T00:00:00Z",
+            camera_id="single-led-test",
             source_mode="test",
         )
 

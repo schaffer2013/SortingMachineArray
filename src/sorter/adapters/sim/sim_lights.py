@@ -18,3 +18,14 @@ class SimLightsAdapter:
         self.last_profile = profile_name or "custom"
         self.status = self.last_profile
         self.last_rgb = tuple(max(0, min(255, int(value))) for value in (red, green, blue))
+
+    def set_pixels(self, pixels: list[list[int]] | list[tuple[int, int, int]], *, profile_name: str | None = None) -> None:
+        self.last_profile = profile_name or "custom-pixels"
+        self.status = self.last_profile
+        self.last_pixels = [
+            [max(0, min(255, int(pixel[0]))), max(0, min(255, int(pixel[1]))), max(0, min(255, int(pixel[2])))]
+            for pixel in pixels
+        ]
+        lit_pixels = [pixel for pixel in self.last_pixels if any(pixel)]
+        if len(lit_pixels) == 1:
+            self.last_rgb = tuple(lit_pixels[0])
