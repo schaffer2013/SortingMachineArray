@@ -226,10 +226,11 @@ const renderSerialLog = (root, entries, emptyText, logKey) => {
   });
 };
 
-const createSkewCropTool = ({feed, cropStage, cropOverlay, cropToggle, cropPreview, cropMeta}) => {
+const createSkewCropTool = ({feed, cropStage, cropOverlay, cropToggle, cropReset, cropPreview, cropMeta, storageKey, autoRefreshMs = 0}) => {
   const noop = {
     refreshFrame: async () => false,
     captureBlob: async () => null,
+    resetCrop: () => {},
   };
   if (!feed || !cropStage || !cropOverlay || !cropPreview) return noop;
   const cropImage = new Image();
@@ -245,12 +246,13 @@ const createSkewCropTool = ({feed, cropStage, cropOverlay, cropToggle, cropPrevi
     horizontalSecond: cropOverlay.querySelector('[data-crop-rule="horizontal-second"]'),
   };
   const corners = ["nw", "ne", "se", "sw"];
+  const autoRefreshIntervalMs = Math.max(0, Number(autoRefreshMs) || 0);
   let enabled = true;
   let loading = false;
   let framePromise = null;
   let pointer = null;
   let frame = {width: 0, height: 0};
-  let crop = {
+  const defaultCrop = {
     nw: {x: 0.28, y: 0.08},
     ne: {x: 0.72, y: 0.08},
     se: {x: 0.72, y: 0.90},
@@ -262,6 +264,23 @@ const createSkewCropTool = ({feed, cropStage, cropOverlay, cropToggle, cropPrevi
     y: clamp01(value[corner]?.y),
   }]));
   const cloneCrop = value => Object.fromEntries(corners.map(corner => [corner, {...value[corner]}]));
+  const loadSavedCrop = () => {
+    if (!storageKey) return null;
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
+      return saved && corners.every(corner => isObject(saved[corner])) ? normalizeCrop(saved) : null;
+    } catch (error) {
+      return null;
+    }
+  };
+  const saveCrop = () => {
+    if (!storageKey) return;
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(normalizeCrop(crop)));
+    } catch (error) {
+    }
+  };
+  let crop = loadSavedCrop() || cloneCrop(defaultCrop);
   const bounds = () => {
     const stageRect = cropStage.getBoundingClientRect();
     const feedRect = feed.getBoundingClientRect();
@@ -419,6 +438,12 @@ const createSkewCropTool = ({feed, cropStage, cropOverlay, cropToggle, cropPrevi
     const rendered = drawPreview();
     if (cropMeta) cropMeta.textContent = rendered ? `4-point crop -> ${cropPreview.width} x ${cropPreview.height}` : "Move corners apart to preview crop";
   };
+  const resetCrop = () => {
+    crop = cloneCrop(defaultCrop);
+    saveCrop();
+    renderOverlay();
+    updatePreview();
+  };
   const refreshFrame = async () => {
     if (!enabled) return false;
     if (loading && framePromise) return framePromise;
@@ -457,6 +482,7 @@ const createSkewCropTool = ({feed, cropStage, cropOverlay, cropToggle, cropPrevi
     updatePreview();
     if (enabled) refreshFrame();
   });
+  cropReset?.addEventListener("click", resetCrop);
   cropOverlay.addEventListener("pointerdown", event => {
     if (!enabled) return;
     const point = pointFromEvent(event);
@@ -481,10 +507,16 @@ const createSkewCropTool = ({feed, cropStage, cropOverlay, cropToggle, cropPrevi
     updatePreview();
   });
   cropOverlay.addEventListener("pointerup", event => {
-    if (pointer?.id === event.pointerId) pointer = null;
+    if (pointer?.id === event.pointerId) {
+      pointer = null;
+      saveCrop();
+    }
   });
   cropOverlay.addEventListener("pointercancel", event => {
-    if (pointer?.id === event.pointerId) pointer = null;
+    if (pointer?.id === event.pointerId) {
+      pointer = null;
+      saveCrop();
+    }
   });
   window.addEventListener("resize", () => {
     renderOverlay();
@@ -493,7 +525,12 @@ const createSkewCropTool = ({feed, cropStage, cropOverlay, cropToggle, cropPrevi
   renderOverlay();
   updatePreview();
   refreshFrame();
-  return {refreshFrame, captureBlob};
+  if (autoRefreshIntervalMs > 0) {
+    setInterval(() => {
+      if (enabled && !pointer && !document.hidden) refreshFrame();
+    }, autoRefreshIntervalMs);
+  }
+  return {refreshFrame, captureBlob, resetCrop};
 };
 
 window.SorterPages = {
@@ -1358,8 +1395,11 @@ window.SorterPages = {
       cropStage: document.querySelector("#recognition-crop-stage"),
       cropOverlay: document.querySelector("#recognition-crop-overlay"),
       cropToggle: document.querySelector("#recognition-crop-toggle"),
+      cropReset: document.querySelector("#recognition-crop-reset"),
       cropPreview: document.querySelector("#recognition-crop-preview"),
       cropMeta: document.querySelector("#recognition-crop-meta"),
+      storageKey: "sorter-recognition-card-crop-v1",
+      autoRefreshMs: 1000,
     });
     let recognitionSource = "upload";
     cameraRefresh.onclick = () => {
@@ -1389,7 +1429,6 @@ window.SorterPages = {
       resultSummary.hidden = true;
       result.textContent = recognitionSource === "camera" ? "Capturing live frame..." : "Recognizing...";
       if (recognitionSource === "camera") {
-        await cropTool.refreshFrame();
         const cropBlob = await cropTool.captureBlob();
         if (!cropBlob) {
           result.textContent = "Camera crop unavailable";
