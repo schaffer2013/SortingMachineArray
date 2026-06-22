@@ -79,6 +79,7 @@ class SerialBoardSession:
         self.last_endstops: dict[str, str] = {}
         self.serial_command_log: deque[dict[str, Any]] = deque(maxlen=500)
         self.serial_poll_log: deque[dict[str, Any]] = deque(maxlen=500)
+        self.controller_fault = False
         self.live_pose: dict[str, float] = {}
         self.last_success_monotonic: float | None = None
         self.connection_state = "disconnected"
@@ -101,11 +102,16 @@ class SerialBoardSession:
                 else:
                     state = "verified"
             else:
-                state = self.connection_state if session_open or self.connection_state in {"connecting", "disconnecting", "error"} else "disconnected"
+                state = (
+                    self.connection_state
+                    if session_open or self.connection_state in {"connecting", "disconnecting", "error", "faulted"}
+                    else "disconnected"
+                )
             return {
                 "connected": verified,
                 "session_open": session_open,
                 "connection_state": state,
+                "controller_fault": self.controller_fault,
                 "busy": self.command_lock.locked(),
                 "port": self.port,
                 "baud_rate": self.baud_rate,
@@ -179,6 +185,7 @@ class SerialBoardSession:
                 self.last_error = None
                 self.last_response = response
                 self._record_serial_command("M115", sent_at, response, ok=True)
+                self.controller_fault = False
                 self.last_success_monotonic = time.monotonic()
                 self.connection_state = "verified"
             return {"ok": True, "message": f"Connected to {port}", **self.status()}
@@ -198,6 +205,7 @@ class SerialBoardSession:
                 with self.state_lock:
                     self.port = None
                     self.connection_state = "disconnected"
+                    self.controller_fault = False
                     self.last_error = None
                 return {"ok": True, "message": "Already disconnected", **self.status()}
             if transport is not None:
@@ -205,6 +213,7 @@ class SerialBoardSession:
             with self.state_lock:
                 self.port = None
                 self.connection_state = "disconnected"
+                self.controller_fault = False
                 self.last_error = None
             return {"ok": True, "message": "Disconnected", **self.status()}
         finally:
@@ -240,10 +249,13 @@ class SerialBoardSession:
         try:
             response = transport.send_command(clean_command)
         except Exception as exc:
+            response = list(getattr(exc, "responses", []))
+            is_fault = _is_controller_fault(str(exc))
             with self.state_lock:
                 self.last_error = str(exc)
-                self._record_serial_command(clean_command, sent_at, [], ok=False, error=str(exc), log_kind=log_kind)
-                self.connection_state = "error"
+                self._record_serial_command(clean_command, sent_at, response, ok=False, error=str(exc), log_kind=log_kind)
+                self.controller_fault = is_fault or self.controller_fault
+                self.connection_state = "faulted" if is_fault else "error"
                 if self.transport is not None:
                     self.transport.close()
                 self.transport = None
@@ -411,6 +423,11 @@ def _port_auto_score(port: dict[str, str]) -> tuple[int, str]:
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _is_controller_fault(message: str) -> bool:
+    normalized = message.lower()
+    return "printer halted" in normalized or "kill() called" in normalized
 
 
 def _parse_m119(lines: list[str]) -> dict[str, str]:

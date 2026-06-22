@@ -19,6 +19,14 @@ class SerialConnection(Protocol):
     def close(self) -> None: ...
 
 
+class MarlinCommandError(RuntimeError):
+    def __init__(self, command: str, line: str, responses: list[str]):
+        super().__init__(f"Marlin rejected {command!r}: {line}")
+        self.command = command
+        self.line = line
+        self.responses = responses
+
+
 @dataclass
 class MarlinSerialTransport:
     """PySerial-backed Marlin command transport shared by hardware adapters.
@@ -80,7 +88,7 @@ class MarlinSerialTransport:
             if normalized == "ok" or normalized.startswith("ok "):
                 return responses
             if normalized.startswith("error"):
-                raise RuntimeError(f"Marlin rejected {command!r}: {line}")
+                raise MarlinCommandError(command, line, responses)
 
 
 @dataclass

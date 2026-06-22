@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import replace
 import re
 
+import pytest
+
 from sorter.bootstrap import build_sim_orchestrator
 from sorter.config.calibration import CalibrationProfile
 from sorter.config.settings import AppSettings
@@ -206,6 +208,26 @@ def test_serial_session_disconnect_is_idempotent():
     assert result["ok"] is True
     assert result["message"] == "Already disconnected"
     assert result["connection_state"] == "disconnected"
+
+
+def test_serial_session_marks_marlin_kill_as_controller_fault():
+    session = web_app_module.SerialBoardSession()
+    session.transport = FaultingTransport()
+    session.port = "COM8"
+    session.connection_state = "verified"
+    session.last_success_monotonic = web_app_module.time.monotonic()
+
+    with pytest.raises(RuntimeError, match="Printer halted"):
+        session.send_command("G28 Y")
+
+    status = session.status()
+    log = status["serial_command_log"][-1]
+    assert status["controller_fault"] is True
+    assert status["connection_state"] == "faulted"
+    assert status["session_open"] is False
+    assert log["command"] == "G28 Y"
+    assert log["response"] == ["Error:Printer halted. kill() called!"]
+    assert log["error"] == "Marlin rejected 'G28 Y': Error:Printer halted. kill() called!"
 
 
 def test_serial_session_keeps_last_500_lines_per_log():
@@ -694,6 +716,7 @@ class FakeSerialBoard:
             "connected": self.connected,
             "session_open": self.connected,
             "connection_state": self.connection_state,
+            "controller_fault": False,
             "busy": False,
             "port": self.port,
             "baud_rate": self.baud_rate,
@@ -806,6 +829,19 @@ class RecordingTransport:
     def send_command(self, command, *, wait_for_ok=True):
         self.commands.append(command)
         return [f"{command} response", "ok"]
+
+    def close(self):
+        self.closed = True
+
+
+class FaultingTransport:
+    def __init__(self):
+        self.closed = False
+
+    def send_command(self, command, *, wait_for_ok=True):
+        error = RuntimeError(f"Marlin rejected {command!r}: Error:Printer halted. kill() called!")
+        error.responses = ["Error:Printer halted. kill() called!"]
+        raise error
 
     def close(self):
         self.closed = True

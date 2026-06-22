@@ -4,6 +4,7 @@ import pytest
 
 from sorter.adapters.hardware.marlin_motion import MarlinMotionAdapter
 from sorter.adapters.hardware.marlin_transport import (
+    MarlinCommandError,
     MarlinSerialTransport,
     RecordingMarlinTransport,
 )
@@ -89,5 +90,7 @@ def test_marlin_serial_transport_raises_on_error_response() -> None:
     connection = FakeSerialConnection([b"Error:Printer halted\n"])
     transport = MarlinSerialTransport(connection=connection)
 
-    with pytest.raises(RuntimeError, match="Marlin rejected"):
+    with pytest.raises(MarlinCommandError, match="Marlin rejected") as exc_info:
         transport.send_command("G1 X1")
+
+    assert exc_info.value.responses == ["Error:Printer halted"]

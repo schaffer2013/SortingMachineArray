@@ -23,10 +23,13 @@ setTheme(getTheme());
 const renderRuntimeBanner = status => {
   const banner = document.querySelector("#runtime-banner");
   if (!banner || !status) return;
+  const faulted = Boolean(status.serial_board?.controller_fault);
   const live = status.runtime_target === "hardware_serial";
   const simulation = status.runtime_target === "simulation";
-  banner.className = live ? "runtime-banner live" : "runtime-banner sim";
-  banner.textContent = live
+  banner.className = live && !faulted ? "runtime-banner live" : "runtime-banner sim";
+  banner.textContent = faulted
+    ? "CONTROLLER FAULT: reset or power-cycle controller"
+    : live
     ? `LIVE HARDWARE: ${status.serial_board?.port || "serial board"}`
     : simulation
       ? "SIMULATION"
@@ -632,10 +635,15 @@ window.SorterPages = {
       renderRuntimeBanner(status);
       const hardwareMode = isHardwareMode(status);
       const hardwareLive = isHardwareLive(status);
-      statePill.textContent = hardwareLive ? "LIVE HARDWARE" : isSimulationMode(status) ? "SIMULATION" : "HARDWARE NOT CONNECTED";
-      statePill.className = hardwareLive ? "pill good-pill" : "pill warn-pill";
-      setButtonsDisabled(document, "[data-control], [data-jog-axis], [data-paired-zc]", hardwareMode && !hardwareLive);
-      const hardwareOnlyDisabled = !hardwareLive;
+      const controllerFault = Boolean(status.serial_board?.controller_fault);
+      statePill.textContent = controllerFault
+        ? "CONTROLLER FAULT"
+        : hardwareLive
+          ? "LIVE HARDWARE"
+          : isSimulationMode(status) ? "SIMULATION" : "HARDWARE NOT CONNECTED";
+      statePill.className = hardwareLive && !controllerFault ? "pill good-pill" : "pill warn-pill";
+      setButtonsDisabled(document, "[data-control], [data-jog-axis], [data-paired-zc]", hardwareMode && (!hardwareLive || controllerFault));
+      const hardwareOnlyDisabled = !hardwareLive || controllerFault;
       endstopRefresh.disabled = hardwareOnlyDisabled;
       bltouchProbe.disabled = hardwareOnlyDisabled;
       bltouchState.disabled = hardwareOnlyDisabled;
@@ -645,6 +653,7 @@ window.SorterPages = {
       statusRoot.innerHTML = [
         ["Initialized", status.machine_initialized ? "Yes" : "No"],
         ["Runtime", status.runtime_message],
+        ["Controller", controllerFault ? status.serial_board?.last_error || "Faulted; reset controller" : status.serial_board?.connection_state || "--"],
         ["X", `${status.pose.x_mm.toFixed(2)} mm`],
         ["Y", `${status.pose.y_mm.toFixed(2)} mm`],
         ["Z", `${z.toFixed(2)} mm`],
@@ -782,14 +791,16 @@ window.SorterPages = {
     function renderSerial(data) {
       const status = data.status || data;
       const state = status.connection_state || "disconnected";
-      serialPill.textContent = status.connected
+      serialPill.textContent = status.controller_fault
+        ? "Controller fault"
+        : status.connected
         ? `Verified ${status.port}`
         : status.session_open
           ? `${state} ${status.port || ""}`
           : state === "connecting"
             ? `Connecting ${status.port || ""}`
             : "Disconnected";
-      serialPill.className = status.connected ? "pill good-pill" : "pill warn-pill";
+      serialPill.className = status.connected && !status.controller_fault ? "pill good-pill" : "pill warn-pill";
       const busy = Boolean(status.busy) || serialOperationActive;
       serialConnect.disabled = Boolean(status.session_open) || busy;
       serialDisconnect.disabled = !status.session_open || busy;
