@@ -1894,11 +1894,19 @@ class WebRuntime:
                 **after,
                 "message": pull.stderr.strip() or pull.stdout.strip() or "Update failed",
             }
+        restart_required = before["current_sha"] != after["current_sha"]
+        restart_scheduled = _schedule_web_process_restart() if restart_required else False
+        message = (
+            "Updated from origin/main. Restarting the web process to run the new code."
+            if restart_scheduled
+            else "Updated from origin/main. Restart the web process to run the new code."
+        )
         return {
             "ok": True,
             **after,
-            "message": "Updated from origin/main. Restart the web process to run the new code.",
-            "restart_required": before["current_sha"] != after["current_sha"],
+            "message": message,
+            "restart_required": restart_required,
+            "restart_scheduled": restart_scheduled,
         }
 
 
@@ -2349,3 +2357,13 @@ def _run_git(args: list[str], cwd: Path, timeout: int = 10) -> subprocess.Comple
             stdout=exc.stdout or "",
             stderr=f"Git command timed out after {timeout} seconds",
         )
+
+
+def _schedule_web_process_restart(delay_seconds: float = 1.0) -> bool:
+    disabled = os.environ.get("SORTER_DISABLE_AUTO_RESTART_AFTER_UPDATE", "").strip().lower()
+    if disabled in {"1", "true", "yes", "on"}:
+        return False
+    timer = threading.Timer(delay_seconds, lambda: os._exit(0))
+    timer.daemon = True
+    timer.start()
+    return True

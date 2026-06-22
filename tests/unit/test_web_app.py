@@ -832,6 +832,63 @@ def test_system_update_refuses_when_not_safe(monkeypatch):
     assert payload["message"] == "Switch to main before updating from the web UI"
 
 
+def test_system_update_schedules_restart_after_successful_pull(monkeypatch):
+    client = _client()
+    states = iter(
+        [
+            {
+                "version": "0.4.0-abc1234",
+                "package_version": "0.4.0",
+                "current_sha": "abc1234",
+                "current_branch": "main",
+                "dirty": False,
+                "remote": "origin/main",
+                "remote_sha": "def5678",
+                "commits_behind": 1,
+                "commits_ahead": 0,
+                "update_available": True,
+                "can_update": True,
+                "message": None,
+                "restart_required": False,
+            },
+            {
+                "version": "0.4.0-def5678",
+                "package_version": "0.4.0",
+                "current_sha": "def5678",
+                "current_branch": "main",
+                "dirty": False,
+                "remote": "origin/main",
+                "remote_sha": "def5678",
+                "commits_behind": 0,
+                "commits_ahead": 0,
+                "update_available": False,
+                "can_update": False,
+                "message": "Already up to date",
+                "restart_required": False,
+            },
+        ]
+    )
+    scheduled = []
+
+    monkeypatch.setattr(web_app_module.WebRuntime, "system_info", lambda self, refresh_remote=False: next(states))
+    monkeypatch.setattr(
+        web_app_module,
+        "_run_git",
+        lambda args, cwd, timeout=10: web_app_module.subprocess.CompletedProcess(args, 0, "", ""),
+    )
+    monkeypatch.setattr(web_app_module, "_schedule_web_process_restart", lambda: scheduled.append(True) or True)
+
+    response = client.post("/api/system/update")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["restart_required"] is True
+    assert payload["restart_scheduled"] is True
+    assert scheduled == [True]
+    assert payload["message"] == "Updated from origin/main. Restarting the web process to run the new code."
+
+
 def test_calibration_can_be_updated_from_web_app(tmp_path):
     settings = _sim_truth_settings()
     orchestrator = build_sim_orchestrator(settings)
