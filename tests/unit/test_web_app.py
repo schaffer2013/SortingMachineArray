@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+import json
 import re
 
 import pytest
 from PIL import Image
 
 from sorter.bootstrap import build_sim_orchestrator
+from sorter.adapters.hardware.marlin_motion import MarlinMotionAdapter
+from sorter.adapters.hardware.marlin_transport import RecordingMarlinTransport
 from sorter.config.calibration import CalibrationProfile
 from sorter.config.settings import AppSettings
 from sorter.interfaces.web import app as web_app_module
@@ -543,6 +546,103 @@ def test_connected_serial_board_takes_over_movement_controls():
     assert status["pose"]["x_mm"] == 5.0
 
 
+def test_live_serial_z_jog_uses_absolute_target_not_relative_mode():
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    runtime = app.config["runtime"]
+    runtime.serial_board = FakeSerialBoard()
+    runtime.serial_board.connect("COM8", 115200)
+    runtime.serial_board.live_pose["z"] = 10.0
+    client = app.test_client()
+
+    response = client.post("/api/control/jog_z", json={"dz_mm": -1.0})
+
+    assert response.status_code == 200
+    assert "G91" not in runtime.serial_board.sent_commands
+    assert runtime.serial_board.sent_commands[-3:] == ["G1 Z9.000 F300", "M400", "M114"]
+    assert runtime.serial_board.live_pose["z"] == 9.0
+
+
+def test_live_serial_unknown_position_jog_uses_limited_relative_move():
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    runtime = app.config["runtime"]
+    runtime.serial_board = FakeSerialBoard()
+    runtime.serial_board.connect("COM8", 115200)
+    runtime.serial_board.live_pose["x"] = 0.0
+    runtime.serial_board.live_pose["y"] = 0.0
+    client = app.test_client()
+
+    response = client.post("/api/control/jog_z", json={"dz_mm": -1.0})
+    too_large = client.post("/api/control/jog_z", json={"dz_mm": -3.0})
+
+    assert response.status_code == 200
+    assert runtime.serial_board.sent_commands[:5] == ["G91", "G1 Z-1.000 F300", "M400", "G90", "M114"]
+    assert too_large.status_code == 400
+    assert "exceeds 2.00 mm" in too_large.get_json()["message"]
+
+
+def test_live_serial_large_absolute_z_move_is_refused_without_confirmation():
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    runtime = app.config["runtime"]
+    runtime.serial_board = FakeSerialBoard()
+    runtime.serial_board.connect("COM8", 115200)
+    runtime.serial_board.live_pose["z"] = 100.0
+    client = app.test_client()
+
+    refused = client.post("/api/control/move_z", json={"z_mm": 1.0})
+    confirmed = client.post("/api/control/move_z", json={"z_mm": 1.0, "confirm_large_move": True})
+
+    assert refused.status_code == 400
+    assert "Refusing Z absolute move" in refused.get_json()["message"]
+    assert confirmed.status_code == 200
+    assert "G1 Z1.000 F1200" in runtime.serial_board.sent_commands
+
+
+def test_direct_hardware_z_jog_sends_relative_move_without_known_position():
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    transport = RecordingMarlinTransport()
+    orchestrator.motion = MarlinMotionAdapter(transport=transport)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    runtime = app.config["runtime"]
+    runtime.runtime_mode = "hardware"
+    runtime.hardware_runtime = True
+    client = app.test_client()
+
+    response = client.post("/api/control/jog_z", json={"dz_mm": -1.0})
+
+    assert response.status_code == 200
+    assert transport.command_log == ["G91", "G1 Z-1.000 F300", "M400", "G90"]
+
+
+def test_control_requests_are_written_to_persistent_audit_log(tmp_path):
+    client = _client(runtime_mode="simulation")
+    runtime = client.application.config["runtime"]
+    runtime.control_audit_path = tmp_path / "control_audit.jsonl"
+
+    response = client.post("/api/control/jog_z", json={"dz_mm": 1.0})
+
+    assert response.status_code == 200
+    entries = [json.loads(line) for line in runtime.control_audit_path.read_text(encoding="utf-8").splitlines()]
+    assert entries[-1]["action"] == "jog_z"
+    assert entries[-1]["payload"] == {"dz_mm": 1.0}
+    assert entries[-1]["ok"] is True
+    assert entries[-1]["runtime_target"] == "simulation"
+
+
 def test_hardware_home_controls_send_axis_specific_and_grouped_sequences():
     settings = _sim_truth_settings()
     orchestrator = build_sim_orchestrator(settings)
@@ -903,6 +1003,7 @@ class FakeSerialBoard:
         self.pixel_displays = []
         self.fail_next_command = False
         self.connection_state = "disconnected"
+        self.absolute_mode = True
 
     def status(self):
         return {
@@ -965,16 +1066,24 @@ class FakeSerialBoard:
     def send_commands(self, commands, *, message):
         responses = []
         for command in commands:
-            if command.startswith("G1 "):
+            if command == "G90":
+                self.absolute_mode = True
+            elif command == "G91":
+                self.absolute_mode = False
+            elif command.startswith("G1 "):
                 for token in command.split():
                     if token.startswith("X"):
-                        self.live_pose["x"] = self.live_pose.get("x", 0.0) + float(token[1:])
+                        value = float(token[1:])
+                        self.live_pose["x"] = value if self.absolute_mode else self.live_pose.get("x", 0.0) + value
                     if token.startswith("Y"):
-                        self.live_pose["y"] = self.live_pose.get("y", 0.0) + float(token[1:])
+                        value = float(token[1:])
+                        self.live_pose["y"] = value if self.absolute_mode else self.live_pose.get("y", 0.0) + value
                     if token.startswith("Z"):
-                        self.live_pose["z"] = self.live_pose.get("z", 0.0) + float(token[1:])
+                        value = float(token[1:])
+                        self.live_pose["z"] = value if self.absolute_mode else self.live_pose.get("z", 0.0) + value
                     if token.startswith("C"):
-                        self.live_pose["c"] = self.live_pose.get("c", 0.0) + float(token[1:])
+                        value = float(token[1:])
+                        self.live_pose["c"] = value if self.absolute_mode else self.live_pose.get("c", 0.0) + value
             result = self.send_command(command)
             responses.extend(result["response"])
         return {"ok": True, "message": message, "response": responses, **self.status()}

@@ -49,6 +49,12 @@ HARDWARE_CONTROL_ACTIONS = {
     "light_profile",
 }
 
+MAX_SERIAL_XY_JOG_MM = 25.0
+MAX_SERIAL_Z_JOG_MM = 2.0
+MAX_SERIAL_C_JOG_MM = 2.0
+MAX_SERIAL_ABSOLUTE_Z_MOVE_MM = 5.0
+MAX_SERIAL_ABSOLUTE_C_MOVE_MM = 5.0
+
 MOTION_CONTROL_ACTIONS = {
     "initialize",
     "home",
@@ -483,6 +489,7 @@ class WebRuntime:
         self.light_profiles_path = light_profiles_path
         self.calibration_path = calibration_path
         self.repo_root = _repo_root()
+        self.control_audit_path = self.repo_root / "data" / "logs" / "control_audit.jsonl"
         self.light_profiles = self._load_light_profiles()
         self.serial_board = SerialBoardSession()
         self.runtime_mode = runtime_mode
@@ -781,6 +788,40 @@ class WebRuntime:
             return {"ok": True, "message": f"Applied light profile {profile_name}"}
         raise ValueError(f"Unsupported control action: {action}")
 
+    def record_control_audit(
+        self,
+        *,
+        action: str,
+        payload: dict[str, Any],
+        result: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> None:
+        try:
+            status = self.status()
+            entry = {
+                "at": _utc_now_iso(),
+                "action": action,
+                "payload": payload,
+                "ok": error is None,
+                "error": error,
+                "result": result,
+                "result_message": (result or {}).get("message"),
+                "runtime_target": status.get("runtime_target"),
+                "pose": status.get("pose"),
+                "serial": {
+                    "connected": status.get("serial_board", {}).get("connected"),
+                    "connection_state": status.get("serial_board", {}).get("connection_state"),
+                    "controller_fault": status.get("serial_board", {}).get("controller_fault"),
+                    "live_pose": status.get("serial_board", {}).get("live_pose"),
+                    "last_response": status.get("serial_board", {}).get("last_response"),
+                },
+            }
+            self.control_audit_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.control_audit_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry, sort_keys=True) + "\n")
+        except Exception:
+            return
+
     def _hardware_control(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         if self.hardware_runtime:
             return self._direct_hardware_control(action, payload)
@@ -884,19 +925,44 @@ class WebRuntime:
             self._move_c(c_mm)
             return {"ok": True, "message": f"Moved suction C to {c_mm:.2f}"}
         if action == "jog_xy":
-            return self.control("move_xy", {
-                "x_mm": float(snapshot.pose.x_mm) + float(payload.get("dx_mm", 0.0)),
-                "y_mm": float(snapshot.pose.y_mm) + float(payload.get("dy_mm", 0.0)),
-            })
+            dx_mm = _bounded_jog_delta(payload.get("dx_mm", 0.0), axis="X", limit_mm=MAX_SERIAL_XY_JOG_MM)
+            dy_mm = _bounded_jog_delta(payload.get("dy_mm", 0.0), axis="Y", limit_mm=MAX_SERIAL_XY_JOG_MM)
+            if float(snapshot.pose.z_mm) < self.calibration.min_xy_travel_z_mm:
+                raise ValueError(
+                    f"Refusing XY jog while Z is below {self.calibration.min_xy_travel_z_mm:.2f} mm travel clearance"
+                )
+            commands = ["G91", f"G1 X{_format_mm(dx_mm)} Y{_format_mm(dy_mm)} F600", "M400", "G90"]
+            self._send_direct_motion_commands(commands)
+            snapshot.pose.x_mm = float(snapshot.pose.x_mm) + dx_mm
+            snapshot.pose.y_mm = float(snapshot.pose.y_mm) + dy_mm
+            return {"ok": True, "message": f"Jogged vacuum XY by ({dx_mm:.2f}, {dy_mm:.2f})", "commands": commands}
         if action == "jog_z":
-            return self.control("move_z", {"z_mm": float(snapshot.pose.z_mm) + float(payload.get("dz_mm", 0.0))})
+            dz_mm = _bounded_jog_delta(payload.get("dz_mm", 0.0), axis="Z", limit_mm=MAX_SERIAL_Z_JOG_MM)
+            commands = ["G91", f"G1 Z{_format_mm(dz_mm)} F300", "M400", "G90"]
+            self._send_direct_motion_commands(commands)
+            snapshot.pose.z_mm = float(snapshot.pose.z_mm) + dz_mm
+            return {"ok": True, "message": f"Jogged vacuum Z by {dz_mm:.2f}", "commands": commands}
         if action == "jog_c":
-            return self.control("move_c", {"c_mm": float(snapshot.pose.c_mm) + float(payload.get("dc_mm", 0.0))})
+            dc_mm = _bounded_jog_delta(payload.get("dc_mm", 0.0), axis="C", limit_mm=MAX_SERIAL_C_JOG_MM)
+            commands = ["G91", f"G1 C{_format_mm(dc_mm)} F300", "M400", "G90"]
+            self._send_direct_motion_commands(commands)
+            snapshot.pose.c_mm = float(snapshot.pose.c_mm) + dc_mm
+            return {"ok": True, "message": f"Jogged suction C by {dc_mm:.2f}", "commands": commands}
         if action == "jog_zc_interface":
-            dz_mm = float(payload.get("dz_mm", 0.0))
-            self._move_zc(float(snapshot.pose.z_mm) + dz_mm, float(snapshot.pose.c_mm) - dz_mm)
-            return {"ok": True, "message": "Moved Z/C interface"}
+            dz_mm = _bounded_jog_delta(payload.get("dz_mm", 0.0), axis="Z/C", limit_mm=MAX_SERIAL_Z_JOG_MM)
+            commands = ["G91", f"G1 Z{_format_mm(dz_mm)} C{_format_mm(-dz_mm)} F300", "M400", "G90"]
+            self._send_direct_motion_commands(commands)
+            snapshot.pose.z_mm = float(snapshot.pose.z_mm) + dz_mm
+            snapshot.pose.c_mm = float(snapshot.pose.c_mm) - dz_mm
+            return {"ok": True, "message": "Jogged Z/C interface", "commands": commands}
         raise ValueError(f"Unsupported direct motion action: {action}")
+
+    def _send_direct_motion_commands(self, commands: list[str]) -> None:
+        transport = getattr(self.orchestrator.motion, "transport", None)
+        if transport is None:
+            raise RuntimeError("Direct hardware motion transport is not configured")
+        for command in commands:
+            transport.send_command(command)
 
     def apply_neopixel_display(self, payload: dict[str, Any]) -> dict[str, Any]:
         if self.runtime_mode != "hardware":
@@ -1165,43 +1231,114 @@ class WebRuntime:
                 message=f"Live board moved XY to ({x_mm:.2f}, {y_mm:.2f})",
             )
         if action == "jog_xy":
-            dx_mm = float(payload.get("dx_mm", 0.0))
-            dy_mm = float(payload.get("dy_mm", 0.0))
+            dx_mm = _bounded_jog_delta(payload.get("dx_mm", 0.0), axis="X", limit_mm=MAX_SERIAL_XY_JOG_MM)
+            dy_mm = _bounded_jog_delta(payload.get("dy_mm", 0.0), axis="Y", limit_mm=MAX_SERIAL_XY_JOG_MM)
+            current_x = self._optional_serial_live_axis_position("x")
+            current_y = self._optional_serial_live_axis_position("y")
+            if current_x is None or current_y is None:
+                return self.serial_board.send_commands(
+                    ["G91", f"G1 X{_format_mm(dx_mm)} Y{_format_mm(dy_mm)} F600", "M400", "G90", "M114"],
+                    message=f"Live board jogged XY by ({dx_mm:.2f}, {dy_mm:.2f})",
+                )
+            target_x = current_x + dx_mm
+            target_y = current_y + dy_mm
             return self.serial_board.send_commands(
-                ["G91", f"G1 X{_format_mm(dx_mm)} Y{_format_mm(dy_mm)} F600", "M400", "G90", "M114"],
-                message=f"Live board jogged XY by ({dx_mm:.2f}, {dy_mm:.2f})",
+                ["G90", f"G1 X{_format_mm(target_x)} Y{_format_mm(target_y)} F600", "M400", "M114"],
+                message=f"Live board jogged XY by ({dx_mm:.2f}, {dy_mm:.2f}) to ({target_x:.2f}, {target_y:.2f})",
             )
         if action == "move_z":
             z_mm = float(payload["z_mm"])
+            self._reject_large_absolute_move(
+                axis="Z",
+                target_mm=z_mm,
+                current_mm=self._optional_serial_live_axis_position("z"),
+                limit_mm=MAX_SERIAL_ABSOLUTE_Z_MOVE_MM,
+                confirmed=bool(payload.get("confirm_large_move")),
+            )
             return self.serial_board.send_commands(
                 ["G90", f"G1 Z{_format_mm(z_mm)} F1200", "M400", "M114"],
                 message=f"Live board moved Z to {z_mm:.2f}",
             )
         if action == "jog_z":
-            dz_mm = float(payload.get("dz_mm", 0.0))
+            dz_mm = _bounded_jog_delta(payload.get("dz_mm", 0.0), axis="Z", limit_mm=MAX_SERIAL_Z_JOG_MM)
+            current_z = self._optional_serial_live_axis_position("z")
+            if current_z is None:
+                return self.serial_board.send_commands(
+                    ["G91", f"G1 Z{_format_mm(dz_mm)} F300", "M400", "G90", "M114"],
+                    message=f"Live board jogged Z by {dz_mm:.2f}",
+                )
+            target_z = current_z + dz_mm
             return self.serial_board.send_commands(
-                ["G91", f"G1 Z{_format_mm(dz_mm)} F300", "M400", "G90", "M114"],
-                message=f"Live board jogged Z by {dz_mm:.2f}",
+                ["G90", f"G1 Z{_format_mm(target_z)} F300", "M400", "M114"],
+                message=f"Live board jogged Z by {dz_mm:.2f} to {target_z:.2f}",
             )
         if action == "move_c":
             c_mm = float(payload["c_mm"])
+            self._reject_large_absolute_move(
+                axis="C",
+                target_mm=c_mm,
+                current_mm=self._optional_serial_live_axis_position("c"),
+                limit_mm=MAX_SERIAL_ABSOLUTE_C_MOVE_MM,
+                confirmed=bool(payload.get("confirm_large_move")),
+            )
             return self.serial_board.send_commands(
                 ["G90", f"G1 C{_format_mm(c_mm)} F1200", "M400", "M114"],
                 message=f"Live board moved C to {c_mm:.2f}",
             )
         if action == "jog_c":
-            dc_mm = float(payload.get("dc_mm", 0.0))
+            dc_mm = _bounded_jog_delta(payload.get("dc_mm", 0.0), axis="C", limit_mm=MAX_SERIAL_C_JOG_MM)
+            current_c = self._optional_serial_live_axis_position("c")
+            if current_c is None:
+                return self.serial_board.send_commands(
+                    ["G91", f"G1 C{_format_mm(dc_mm)} F300", "M400", "G90", "M114"],
+                    message=f"Live board jogged C by {dc_mm:.2f}",
+                )
+            target_c = current_c + dc_mm
             return self.serial_board.send_commands(
-                ["G91", f"G1 C{_format_mm(dc_mm)} F300", "M400", "G90", "M114"],
-                message=f"Live board jogged C by {dc_mm:.2f}",
+                ["G90", f"G1 C{_format_mm(target_c)} F300", "M400", "M114"],
+                message=f"Live board jogged C by {dc_mm:.2f} to {target_c:.2f}",
             )
         if action == "jog_zc_interface":
-            dz_mm = float(payload.get("dz_mm", 0.0))
+            dz_mm = _bounded_jog_delta(payload.get("dz_mm", 0.0), axis="Z/C", limit_mm=MAX_SERIAL_Z_JOG_MM)
+            current_z = self._optional_serial_live_axis_position("z")
+            current_c = self._optional_serial_live_axis_position("c")
+            if current_z is None or current_c is None:
+                return self.serial_board.send_commands(
+                    ["G91", f"G1 Z{_format_mm(dz_mm)} C{_format_mm(-dz_mm)} F300", "M400", "G90", "M114"],
+                    message=f"Live board moved interface Z by {dz_mm:.2f}",
+                )
+            target_z = current_z + dz_mm
+            target_c = current_c - dz_mm
             return self.serial_board.send_commands(
-                ["G91", f"G1 Z{_format_mm(dz_mm)} C{_format_mm(-dz_mm)} F300", "M400", "G90", "M114"],
-                message=f"Live board moved interface Z by {dz_mm:.2f}",
+                ["G90", f"G1 Z{_format_mm(target_z)} C{_format_mm(target_c)} F300", "M400", "M114"],
+                message=f"Live board moved interface Z by {dz_mm:.2f} to Z {target_z:.2f} / C {target_c:.2f}",
             )
         raise ValueError(f"Unsupported live serial control action: {action}")
+
+    def _optional_serial_live_axis_position(self, axis: str) -> float | None:
+        live_pose = self.serial_board.status().get("live_pose", {})
+        value = live_pose.get(axis)
+        if value is None:
+            return None
+        return float(value)
+
+    def _reject_large_absolute_move(
+        self,
+        *,
+        axis: str,
+        target_mm: float,
+        current_mm: float | None,
+        limit_mm: float,
+        confirmed: bool,
+    ) -> None:
+        if current_mm is None or confirmed:
+            return
+        delta_mm = target_mm - current_mm
+        if abs(delta_mm) > limit_mm:
+            raise ValueError(
+                f"Refusing {axis} absolute move from {current_mm:.2f} to {target_mm:.2f} mm "
+                f"({delta_mm:.2f} mm); use jog or confirm_large_move"
+            )
 
     def _load_light_profiles(self) -> dict[str, dict[str, int]]:
         default_profiles = {
@@ -1801,9 +1938,13 @@ def create_web_app(
 
     @app.post("/api/control/<action>")
     def api_control(action: str):
+        payload = request.get_json(silent=True) or {}
         try:
-            return jsonify(runtime.control(action, request.get_json(silent=True) or {}))
+            result = runtime.control(action, payload)
+            runtime.record_control_audit(action=action, payload=payload, result=result)
+            return jsonify(result)
         except Exception as exc:
+            runtime.record_control_audit(action=action, payload=payload, error=str(exc))
             return jsonify({"ok": False, "message": str(exc)}), 400
 
     @app.get("/api/card/validate")
@@ -2054,6 +2195,16 @@ def _normalize_web_recognition_mode(raw_mode: Any) -> str:
     if mode in {"expected_card", "expected-card"}:
         return "reevaluation"
     return mode or "greenfield"
+
+
+def _bounded_jog_delta(raw_value: Any, *, axis: str, limit_mm: float) -> float:
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{axis} jog distance must be a number") from None
+    if abs(value) > limit_mm:
+        raise ValueError(f"{axis} jog distance {value:.2f} mm exceeds {limit_mm:.2f} mm per command")
+    return value
 
 
 def _normalize_crop_payload(raw_crop: Any) -> dict[str, float] | None:
