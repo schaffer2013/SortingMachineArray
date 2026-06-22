@@ -581,6 +581,12 @@ window.SorterPages = {
             max_samples: Number(document.querySelector("#lighting-opt-samples").value),
             target_brightness: Number(document.querySelector("#lighting-opt-target").value),
             settle_ms: Number(document.querySelector("#lighting-opt-settle").value),
+            crop: {
+              left: Number(document.querySelector("#lighting-opt-crop-left").value),
+              top: Number(document.querySelector("#lighting-opt-crop-top").value),
+              right: Number(document.querySelector("#lighting-opt-crop-right").value),
+              bottom: Number(document.querySelector("#lighting-opt-crop-bottom").value),
+            },
           }),
         });
         optimizerMessage.textContent = result.message || "Lighting optimized";
@@ -607,9 +613,10 @@ window.SorterPages = {
         <article class="status-card"><div class="muted">Score</div><strong>${Number(best.score).toFixed(4)}</strong></article>
         <article class="status-card"><div class="muted">Brightness</div><strong>${Number(best.mean_brightness).toFixed(2)}</strong></article>
         <article class="status-card"><div class="muted">Contrast</div><strong>${Number(best.contrast).toFixed(2)}</strong></article>
+        <article class="status-card"><div class="muted">Glare</div><strong>${Number(best.glare_fraction || 0).toFixed(4)}</strong></article>
         ${ranked.map(sample => `
           <article class="status-card">
-            <div class="muted">Candidate score ${Number(sample.score).toFixed(4)}</div>
+            <div class="muted">Candidate score ${Number(sample.score).toFixed(4)} / glare ${Number(sample.glare_fraction || 0).toFixed(4)}</div>
             <strong><span class="color-swatch" style="background:${rgbToHex([sample.red, sample.green, sample.blue])}"></span>${sample.red}, ${sample.green}, ${sample.blue}</strong>
           </article>
         `).join("")}

@@ -165,6 +165,12 @@ class FuzzyEnigmaRecognizerAdapter:
             setattr(recognizer_config, "recognition_backend", requested_backend)
             self.sorter_backend = requested_backend
             self.card_engine_requested_backend = requested_backend
+        previous_moss_threshold = None
+        if recognizer_config is not None and hasattr(recognizer_config, "moss_threshold"):
+            previous_moss_threshold = getattr(recognizer_config, "moss_threshold")
+            requested_threshold = _coerce_optional_float(request.get("moss_threshold"))
+            if requested_threshold is not None:
+                setattr(recognizer_config, "moss_threshold", max(1.0, min(80.0, requested_threshold)))
 
         use_tracked_pool = request.get("use_tracked_pool")
         track_result = request.get("track_result")
@@ -221,6 +227,8 @@ class FuzzyEnigmaRecognizerAdapter:
                 )
         finally:
             _restore_bytecode_env(previous_bytecode_env)
+            if previous_moss_threshold is not None and recognizer_config is not None:
+                setattr(recognizer_config, "moss_threshold", previous_moss_threshold)
         raw_debug = dict(_output_attr(output, "debug", {}))
         mode_flags = dict(_output_attr(output, "mode_flags", {}))
         pipeline_summary = dict(_output_attr(output, "pipeline_summary", {}))
@@ -373,6 +381,15 @@ def _effective_card_engine_backend(raw_debug: dict[str, Any], *, default: str) -
                 return "fuzzy_enigma"
             return normalized
     return default
+
+
+def _coerce_optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _normalize_card_engine_backend(value: Any) -> str:

@@ -22,9 +22,16 @@
             <option>expected_card</option>
           </select>
         </label>
+        <label>Moss threshold<input name="moss_threshold" type="number" min="1" max="80" step="1" value="10"></label>
         <label>Expected name<input name="expected_name"></label>
         <label>Expected set<input name="expected_set"></label>
         <label>Collector #<input name="expected_collector"></label>
+      </div>
+      <div class="form-grid four-up">
+        <label>Crop left %<input name="crop_left" type="number" min="0" max="98" step="1" value="16"></label>
+        <label>Crop top %<input name="crop_top" type="number" min="0" max="98" step="1" value="4"></label>
+        <label>Crop right %<input name="crop_right" type="number" min="1" max="100" step="1" value="62"></label>
+        <label>Crop bottom %<input name="crop_bottom" type="number" min="1" max="100" step="1" value="98"></label>
       </div>
       <div class="checkbox-row">
         <label><input type="checkbox" name="prefer_visual_small_pool"> Prefer visual small pool</label>
