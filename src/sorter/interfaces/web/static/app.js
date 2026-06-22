@@ -12,6 +12,66 @@ const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, character =>
   "\"": "&quot;",
   "'": "&#39;",
 }[character]));
+const isObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
+const nonEmptyObject = value => isObject(value) && Object.keys(value).length > 0;
+const firstPresent = values => values.find(value => value !== undefined && value !== null && value !== "");
+const formatConfidence = value => {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "--";
+  const percent = number <= 1 ? number * 100 : number;
+  return `${percent.toFixed(1)}%`;
+};
+const formatSeconds = value => {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "--";
+  return number < 1 ? `${Math.round(number * 1000)} ms` : `${number.toFixed(2)} s`;
+};
+const timingValue = (timings, keys) => {
+  for (const key of keys) {
+    if (timings[key] !== undefined && timings[key] !== null) return timings[key];
+  }
+  return null;
+};
+const recognitionTimings = result => {
+  const raw = result?.debug?.raw || {};
+  return firstPresent([
+    nonEmptyObject(raw.timings) ? raw.timings : null,
+    nonEmptyObject(raw.moss_machine?.timings) ? raw.moss_machine.timings : null,
+    nonEmptyObject(raw.moss?.debug?.timings) ? raw.moss.debug.timings : null,
+    nonEmptyObject(raw.moss?.timings) ? raw.moss.timings : null,
+    nonEmptyObject(result?.debug?.timings) ? result.debug.timings : null,
+  ]) || {};
+};
+const recognitionSetConfidence = (result, candidate) => {
+  const setCode = candidate?.set_code;
+  const comparisons = result?.debug?.raw?.set_symbol?.comparisons;
+  if (Array.isArray(comparisons) && setCode) {
+    const comparison = comparisons.find(item => item?.set_code === setCode);
+    if (comparison?.similarity !== undefined) return comparison.similarity;
+  }
+  return candidate?.score;
+};
+const renderRecognitionSummary = (root, result) => {
+  if (!root || !result) return;
+  const candidate = Array.isArray(result.alternatives) ? result.alternatives[0] : null;
+  const timings = recognitionTimings(result);
+  const totalTime = timingValue(timings, ["total", "wall_total", "scanner_runtime"]);
+  const timingDetails = [
+    ["Title OCR", timingValue(timings, ["title_ocr"])],
+    ["Secondary OCR", timingValue(timings, ["secondary_ocr"])],
+    ["Set symbol", timingValue(timings, ["set_symbol_compare"])],
+    ["Moss scan", timingValue(timings, ["scanner_runtime"])],
+  ].filter(([, value]) => value !== null && value !== undefined);
+  const timingDetail = timingDetails.length
+    ? timingDetails.slice(0, 3).map(([label, value]) => `${label} ${formatSeconds(value)}`).join(" · ")
+    : "No stage timings reported";
+  root.hidden = false;
+  root.innerHTML = [
+    ["Name", result.card_name || result.debug?.raw?.best_name || candidate?.name || "--", `Confidence ${formatConfidence(result.confidence)}`],
+    ["Set", candidate?.set_code || "--", `Confidence ${formatConfidence(recognitionSetConfidence(result, candidate))}`],
+    ["Timing", formatSeconds(totalTime), timingDetail],
+  ].map(([label, value, detail]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}<span class="summary-detail">${escapeHtml(detail)}</span></dd></div>`).join("");
+};
 const getTheme = () => localStorage.getItem("sorter-theme") || "light";
 const setTheme = theme => {
   const normalized = theme === "light" ? "light" : "dark";
@@ -1290,6 +1350,7 @@ window.SorterPages = {
     const validation = document.querySelector("#card-validation");
     const form = document.querySelector("#recognition-form");
     const result = document.querySelector("#recognition-result");
+    const resultSummary = document.querySelector("#recognition-summary");
     const cameraFeed = document.querySelector("#recognition-camera-feed");
     const cameraRefresh = document.querySelector("#recognition-camera-refresh");
     const cropTool = createSkewCropTool({
@@ -1325,6 +1386,7 @@ window.SorterPages = {
       ["prefer_visual_small_pool","use_tracked_pool","track_result"].forEach(name => {
         data.set(name, form.elements[name].checked ? "true" : "false");
       });
+      resultSummary.hidden = true;
       result.textContent = recognitionSource === "camera" ? "Capturing live frame..." : "Recognizing...";
       if (recognitionSource === "camera") {
         await cropTool.refreshFrame();
@@ -1339,7 +1401,13 @@ window.SorterPages = {
       }
       const response = await fetch("/api/recognition/run", {method:"POST", body:data});
       const body = await response.json();
-      result.textContent = body.ok ? pretty(body.result) : body.message;
+      if (body.ok) {
+        renderRecognitionSummary(resultSummary, body.result);
+        result.textContent = pretty(body.result);
+      } else {
+        resultSummary.hidden = true;
+        result.textContent = body.message;
+      }
     };
   },
   runs() {
