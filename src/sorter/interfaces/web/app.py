@@ -50,8 +50,8 @@ HARDWARE_CONTROL_ACTIONS = {
 }
 
 MAX_SERIAL_XY_JOG_MM = 25.0
-MAX_SERIAL_Z_JOG_MM = 2.0
-MAX_SERIAL_C_JOG_MM = 2.0
+MAX_SERIAL_Z_JOG_MM = 5.0
+MAX_SERIAL_C_JOG_MM = 5.0
 MAX_SERIAL_ABSOLUTE_Z_MOVE_MM = 5.0
 MAX_SERIAL_ABSOLUTE_C_MOVE_MM = 5.0
 
@@ -486,6 +486,7 @@ class WebRuntime:
         self.last_error: str | None = None
         self.last_manual_recognition: dict[str, Any] | None = None
         self.machine_initialized = False
+        self.homed_axes: set[str] = set()
         self.light_profiles_path = light_profiles_path
         self.calibration_path = calibration_path
         self.repo_root = _repo_root()
@@ -665,6 +666,7 @@ class WebRuntime:
         with self.lock:
             travel_z_mm = self.orchestrator.initialize_machine(self.calibration)
             self.machine_initialized = True
+            self._mark_axes_homed("x", "y", "z", "c")
             return {
                 "ok": True,
                 "message": f"Machine initialized and homed; vacuum Z at {travel_z_mm:.2f} mm travel clearance",
@@ -682,6 +684,7 @@ class WebRuntime:
             snapshot.pose.y_mm = 0.0
             snapshot.pose.z_mm = self.calibration.z_home_mm
             snapshot.pose.c_mm = self.calibration.c_home_mm
+            self._mark_axes_homed("x", "y", "z", "c")
             self.machine_initialized = False
             return {
                 "ok": True,
@@ -701,6 +704,7 @@ class WebRuntime:
                 snapshot.pose.z_mm = self.calibration.z_home_mm
             elif axis == "c":
                 snapshot.pose.c_mm = self.calibration.c_home_mm
+            self._mark_axes_homed(axis)
             self.machine_initialized = False
             return {"ok": True, "message": f"Homed {axis.upper()} axis"}
         if action == "wait_idle":
@@ -787,6 +791,15 @@ class WebRuntime:
             self._apply_light_profile(profile_name, profile)
             return {"ok": True, "message": f"Applied light profile {profile_name}"}
         raise ValueError(f"Unsupported control action: {action}")
+
+    def _mark_axes_homed(self, *axes: str) -> None:
+        for axis in axes:
+            normalized = str(axis).strip().lower()
+            if normalized:
+                self.homed_axes.add(normalized)
+
+    def _jog_limit_for_axes(self, limit_mm: float, *axes: str) -> float | None:
+        return None if all(axis in self.homed_axes for axis in axes) else limit_mm
 
     def record_control_audit(
         self,
@@ -888,6 +901,7 @@ class WebRuntime:
             snapshot.pose.y_mm = 0.0
             snapshot.pose.z_mm = self.calibration.z_home_mm
             snapshot.pose.c_mm = self.calibration.c_home_mm
+            self._mark_axes_homed("x", "y", "z", "c")
             self.machine_initialized = False
             return {"ok": True, "message": "Axes homed"}
         if action in {"home_x", "home_y", "home_z", "home_c"}:
@@ -901,6 +915,7 @@ class WebRuntime:
                 snapshot.pose.z_mm = self.calibration.z_home_mm
             elif axis == "C":
                 snapshot.pose.c_mm = self.calibration.c_home_mm
+            self._mark_axes_homed(axis.lower())
             self.machine_initialized = False
             return {"ok": True, "message": f"Homed {axis} axis"}
         if action == "wait_idle":
@@ -937,19 +952,31 @@ class WebRuntime:
             snapshot.pose.y_mm = float(snapshot.pose.y_mm) + dy_mm
             return {"ok": True, "message": f"Jogged vacuum XY by ({dx_mm:.2f}, {dy_mm:.2f})", "commands": commands}
         if action == "jog_z":
-            dz_mm = _bounded_jog_delta(payload.get("dz_mm", 0.0), axis="Z", limit_mm=MAX_SERIAL_Z_JOG_MM)
+            dz_mm = _bounded_jog_delta(
+                payload.get("dz_mm", 0.0),
+                axis="Z",
+                limit_mm=self._jog_limit_for_axes(MAX_SERIAL_Z_JOG_MM, "z"),
+            )
             commands = ["G91", f"G1 Z{_format_mm(dz_mm)} F300", "M400", "G90"]
             self._send_direct_motion_commands(commands)
             snapshot.pose.z_mm = float(snapshot.pose.z_mm) + dz_mm
             return {"ok": True, "message": f"Jogged vacuum Z by {dz_mm:.2f}", "commands": commands}
         if action == "jog_c":
-            dc_mm = _bounded_jog_delta(payload.get("dc_mm", 0.0), axis="C", limit_mm=MAX_SERIAL_C_JOG_MM)
+            dc_mm = _bounded_jog_delta(
+                payload.get("dc_mm", 0.0),
+                axis="C",
+                limit_mm=self._jog_limit_for_axes(MAX_SERIAL_C_JOG_MM, "c"),
+            )
             commands = ["G91", f"G1 C{_format_mm(dc_mm)} F300", "M400", "G90"]
             self._send_direct_motion_commands(commands)
             snapshot.pose.c_mm = float(snapshot.pose.c_mm) + dc_mm
             return {"ok": True, "message": f"Jogged suction C by {dc_mm:.2f}", "commands": commands}
         if action == "jog_zc_interface":
-            dz_mm = _bounded_jog_delta(payload.get("dz_mm", 0.0), axis="Z/C", limit_mm=MAX_SERIAL_Z_JOG_MM)
+            dz_mm = _bounded_jog_delta(
+                payload.get("dz_mm", 0.0),
+                axis="Z/C",
+                limit_mm=self._jog_limit_for_axes(MAX_SERIAL_Z_JOG_MM, "z", "c"),
+            )
             commands = ["G91", f"G1 Z{_format_mm(dz_mm)} C{_format_mm(-dz_mm)} F300", "M400", "G90"]
             self._send_direct_motion_commands(commands)
             snapshot.pose.z_mm = float(snapshot.pose.z_mm) + dz_mm
@@ -1210,15 +1237,21 @@ class WebRuntime:
 
     def _hardware_serial_control(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         if action == "initialize":
-            return self.serial_board.send_commands(
+            result = self.serial_board.send_commands(
                 ["G28 Z C", "G28 X Y", "M114"],
                 message="Live board initialized and homed",
             )
+            self._mark_axes_homed("x", "y", "z", "c")
+            return result
         if action == "home":
-            return self.serial_board.send_commands(["G28 Z C", "G28 X Y", "M114"], message="Live board axes homed")
+            result = self.serial_board.send_commands(["G28 Z C", "G28 X Y", "M114"], message="Live board axes homed")
+            self._mark_axes_homed("x", "y", "z", "c")
+            return result
         if action in {"home_x", "home_y", "home_z", "home_c"}:
             axis = action.removeprefix("home_").upper()
-            return self.serial_board.send_commands([f"G28 {axis}", "M114"], message=f"Live board homed {axis}")
+            result = self.serial_board.send_commands([f"G28 {axis}", "M114"], message=f"Live board homed {axis}")
+            self._mark_axes_homed(axis.lower())
+            return result
         if action == "wait_idle":
             return self.serial_board.send_commands(["M400", "M114"], message="Live board idle")
         if action in {"move_xy", "move_camera_xy"}:
@@ -1260,7 +1293,11 @@ class WebRuntime:
                 message=f"Live board moved Z to {z_mm:.2f}",
             )
         if action == "jog_z":
-            dz_mm = _bounded_jog_delta(payload.get("dz_mm", 0.0), axis="Z", limit_mm=MAX_SERIAL_Z_JOG_MM)
+            dz_mm = _bounded_jog_delta(
+                payload.get("dz_mm", 0.0),
+                axis="Z",
+                limit_mm=self._jog_limit_for_axes(MAX_SERIAL_Z_JOG_MM, "z"),
+            )
             current_z = self._optional_serial_live_axis_position("z")
             if current_z is None:
                 return self.serial_board.send_commands(
@@ -1286,7 +1323,11 @@ class WebRuntime:
                 message=f"Live board moved C to {c_mm:.2f}",
             )
         if action == "jog_c":
-            dc_mm = _bounded_jog_delta(payload.get("dc_mm", 0.0), axis="C", limit_mm=MAX_SERIAL_C_JOG_MM)
+            dc_mm = _bounded_jog_delta(
+                payload.get("dc_mm", 0.0),
+                axis="C",
+                limit_mm=self._jog_limit_for_axes(MAX_SERIAL_C_JOG_MM, "c"),
+            )
             current_c = self._optional_serial_live_axis_position("c")
             if current_c is None:
                 return self.serial_board.send_commands(
@@ -1299,7 +1340,11 @@ class WebRuntime:
                 message=f"Live board jogged C by {dc_mm:.2f} to {target_c:.2f}",
             )
         if action == "jog_zc_interface":
-            dz_mm = _bounded_jog_delta(payload.get("dz_mm", 0.0), axis="Z/C", limit_mm=MAX_SERIAL_Z_JOG_MM)
+            dz_mm = _bounded_jog_delta(
+                payload.get("dz_mm", 0.0),
+                axis="Z/C",
+                limit_mm=self._jog_limit_for_axes(MAX_SERIAL_Z_JOG_MM, "z", "c"),
+            )
             current_z = self._optional_serial_live_axis_position("z")
             current_c = self._optional_serial_live_axis_position("c")
             if current_z is None or current_c is None:
@@ -2197,12 +2242,12 @@ def _normalize_web_recognition_mode(raw_mode: Any) -> str:
     return mode or "greenfield"
 
 
-def _bounded_jog_delta(raw_value: Any, *, axis: str, limit_mm: float) -> float:
+def _bounded_jog_delta(raw_value: Any, *, axis: str, limit_mm: float | None) -> float:
     try:
         value = float(raw_value)
     except (TypeError, ValueError):
         raise ValueError(f"{axis} jog distance must be a number") from None
-    if abs(value) > limit_mm:
+    if limit_mm is not None and abs(value) > limit_mm:
         raise ValueError(f"{axis} jog distance {value:.2f} mm exceeds {limit_mm:.2f} mm per command")
     return value
 
