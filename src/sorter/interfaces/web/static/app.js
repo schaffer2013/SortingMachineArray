@@ -24,13 +24,13 @@ const renderRuntimeBanner = status => {
   const banner = document.querySelector("#runtime-banner");
   if (!banner || !status) return;
   const faulted = Boolean(status.serial_board?.controller_fault);
-  const live = status.runtime_target === "hardware_serial";
+  const live = isHardwareLive(status);
   const simulation = status.runtime_target === "simulation";
   banner.className = live && !faulted ? "runtime-banner live" : "runtime-banner sim";
   banner.textContent = faulted
     ? "CONTROLLER FAULT: reset or power-cycle controller"
     : live
-    ? `LIVE HARDWARE: ${status.serial_board?.port || "serial board"}`
+    ? `LIVE HARDWARE: ${status.serial_board?.port || "direct Pi adapters"}`
     : simulation
       ? "SIMULATION"
       : "HARDWARE NOT CONNECTED";
@@ -54,7 +54,12 @@ refreshRuntimeBanner();
 setInterval(refreshRuntimeBanner, 2000);
 const isHardwareMode = status => status.runtime_mode === "hardware";
 const isSimulationMode = status => status.runtime_mode === "simulation";
-const isHardwareLive = status => status.runtime_target === "hardware_serial";
+const isHardwareLive = status => status.runtime_target === "hardware_serial" || status.runtime_target === "hardware_direct";
+const controllerStateText = status => {
+  if (status.serial_board?.controller_fault) return status.serial_board?.last_error || "Faulted; reset controller";
+  if (status.runtime_target === "hardware_direct" && !status.serial_board?.session_open) return "direct Pi adapters";
+  return status.serial_board?.connection_state || "--";
+};
 const setButtonsDisabled = (root, selector, disabled) => {
   root.querySelectorAll(selector).forEach(button => button.disabled = disabled);
 };
@@ -653,7 +658,7 @@ window.SorterPages = {
       statusRoot.innerHTML = [
         ["Initialized", status.machine_initialized ? "Yes" : "No"],
         ["Runtime", status.runtime_message],
-        ["Controller", controllerFault ? status.serial_board?.last_error || "Faulted; reset controller" : status.serial_board?.connection_state || "--"],
+        ["Controller", controllerStateText(status)],
         ["X", `${status.pose.x_mm.toFixed(2)} mm`],
         ["Y", `${status.pose.y_mm.toFixed(2)} mm`],
         ["Z", `${z.toFixed(2)} mm`],
