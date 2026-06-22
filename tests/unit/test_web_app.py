@@ -412,6 +412,7 @@ def test_hardware_panels_are_grouped_by_domain():
     assert b'name="moss_threshold" type="number" min="1" max="80" step="1" value="80"' in recognition.data
     assert b'id="recognition-crop-overlay"' in recognition.data
     assert b'id="recognition-crop-preview"' in recognition.data
+    assert b'id="recognition-summary"' in recognition.data
     assert b'id="endstop-state"' in movement.data
     assert b'id="bltouch-probe"' in movement.data
     assert b'data-control="home_x"' in movement.data
