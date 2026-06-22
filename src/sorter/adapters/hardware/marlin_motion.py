@@ -31,20 +31,24 @@ class MarlinMotionAdapter:
         self._pose = MachinePose(z_mm=self.z_home_mm, c_mm=self.c_home_mm)
 
     def move_xy(self, x_mm: float, y_mm: float) -> None:
+        self._send("G90")
         self._send(f"G1 X{_format_mm(x_mm)} Y{_format_mm(y_mm)} F{self.xy_feedrate_mm_per_min}")
         self.total_distance_mm += math.dist((self._pose.x_mm, self._pose.y_mm), (x_mm, y_mm))
         self._pose.x_mm = x_mm
         self._pose.y_mm = y_mm
 
     def move_z(self, z_mm: float) -> None:
+        self._send("G90")
         self._send(f"G1 Z{_format_mm(z_mm)} F{self.z_feedrate_mm_per_min}")
         self._pose.z_mm = z_mm
 
     def move_c(self, c_mm: float) -> None:
+        self._send("G90")
         self._send(f"G1 C{_format_mm(c_mm)} F{self.c_feedrate_mm_per_min}")
         self._pose.c_mm = c_mm
 
     def move_zc(self, z_mm: float, c_mm: float) -> None:
+        self._send("G90")
         self._send(f"G1 Z{_format_mm(z_mm)} C{_format_mm(c_mm)} F{self.z_feedrate_mm_per_min}")
         self._pose.z_mm = z_mm
         self._pose.c_mm = c_mm
