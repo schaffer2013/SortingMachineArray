@@ -13,6 +13,7 @@ from sorter.adapters.hardware.marlin_motion import MarlinMotionAdapter
 from sorter.adapters.hardware.marlin_transport import RecordingMarlinTransport
 from sorter.config.calibration import CalibrationProfile
 from sorter.config.settings import AppSettings
+from sorter.interfaces import web_runner
 from sorter.interfaces.web import app as web_app_module
 from sorter.interfaces.web import create_web_app
 from sorter.ports.camera import Frame
@@ -83,6 +84,57 @@ def test_light_profiles_can_be_created_and_applied(tmp_path):
     assert apply_response.status_code == 200
     assert status["lights_profile"] == "inspection-blue"
     assert status["lights_rgb"] == [1, 2, 42]
+
+
+def test_light_profiles_seed_from_tracked_config_and_save_to_local_data(tmp_path):
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    seed_path = tmp_path / "config" / "light_profiles.json"
+    local_path = tmp_path / "local_data" / "light_profiles.json"
+    seed_path.parent.mkdir(parents=True)
+    seed_path.write_text(
+        json.dumps({"profiles": [{"name": "seeded", "red": 1, "green": 2, "blue": 3}]}),
+        encoding="utf-8",
+    )
+    app = create_web_app(
+        orchestrator,
+        calibration,
+        light_profiles_path=local_path,
+        light_profiles_seed_path=seed_path,
+    )
+    app.config["runtime"].runtime_mode = "simulation"
+    app.testing = True
+    client = app.test_client()
+
+    seeded = client.get("/api/light-profiles").get_json()["profiles"]
+    created = client.post(
+        "/api/light-profiles",
+        json={"name": "local", "red": 4, "green": 5, "blue": 6},
+    )
+    saved = json.loads(local_path.read_text(encoding="utf-8"))
+
+    assert created.status_code == 200
+    assert any(profile["name"] == "seeded" for profile in seeded)
+    assert local_path.exists()
+    assert {profile["name"] for profile in saved["profiles"]} == {"seeded", "local"}
+
+
+def test_web_runner_prefers_local_calibration_and_writes_local_path(tmp_path):
+    settings = _sim_truth_settings()
+    base = CalibrationProfile.from_file(settings.calibration_path).to_json_dict()
+    tracked_path = tmp_path / "config" / "calibration.json"
+    local_path = tmp_path / "local_data" / "calibration.json"
+    tracked_path.parent.mkdir(parents=True)
+    local_path.parent.mkdir(parents=True)
+    tracked_path.write_text(json.dumps({**base, "camera_offset_z_mm": 1.0}), encoding="utf-8")
+    local_path.write_text(json.dumps({**base, "camera_offset_z_mm": 9.0}), encoding="utf-8")
+    local_settings = replace(settings, calibration_path=tracked_path)
+
+    calibration, writable_path = web_runner._load_calibration(tmp_path, local_settings)
+
+    assert calibration.camera_offset_z_mm == 9.0
+    assert writable_path == local_path
 
 
 def test_light_profile_is_sent_to_connected_serial_board(tmp_path):
@@ -253,6 +305,25 @@ def test_serial_session_records_recent_command_log():
     assert log[-2]["sent_at"].endswith("Z")
     assert log[-1]["command"] == "M114"
     assert log[-1]["response"] == ["M114 response", "ok"]
+
+
+def test_serial_session_persists_and_reloads_command_log(tmp_path):
+    log_path = tmp_path / "serial_commands.jsonl"
+    first_session = web_app_module.SerialBoardSession(serial_log_path=log_path)
+    first_session.transport = RecordingTransport()
+    first_session.port = "COM8"
+    first_session.connection_state = "verified"
+    first_session.last_success_monotonic = web_app_module.time.monotonic()
+
+    first_session.send_command("G1 Z9.000 F300")
+    restored_session = web_app_module.SerialBoardSession(serial_log_path=log_path)
+    status = restored_session.status()
+    saved_entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+
+    assert saved_entries[-1]["kind"] == "command"
+    assert saved_entries[-1]["command"] == "G1 Z9.000 F300"
+    assert status["serial_command_log"][-1]["command"] == "G1 Z9.000 F300"
+    assert status["serial_command_log"][-1]["response"] == ["G1 Z9.000 F300 response", "ok"]
 
 
 def test_serial_session_records_status_polls_separately():
@@ -583,6 +654,51 @@ def test_camera_space_z_move_applies_camera_offset_for_live_serial():
     assert response.status_code == 200
     assert "G1 Z7.000 F1200" in runtime.serial_board.sent_commands
     assert "camera Z" in response.get_json()["message"]
+
+
+def test_live_serial_move_vacuum_xy_includes_requested_vacuum_z():
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    runtime = app.config["runtime"]
+    runtime.serial_board = FakeSerialBoard()
+    runtime.serial_board.connect("COM8", 115200)
+    runtime.serial_board.live_pose["z"] = 10.0
+    client = app.test_client()
+
+    response = client.post("/api/control/move_xy", json={"x_mm": 100.0, "y_mm": 50.0, "z_mm": 12.0})
+
+    assert response.status_code == 200
+    assert "G1 X100.000 Y50.000 Z12.000 F6000" in runtime.serial_board.sent_commands
+    assert runtime.serial_board.live_pose["z"] == 12.0
+
+
+def test_live_serial_move_camera_xy_includes_camera_space_z_offset():
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path).with_updates(
+        camera_offset_x_mm=10.0,
+        camera_offset_y_mm=15.0,
+        camera_offset_z_mm=5.0,
+    )
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    runtime = app.config["runtime"]
+    runtime.serial_board = FakeSerialBoard()
+    runtime.serial_board.connect("COM8", 115200)
+    runtime.serial_board.live_pose["z"] = 7.0
+    client = app.test_client()
+
+    response = client.post(
+        "/api/control/move_camera_xy",
+        json={"x_mm": 100.0, "y_mm": 50.0, "z_mm": 12.0, "coordinate_space": "camera"},
+    )
+
+    assert response.status_code == 200
+    assert "G1 X90.000 Y35.000 Z7.000 F6000" in runtime.serial_board.sent_commands
+    assert runtime.serial_board.live_pose["z"] == 7.0
 
 
 def test_live_serial_z_jog_uses_absolute_target_not_relative_mode():

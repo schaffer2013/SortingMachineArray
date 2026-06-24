@@ -57,6 +57,9 @@ The current web console is immediately useful in `sim` mode. In `hardware` mode,
 
 - Install the always-on Pi service from a Raspberry Pi shell:
 	- `bash scripts/install-rpi-webserver.sh`
+- Machine-specific writable data lives under untracked `local_data/`.
+	- Calibration loads from `local_data/calibration.json` when present, otherwise from tracked `config/calibration.json`; web saves write to `local_data/calibration.json`.
+	- Light profiles load from `local_data/light_profiles.json` when present, otherwise seed from tracked `config/light_profiles.json`; web saves write to `local_data/light_profiles.json`.
 - The service is named `sortingmachine-web` and starts at boot after the network is online.
 - Service start is intentionally fast: it uses the existing `.venv` and runs:
 	- `SORTER_MODE=hardware python -m sorter.interfaces.web_runner`
