@@ -1887,19 +1887,28 @@ class WebRuntime:
         if not before["can_update"]:
             return {"ok": False, **before}
         pull = _run_git(["pull", "--ff-only", "origin", "main"], cwd=self.repo_root, timeout=120)
-        after = self.system_info(refresh_remote=False)
         if pull.returncode != 0:
+            after = self.system_info(refresh_remote=False)
             return {
                 "ok": False,
                 **after,
                 "message": pull.stderr.strip() or pull.stdout.strip() or "Update failed",
             }
+        deploy = _run_deploy_script(self.repo_root)
+        after = self.system_info(refresh_remote=False)
+        if deploy.returncode != 0:
+            return {
+                "ok": False,
+                **after,
+                "message": deploy.stderr.strip() or deploy.stdout.strip() or "Deploy install failed",
+                "deploy_returncode": deploy.returncode,
+            }
         restart_required = before["current_sha"] != after["current_sha"]
         restart_scheduled = _schedule_web_process_restart() if restart_required else False
         message = (
-            "Updated from origin/main. Restarting the web process to run the new code."
+            "Updated from origin/main, installed dependencies, and restarting the web process."
             if restart_scheduled
-            else "Updated from origin/main. Restart the web process to run the new code."
+            else "Updated from origin/main and installed dependencies. Restart the web process to run the new code."
         )
         return {
             "ok": True,
@@ -2356,6 +2365,33 @@ def _run_git(args: list[str], cwd: Path, timeout: int = 10) -> subprocess.Comple
             returncode=124,
             stdout=exc.stdout or "",
             stderr=f"Git command timed out after {timeout} seconds",
+        )
+
+
+def _run_deploy_script(repo_root: Path, timeout: int = 900) -> subprocess.CompletedProcess[str]:
+    script = repo_root / "scripts" / "deploy-rpi-webserver.sh"
+    if not script.exists():
+        return subprocess.CompletedProcess(
+            [str(script), "--no-pull"],
+            returncode=127,
+            stdout="",
+            stderr=f"Deploy script not found: {script}",
+        )
+    try:
+        return subprocess.run(
+            ["bash", str(script), "--no-pull"],
+            cwd=repo_root,
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return subprocess.CompletedProcess(
+            [str(script), "--no-pull"],
+            returncode=124,
+            stdout=exc.stdout or "",
+            stderr=f"Deploy script timed out after {timeout} seconds",
         )
 
 
