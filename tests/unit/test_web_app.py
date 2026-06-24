@@ -115,6 +115,40 @@ def test_card_back_training_model_plan_capture_and_label(tmp_path):
     assert image_response.mimetype == "image/jpeg"
 
 
+def test_card_back_training_capture_confirms_generated_camera_z_move(tmp_path):
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path).with_updates(
+        camera_offset_x_mm=10.0,
+        camera_offset_y_mm=15.0,
+        camera_offset_z_mm=5.0,
+    )
+    app = create_web_app(orchestrator, calibration)
+    app.config["runtime"].card_back_training = CardBackTrainingStore(tmp_path / "card_back_training")
+    app.testing = True
+    runtime = app.config["runtime"]
+    runtime.serial_board = FakeSerialBoard()
+    runtime.serial_board.connect("COM8", 115200)
+    runtime.serial_board.live_pose["z"] = 150.0
+    client = app.test_client()
+
+    created = client.post("/api/card-back-training/models", json={"name": "live z capture"}).get_json()
+    response = client.post(
+        "/api/card-back-training/capture",
+        json={
+            "model_id": created["model"]["model_id"],
+            "execute_motion": True,
+            "run_detection": False,
+            "point": {"x_mm": 89.502, "y_mm": 84.503, "z_mm": 149.51},
+            "lighting": {"mode": "random_pixels", "pixels": [[0, 0, 0] for _ in range(16)]},
+        },
+    )
+
+    assert response.status_code == 200
+    assert "G1 X79.502 Y69.503 Z144.510 F6000" in runtime.serial_board.sent_commands
+    assert runtime.serial_board.live_pose["z"] == 144.51
+
+
 def test_status_snapshot_and_capabilities_are_available():
     client = _client()
     status = client.get("/api/status").get_json()

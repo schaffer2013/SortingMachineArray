@@ -846,6 +846,7 @@ class WebRuntime:
                     "y_mm": float(point["y_mm"]),
                     "z_mm": float(point["z_mm"]),
                     "coordinate_space": "camera",
+                    "confirm_large_move": True,
                 },
             )
             self.control("wait_idle", {})
