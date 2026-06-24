@@ -194,7 +194,7 @@ def refine_card_back_corners_to_truth(
     *,
     output_size: tuple[int, int] = (630, 880),
     score_size: tuple[int, int] = (315, 440),
-    max_corner_adjust_px: float = 45.0,
+    max_corner_adjust_px: float = 180.0,
 ) -> tuple[tuple[tuple[float, float], ...], dict[str, Any]]:
     if len(corners) != 4:
         raise ValueError("Card corner refinement requires exactly four card corners")
@@ -804,7 +804,7 @@ def _corner_regularization_penalty(
 ) -> float:
     if max_corner_adjust_px <= 0:
         return 0.0
-    return min(0.12, 0.08 * (_max_corner_delta(original, candidate) / max_corner_adjust_px))
+    return min(0.08, 0.03 * (_max_corner_delta(original, candidate) / max_corner_adjust_px))
 
 
 def _texture_similarity_score(candidate_rgb: Any, truth_rgb: Any) -> float:
