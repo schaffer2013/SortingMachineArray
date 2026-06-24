@@ -189,7 +189,7 @@ def test_card_back_training_capture_confirms_generated_camera_z_move(tmp_path):
     )
 
     assert response.status_code == 200
-    assert "G1 X79.502 Y69.503 Z144.510 F3000" in runtime.serial_board.sent_commands
+    assert "G1 X79.502 Y69.503 Z144.510 F1800" in runtime.serial_board.sent_commands
     assert "G1 X79.502 Y69.503 Z144.510 F6000" not in runtime.serial_board.sent_commands
     assert runtime.serial_board.live_pose["z"] == 144.51
 
@@ -1150,7 +1150,7 @@ def test_live_serial_move_vacuum_xy_includes_requested_vacuum_z():
     response = client.post("/api/control/move_xy", json={"x_mm": 100.0, "y_mm": 50.0, "z_mm": 12.0})
 
     assert response.status_code == 200
-    assert "G1 X100.000 Y50.000 Z12.000 F3000" in runtime.serial_board.sent_commands
+    assert "G1 X100.000 Y50.000 Z12.000 F1800" in runtime.serial_board.sent_commands
     assert "G1 X100.000 Y50.000 Z12.000 F6000" not in runtime.serial_board.sent_commands
     assert runtime.serial_board.live_pose["z"] == 12.0
 
@@ -1177,7 +1177,7 @@ def test_live_serial_move_camera_xy_includes_camera_space_z_offset():
     )
 
     assert response.status_code == 200
-    assert "G1 X90.000 Y35.000 Z7.000 F3000" in runtime.serial_board.sent_commands
+    assert "G1 X90.000 Y35.000 Z7.000 F1800" in runtime.serial_board.sent_commands
     assert "G1 X90.000 Y35.000 Z7.000 F6000" not in runtime.serial_board.sent_commands
     assert runtime.serial_board.live_pose["z"] == 7.0
 
@@ -1192,8 +1192,8 @@ def test_live_serial_xyz_feedrate_caps_z_component_with_tunable_limit():
         target_z_mm=5.0,
     )
 
-    assert web_app_module.MAX_SERIAL_COMBINED_Z_SPEED_MM_PER_S == 50.0
-    assert feedrate == pytest.approx((50.0 * 60.0) * ((3.0**2 + 4.0**2 + 5.0**2) ** 0.5) / 5.0)
+    assert web_app_module.MAX_SERIAL_COMBINED_Z_SPEED_MM_PER_S == 30.0
+    assert feedrate == pytest.approx((30.0 * 60.0) * ((3.0**2 + 4.0**2 + 5.0**2) ** 0.5) / 5.0)
 
 
 def test_live_serial_z_jog_uses_absolute_target_not_relative_mode():
