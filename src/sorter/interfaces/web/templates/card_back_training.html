@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Training - Sorter Console{% endblock %}
+{% block shell_class %}training-shell{% endblock %}
+{% block content %}
+<section class="training-grid">
+  <article class="panel">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">Models</p>
+        <h2>Card-back training sets</h2>
+      </div>
+      <span id="training-model-pill" class="pill">Loading</span>
+    </div>
+    <div class="form-grid">
+      <label>Active model
+        <select id="training-model-select"></select>
+      </label>
+      <button id="training-model-activate" type="button" class="secondary">Activate</button>
+    </div>
+    <div id="training-counts" class="metric-list training-counts"></div>
+    <form id="training-model-form" class="training-model-form">
+      <div class="form-grid">
+        <label>New model name<input name="name" placeholder="morning-light-v1"></label>
+        <label>Base model<select name="base_model_id" id="training-base-model"></select></label>
+      </div>
+      <label>Notes<input name="notes" placeholder="Lighting, camera height, or setup notes"></label>
+      <button type="submit">Create model</button>
+    </form>
+    <p id="training-model-message" class="muted">Create separate models for different experiments without deleting earlier datasets.</p>
+  </article>
+
+  <article class="panel">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">Capture volume</p>
+        <h2>Spring-spaced points</h2>
+      </div>
+      <button id="training-plan-generate" type="button">Generate</button>
+    </div>
+    <div class="form-grid three-up">
+      <label>Min X mm<input id="training-min-x" type="number" step="0.1" value="80"></label>
+      <label>Max X mm<input id="training-max-x" type="number" step="0.1" value="120"></label>
+      <label>Min Y mm<input id="training-min-y" type="number" step="0.1" value="80"></label>
+      <label>Max Y mm<input id="training-max-y" type="number" step="0.1" value="120"></label>
+      <label>Min Z mm<input id="training-min-z" type="number" step="0.1" value="8"></label>
+      <label>Max Z mm<input id="training-max-z" type="number" step="0.1" value="18"></label>
+      <label>Points<input id="training-point-count" type="number" min="1" max="80" step="1" value="12"></label>
+      <label>Seed<input id="training-seed" type="number" step="1" placeholder="optional"></label>
+      <label>Settle ms<input id="training-settle-ms" type="number" min="0" max="5000" step="25" value="150"></label>
+      <label>Light min<input id="training-light-min" type="number" min="0" max="255" step="1" value="0"></label>
+      <label>Light max<input id="training-light-max" type="number" min="0" max="255" step="1" value="110"></label>
+      <label>Split
+        <select id="training-split">
+          <option value="staged">staged</option>
+          <option value="train">train</option>
+          <option value="eval">eval</option>
+        </select>
+      </label>
+    </div>
+    <label class="inline-toggle"><input id="training-execute-motion" type="checkbox"> Move camera and apply generated lighting while capturing</label>
+    <canvas id="training-box-canvas" class="training-box-canvas" width="720" height="360"></canvas>
+    <div class="button-row">
+      <button id="training-capture-selected" type="button">Capture selected</button>
+      <button id="training-capture-all" type="button" class="secondary">Capture all staged</button>
+    </div>
+    <p id="training-plan-message" class="muted">Generate a point plan before capturing.</p>
+  </article>
+</section>
+
+<section class="training-grid training-workflow-grid">
+  <article class="panel">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">Capture plan</p>
+        <h2>XYZ and NeoPixel samples</h2>
+      </div>
+      <span id="training-plan-pill" class="pill">0 points</span>
+    </div>
+    <div id="training-plan-list" class="training-plan-list"></div>
+  </article>
+
+  <article class="panel">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">Corner truth</p>
+        <h2>Manual tuning</h2>
+      </div>
+      <button id="training-detect" type="button" class="secondary">Detect live</button>
+    </div>
+    <div class="training-tune-layout">
+      <div class="training-frame-stage">
+        <img id="training-camera-feed" class="camera-feed training-camera-feed" src="/camera/stream" alt="Live camera feed">
+        <svg id="training-corner-overlay" class="training-corner-overlay" aria-hidden="true"></svg>
+      </div>
+      <aside class="training-tune-side">
+        <div class="training-corner-buttons" role="group" aria-label="Corner selection">
+          <button type="button" data-training-corner="nw">NW</button>
+          <button type="button" data-training-corner="ne" class="secondary">NE</button>
+          <button type="button" data-training-corner="se" class="secondary">SE</button>
+          <button type="button" data-training-corner="sw" class="secondary">SW</button>
+        </div>
+        <label>Zoom<input id="training-zoom" type="range" min="4" max="16" step="1" value="8"></label>
+        <div class="training-zoom-stage">
+          <canvas id="training-tune-canvas" width="320" height="320" tabindex="0" aria-label="Corner tuning zoom canvas"></canvas>
+          <img src="/static/card-back-truth.jpg" alt="" class="training-truth-reference">
+        </div>
+        <div class="button-row compact-button-row">
+          <button id="training-label-train" type="button" class="secondary">Mark train</button>
+          <button id="training-label-eval" type="button" class="secondary">Mark eval</button>
+          <button id="training-save-label" type="button">Save tuning</button>
+        </div>
+        <p id="training-tune-message" class="muted">Capture or detect a card back, choose a corner, then use arrow keys for 1 px moves. Hold Shift for 10 px.</p>
+      </aside>
+    </div>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-heading">
+    <div>
+      <p class="eyebrow">Workflow</p>
+      <h2>Incremental training loop</h2>
+    </div>
+  </div>
+  <div class="training-workflow-steps">
+    <article class="status-card"><div class="muted">1. Model</div><strong>Create or activate a model for this experiment.</strong></article>
+    <article class="status-card"><div class="muted">2. Plan</div><strong>Generate spring-spaced XYZ points in the camera box.</strong></article>
+    <article class="status-card"><div class="muted">3. Capture</div><strong>Run the plan in different room lighting and leave new frames staged.</strong></article>
+    <article class="status-card"><div class="muted">4. Tune</div><strong>Fix each corner against the truth reference, then mark train or eval.</strong></article>
+    <article class="status-card"><div class="muted">5. Train</div><strong>Register training runs as artifacts without replacing earlier models.</strong></article>
+  </div>
+  <pre id="training-last-result" class="code-block compact-code-block">No capture yet.</pre>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>window.SorterPages.cardBackTraining();</script>
+{% endblock %}

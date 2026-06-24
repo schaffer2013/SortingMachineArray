@@ -12,6 +12,7 @@ from sorter.bootstrap import build_sim_orchestrator
 from sorter.adapters.hardware.marlin_motion import MarlinMotionAdapter
 from sorter.adapters.hardware.marlin_transport import RecordingMarlinTransport
 from sorter.application.card_back_detection import detect_card_back, refine_card_back_corners_to_truth
+from sorter.application.card_back_training import CardBackTrainingStore
 from sorter.config.calibration import CalibrationProfile
 from sorter.config.settings import AppSettings
 from sorter.interfaces import web_runner
@@ -36,9 +37,82 @@ def _sim_truth_settings():
 
 def test_web_pages_render():
     client = _client()
-    for path in ("/", "/movement", "/machine", "/recognition", "/runs", "/system", "/about"):
+    for path in ("/", "/movement", "/machine", "/recognition", "/card-back-training", "/runs", "/system", "/about"):
         response = client.get(path)
         assert response.status_code == 200
+
+
+def test_card_back_training_model_plan_capture_and_label(tmp_path):
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.config["runtime"].runtime_mode = "simulation"
+    app.config["runtime"].card_back_training = CardBackTrainingStore(tmp_path / "card_back_training")
+    app.testing = True
+    client = app.test_client()
+
+    created = client.post("/api/card-back-training/models", json={"name": "corner model v1"}).get_json()
+    model_id = created["model"]["model_id"]
+    plan_response = client.post(
+        "/api/card-back-training/plan",
+        json={
+            "box": {
+                "min_x_mm": 80,
+                "max_x_mm": 120,
+                "min_y_mm": 90,
+                "max_y_mm": 130,
+                "min_z_mm": 8,
+                "max_z_mm": 18,
+            },
+            "count": 5,
+            "seed": 7,
+            "light_min": 0,
+            "light_max": 80,
+        },
+    )
+    plan = plan_response.get_json()["plan"]
+    capture_response = client.post(
+        "/api/card-back-training/capture",
+        json={
+            "model_id": model_id,
+            "point": plan[0]["point"],
+            "lighting": plan[0]["lighting"],
+            "run_detection": False,
+            "split": "staged",
+        },
+    )
+    captured = capture_response.get_json()["sample"]
+    sample_id = captured["sample_id"]
+    label_response = client.patch(
+        f"/api/card-back-training/models/{model_id}/samples/{sample_id}",
+        json={
+            "split": "train",
+            "truth_corners_px": {
+                "nw": {"x": 10, "y": 12},
+                "ne": {"x": 110, "y": 13},
+                "se": {"x": 112, "y": 180},
+                "sw": {"x": 11, "y": 179},
+            },
+        },
+    )
+    summary = client.get("/api/card-back-training").get_json()
+    sample_payload_response = client.get(f"/api/card-back-training/models/{model_id}/samples/{sample_id}")
+    image_response = client.get(f"/api/card-back-training/models/{model_id}/samples/{sample_id}/image.jpg")
+
+    assert plan_response.status_code == 200
+    assert len(plan) == 5
+    assert all(80 <= item["point"]["x_mm"] <= 120 for item in plan)
+    assert capture_response.status_code == 200
+    assert captured["split"] == "staged"
+    assert label_response.status_code == 200
+    assert label_response.get_json()["sample"]["split"] == "train"
+    assert summary["models"][0]["train_count"] == 1
+    assert summary["models"][0]["truth_count"] == 1
+    assert sample_payload_response.status_code == 200
+    assert sample_payload_response.get_json()["sample"]["label"]["truth_corners_px"]["nw"] == [10.0, 12.0]
+    assert image_response.status_code == 200
+    assert image_response.mimetype == "image/jpeg"
 
 
 def test_status_snapshot_and_capabilities_are_available():
