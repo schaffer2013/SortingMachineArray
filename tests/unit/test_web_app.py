@@ -325,6 +325,7 @@ def test_camera_page_has_card_back_truth_overlay_controls():
     assert b'id="camera-card-detect"' in response.data
     assert b'id="camera-card-truth-toggle"' in response.data
     assert b'id="camera-card-truth-overlay"' in response.data
+    assert b"/static/card-back-truth.jpg" in response.data
 
 
 def test_serial_api_lists_connects_sends_and_disconnects():
