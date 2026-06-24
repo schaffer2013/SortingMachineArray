@@ -186,7 +186,7 @@ def refine_card_back_corners_to_truth(
     truth_image: Image.Image,
     *,
     output_size: tuple[int, int] = (630, 880),
-    score_size: tuple[int, int] = (420, 587),
+    score_size: tuple[int, int] = (315, 440),
     max_corner_adjust_px: float = 45.0,
 ) -> tuple[tuple[tuple[float, float], ...], dict[str, Any]]:
     if len(corners) != 4:
@@ -248,9 +248,8 @@ def _coordinate_descent_corners(
     if _max_corner_delta(original, corners) <= max_corner_adjust_px:
         best = tuple((float(x), float(y)) for x, y in corners)
     best_score = initial_score
-    for step in (14.0, 7.0, 3.5, 1.75, 0.9):
-        improved = True
-        while improved:
+    for step in (14.0, 7.0, 3.5, 1.75):
+        for _ in range(2):
             improved = False
             for corner_index in range(4):
                 for dx, dy in (
@@ -277,6 +276,8 @@ def _coordinate_descent_corners(
                         best = candidate_tuple
                         best_score = score
                         improved = True
+            if not improved:
+                break
     return best, best_score
 
 
