@@ -127,6 +127,36 @@ def test_card_back_training_model_plan_capture_and_label(tmp_path):
     assert image_response.mimetype == "image/jpeg"
 
 
+def test_card_back_training_delete_sample_and_model(tmp_path):
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.config["runtime"].card_back_training = CardBackTrainingStore(tmp_path / "card_back_training")
+    app.testing = True
+    client = app.test_client()
+
+    created = client.post("/api/card-back-training/models", json={"name": "delete me"}).get_json()
+    model_id = created["model"]["model_id"]
+    capture_response = client.post(
+        "/api/card-back-training/capture",
+        json={"model_id": model_id, "run_detection": False, "split": "staged"},
+    )
+    sample_id = capture_response.get_json()["sample"]["sample_id"]
+
+    delete_sample = client.delete(f"/api/card-back-training/models/{model_id}/samples/{sample_id}")
+    missing_sample = client.get(f"/api/card-back-training/models/{model_id}/samples/{sample_id}")
+    delete_model = client.delete(f"/api/card-back-training/models/{model_id}")
+    summary = client.get("/api/card-back-training").get_json()
+
+    assert delete_sample.status_code == 200
+    assert delete_sample.get_json()["deleted_sample_id"] == sample_id
+    assert missing_sample.status_code == 404
+    assert delete_model.status_code == 200
+    assert delete_model.get_json()["deleted_model_id"] == model_id
+    assert summary["models"] == []
+
+
 def test_card_back_training_capture_confirms_generated_camera_z_move(tmp_path):
     settings = _sim_truth_settings()
     orchestrator = build_sim_orchestrator(settings)
@@ -159,6 +189,65 @@ def test_card_back_training_capture_confirms_generated_camera_z_move(tmp_path):
     assert response.status_code == 200
     assert "G1 X79.502 Y69.503 Z144.510 F6000" in runtime.serial_board.sent_commands
     assert runtime.serial_board.live_pose["z"] == 144.51
+
+
+def test_card_back_training_capture_waits_after_motion_before_image(tmp_path, monkeypatch):
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path).with_updates(
+        camera_offset_x_mm=10.0,
+        camera_offset_y_mm=15.0,
+        camera_offset_z_mm=5.0,
+    )
+    app = create_web_app(orchestrator, calibration)
+    app.config["runtime"].card_back_training = CardBackTrainingStore(tmp_path / "card_back_training")
+    app.testing = True
+    runtime = app.config["runtime"]
+    runtime.serial_board = FakeSerialBoard()
+    runtime.serial_board.connect("COM8", 115200)
+    sleeps = []
+    monkeypatch.setattr(web_app_module.time, "sleep", lambda seconds: sleeps.append(seconds))
+    client = app.test_client()
+
+    created = client.post("/api/card-back-training/models", json={"name": "settle capture"}).get_json()
+    response = client.post(
+        "/api/card-back-training/capture",
+        json={
+            "model_id": created["model"]["model_id"],
+            "execute_motion": True,
+            "run_detection": False,
+            "settle_ms": 150,
+            "point": {"x_mm": 89.502, "y_mm": 84.503, "z_mm": 149.51},
+        },
+    )
+
+    assert response.status_code == 200
+    assert sleeps[:2] == [1.0, 0.15]
+
+
+def test_card_back_detect_endpoint_supports_opencv_method(tmp_path):
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    image_path = tmp_path / "card-back.jpg"
+    image = Image.new("RGB", (900, 650), "#111827")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((220, 80, 620, 640), fill="#3b2418")
+    draw.rectangle((245, 110, 595, 610), fill="#9b6239")
+    draw.ellipse((295, 145, 545, 545), outline="#53348a", width=10, fill="#d08a54")
+    image.save(image_path)
+    orchestrator.camera = StaticImageCamera(image_path)
+    client = app.test_client()
+
+    response = client.post("/api/card-back/detect", json={"detection_method": "opencv"})
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["found"] is True
+    assert payload["detection_method"] == "opencv"
+    assert "corner_refinement" not in payload
 
 
 def test_status_snapshot_and_capabilities_are_available():

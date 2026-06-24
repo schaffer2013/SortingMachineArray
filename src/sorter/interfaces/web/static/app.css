@@ -286,12 +286,15 @@ th { color:var(--muted); font-size:.82rem; text-transform:uppercase; letter-spac
 .training-plan-list { display:grid; gap:8px; max-height:520px; overflow:auto; padding-right:4px; }
 .training-plan-entry,
 .training-sample-row {
-  display:grid; grid-template-columns:auto auto minmax(0,1fr); gap:10px; align-items:center; width:100%; text-align:left;
+  display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:center; width:100%; text-align:left;
   border-radius:12px; background:var(--panel-soft); color:var(--text); border:1px solid var(--line);
 }
 .training-sample-list { display:grid; gap:8px; margin:12px 0 4px; }
-.training-sample-row { grid-template-columns:auto minmax(0,1fr) auto; }
+.training-sample-load { display:grid; grid-template-columns:auto minmax(0,1fr) auto; gap:10px; align-items:center; min-width:0; text-align:left; border-radius:10px; }
+.training-sample-delete { border-radius:10px; padding:8px 10px; }
 .training-plan-entry.selected { border-color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent); }
+.training-current-box { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:10px; align-items:end; margin-top:12px; }
+.training-current-box label { margin:0; }
 .training-tune-layout { display:grid; grid-template-columns:minmax(0, 1fr) minmax(260px, 340px); gap:16px; align-items:start; }
 .training-frame-stage { position:relative; min-width:0; border-radius:16px; overflow:hidden; background:var(--code-bg); }
 .training-camera-feed { min-height:460px; object-fit:contain; }
@@ -321,7 +324,7 @@ th { color:var(--muted); font-size:.82rem; text-transform:uppercase; letter-spac
   .app-layout { grid-template-columns: 1fr; }
   .app-layout nav { position:static; display:flex; overflow:auto; }
   .app-layout a { white-space:nowrap; }
-  .hero-grid, .dashboard-grid, .two-column, .camera-control-grid, .training-grid, .training-workflow-grid { grid-template-columns: 1fr; }
+  .hero-grid, .dashboard-grid, .two-column, .camera-control-grid, .training-grid, .training-workflow-grid, .training-current-box { grid-template-columns: 1fr; }
   .camera-feed-layout { grid-template-columns: 1fr; }
   .training-tune-layout { grid-template-columns: 1fr; }
   .training-nudge-panel { grid-template-columns: 1fr; }
