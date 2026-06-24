@@ -14,9 +14,9 @@ import tempfile
 import threading
 import time
 import tomllib
-from typing import Any
+from typing import Any, Callable
 
-from flask import Flask, Response, jsonify, render_template, request, send_file
+from flask import Flask, Response, g, jsonify, render_template, request, send_file
 from PIL import Image, ImageDraw, ImageStat
 
 from sorter.application.orchestrator import Orchestrator
@@ -54,6 +54,8 @@ MAX_SERIAL_Z_JOG_MM = 5.0
 MAX_SERIAL_C_JOG_MM = 5.0
 MAX_SERIAL_ABSOLUTE_Z_MOVE_MM = 5.0
 MAX_SERIAL_ABSOLUTE_C_MOVE_MM = 5.0
+SERIAL_CONNECT_TIMEOUT_SECONDS = 3.0
+SERIAL_COMMAND_TIMEOUT_SECONDS = 10.0
 
 MOTION_CONTROL_ACTIONS = {
     "initialize",
@@ -75,7 +77,8 @@ MOTION_CONTROL_ACTIONS = {
 
 
 class SerialBoardSession:
-    def __init__(self):
+    def __init__(self, event_logger: Callable[[str, dict[str, Any] | None], None] | None = None):
+        self.event_logger = event_logger
         self.transport: MarlinSerialTransport | None = None
         self.lights: NeoPixelLightsAdapter | None = None
         self.port: str | None = None
@@ -150,17 +153,22 @@ class SerialBoardSession:
         if self.status()["session_open"]:
             return {"ok": True, "message": f"Already connected to {self.port}", **self.status()}
         ports = self.list_ports()
+        self._record_event("serial.auto_connect.start", {"ports": ports})
         for item in sorted(ports, key=_port_auto_score, reverse=True):
             try:
                 return self.connect(item["device"])
-            except Exception:
+            except Exception as exc:
+                self._record_event("serial.auto_connect.port_failed", {"port": item.get("device"), "error": str(exc)})
                 continue
         message = self.last_error or "No serial board responded to M115"
+        self._record_event("serial.auto_connect.failed", {"message": message})
         return {"ok": False, "message": message, **self.status()}
 
     def connect(self, port: str, baud_rate: int = 115200) -> dict[str, Any]:
         if not self._acquire_command():
             raise RuntimeError("Serial board is busy with another command")
+        started_at = time.monotonic()
+        self._record_event("serial.connect.start", {"port": port, "baud_rate": int(baud_rate)})
         try:
             with self.state_lock:
                 if self.transport is not None:
@@ -171,10 +179,15 @@ class SerialBoardSession:
                 self.baud_rate = int(baud_rate)
                 self.connection_state = "connecting"
                 self.last_error = None
-            transport = MarlinSerialTransport(serial_port=port, baud_rate=int(baud_rate), timeout_seconds=60.0)
+            transport = MarlinSerialTransport(
+                serial_port=port,
+                baud_rate=int(baud_rate),
+                timeout_seconds=SERIAL_CONNECT_TIMEOUT_SECONDS,
+            )
             try:
                 sent_at = _utc_now_iso()
                 response = transport.send_command("M115")
+                _set_transport_timeout(transport, SERIAL_COMMAND_TIMEOUT_SECONDS)
             except Exception as exc:
                 self._record_serial_command("M115", sent_at, [], ok=False, error=str(exc))
                 transport.close()
@@ -184,6 +197,10 @@ class SerialBoardSession:
                     self.last_error = str(exc)
                     self.last_response = []
                     self.connection_state = "error"
+                self._record_event(
+                    "serial.connect.failed",
+                    {"port": port, "baud_rate": int(baud_rate), "elapsed_ms": _elapsed_ms(started_at), "error": str(exc)},
+                )
                 raise
             with self.state_lock:
                 self.transport = transport
@@ -194,6 +211,15 @@ class SerialBoardSession:
                 self.controller_fault = False
                 self.last_success_monotonic = time.monotonic()
                 self.connection_state = "verified"
+            self._record_event(
+                "serial.connect.succeeded",
+                {
+                    "port": port,
+                    "baud_rate": int(baud_rate),
+                    "elapsed_ms": _elapsed_ms(started_at),
+                    "response": response,
+                },
+            )
             return {"ok": True, "message": f"Connected to {port}", **self.status()}
         finally:
             self.command_lock.release()
@@ -201,6 +227,7 @@ class SerialBoardSession:
     def disconnect(self) -> dict[str, Any]:
         if not self._acquire_command():
             raise RuntimeError("Serial board is busy with another command")
+        self._record_event("serial.disconnect.start", {"port": self.port, "state": self.connection_state})
         try:
             with self.state_lock:
                 transport = self.transport
@@ -213,6 +240,7 @@ class SerialBoardSession:
                     self.connection_state = "disconnected"
                     self.controller_fault = False
                     self.last_error = None
+                self._record_event("serial.disconnect.noop", {})
                 return {"ok": True, "message": "Already disconnected", **self.status()}
             if transport is not None:
                 transport.close()
@@ -221,6 +249,7 @@ class SerialBoardSession:
                 self.connection_state = "disconnected"
                 self.controller_fault = False
                 self.last_error = None
+            self._record_event("serial.disconnect.succeeded", {})
             return {"ok": True, "message": "Disconnected", **self.status()}
         finally:
             self.command_lock.release()
@@ -413,6 +442,25 @@ class SerialBoardSession:
             self.serial_poll_log.append(entry)
         else:
             self.serial_command_log.append(entry)
+        self._record_event(
+            f"serial.{log_kind}",
+            {
+                "command": command,
+                "ok": ok,
+                "error": error,
+                "response": list(response)[-10:],
+                "port": self.port,
+                "connection_state": self.connection_state,
+            },
+        )
+
+    def _record_event(self, event: str, details: dict[str, Any] | None = None) -> None:
+        if self.event_logger is None:
+            return
+        try:
+            self.event_logger(event, details or {})
+        except Exception:
+            pass
 
 
 def _port_auto_score(port: dict[str, str]) -> tuple[int, str]:
@@ -429,6 +477,67 @@ def _port_auto_score(port: dict[str, str]) -> tuple[int, str]:
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return max(0, round((time.monotonic() - started_at) * 1000))
+
+
+def _set_transport_timeout(transport: MarlinSerialTransport, timeout_seconds: float) -> None:
+    transport.timeout_seconds = timeout_seconds
+    try:
+        connection = transport.open()
+        setattr(connection, "timeout", timeout_seconds)
+    except Exception:
+        pass
+
+
+def _json_safe(value: Any) -> Any:
+    try:
+        json.dumps(value)
+        return value
+    except TypeError:
+        if isinstance(value, dict):
+            return {str(key): _json_safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [_json_safe(item) for item in value]
+        return str(value)
+
+
+def _request_debug_payload() -> dict[str, Any] | None:
+    if request.method in {"GET", "HEAD", "OPTIONS"}:
+        return None
+    if request.is_json:
+        payload = request.get_json(silent=True)
+        if isinstance(payload, dict):
+            return _trim_debug_payload(payload)
+        return {"value": _json_safe(payload)}
+    if request.form or request.files:
+        return {
+            "form": _trim_debug_payload(dict(request.form.items())),
+            "files": {
+                name: {
+                    "filename": storage.filename,
+                    "content_type": storage.content_type,
+                }
+                for name, storage in request.files.items()
+            },
+        }
+    content_length = request.content_length
+    if content_length:
+        return {"content_length": content_length, "content_type": request.content_type}
+    return None
+
+
+def _trim_debug_payload(payload: dict[str, Any], *, max_value_length: int = 500) -> dict[str, Any]:
+    trimmed: dict[str, Any] = {}
+    for key, value in payload.items():
+        safe_value = _json_safe(value)
+        if isinstance(safe_value, str) and len(safe_value) > max_value_length:
+            trimmed[key] = f"{safe_value[:max_value_length]}...<truncated>"
+        else:
+            trimmed[key] = safe_value
+    return trimmed
 
 
 def _is_controller_fault(message: str) -> bool:
@@ -491,8 +600,9 @@ class WebRuntime:
         self.calibration_path = calibration_path
         self.repo_root = _repo_root()
         self.control_audit_path = self.repo_root / "data" / "logs" / "control_audit.jsonl"
+        self.debug_events_path = self.repo_root / "data" / "logs" / "debug_events.jsonl"
         self.light_profiles = self._load_light_profiles()
-        self.serial_board = SerialBoardSession()
+        self.serial_board = SerialBoardSession(event_logger=self.record_debug_event)
         self.runtime_mode = runtime_mode
         self.hardware_runtime = bool(getattr(orchestrator, "hardware_runtime", False))
         self.lock = threading.RLock()
@@ -746,9 +856,9 @@ class WebRuntime:
                 ),
             }
         if action == "move_z":
-            z_mm = float(payload["z_mm"])
+            z_mm, z_label = self._vacuum_z_from_payload(payload)
             self.orchestrator.move_vac_z(z_mm)
-            return {"ok": True, "message": f"Moved vacuum Z to {z_mm:.2f}"}
+            return {"ok": True, "message": f"Moved {z_label} Z to vacuum Z {z_mm:.2f}"}
         if action == "jog_z":
             dz_mm = float(payload.get("dz_mm", 0.0))
             snapshot = self.orchestrator.world.snapshot
@@ -838,6 +948,19 @@ class WebRuntime:
             }
             self.control_audit_path.parent.mkdir(parents=True, exist_ok=True)
             with self.control_audit_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry, sort_keys=True) + "\n")
+        except Exception:
+            return
+
+    def record_debug_event(self, event: str, details: dict[str, Any] | None = None) -> None:
+        entry = {
+            "timestamp": _utc_now_iso(),
+            "event": str(event),
+            "details": _json_safe(details or {}),
+        }
+        try:
+            self.debug_events_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.debug_events_path.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(entry, sort_keys=True) + "\n")
         except Exception:
             return
@@ -939,9 +1062,9 @@ class WebRuntime:
             self.orchestrator.move_camera_to_vacuum_xy_when_safe(self.calibration, x_mm, y_mm)
             return {"ok": True, "message": f"Moved camera over ({x_mm:.2f}, {y_mm:.2f})"}
         if action == "move_z":
-            z_mm = float(payload["z_mm"])
+            z_mm, z_label = self._vacuum_z_from_payload(payload)
             self.orchestrator.move_vac_z(z_mm)
-            return {"ok": True, "message": f"Moved vacuum Z to {z_mm:.2f}"}
+            return {"ok": True, "message": f"Moved {z_label} Z to vacuum Z {z_mm:.2f}"}
         if action == "move_c":
             c_mm = float(payload["c_mm"])
             self._move_c(c_mm)
@@ -1287,7 +1410,7 @@ class WebRuntime:
                 message=f"Live board jogged XY by ({dx_mm:.2f}, {dy_mm:.2f}) to ({target_x:.2f}, {target_y:.2f})",
             )
         if action == "move_z":
-            z_mm = float(payload["z_mm"])
+            z_mm, z_label = self._vacuum_z_from_payload(payload)
             self._reject_large_absolute_move(
                 axis="Z",
                 target_mm=z_mm,
@@ -1297,7 +1420,7 @@ class WebRuntime:
             )
             return self.serial_board.send_commands(
                 ["G90", f"G1 Z{_format_mm(z_mm)} F1200", "M400", "M114"],
-                message=f"Live board moved Z to {z_mm:.2f}",
+                message=f"Live board moved {z_label} Z to vacuum Z {z_mm:.2f}",
             )
         if action == "jog_z":
             dz_mm = _bounded_jog_delta(
@@ -1373,6 +1496,15 @@ class WebRuntime:
         if value is None:
             return None
         return float(value)
+
+    def _vacuum_z_from_payload(self, payload: dict[str, Any]) -> tuple[float, str]:
+        requested_z = float(payload["z_mm"])
+        coordinate_space = str(payload.get("coordinate_space", "vacuum")).strip().lower()
+        if coordinate_space == "camera":
+            return requested_z - float(self.calibration.camera_offset_z_mm), "camera"
+        if coordinate_space not in {"", "vacuum", "nozzle"}:
+            raise ValueError(f"Unsupported Z coordinate space: {coordinate_space}")
+        return requested_z, "vacuum"
 
     def _reject_large_absolute_move(
         self,
@@ -1945,6 +2077,28 @@ def create_web_app(
     )
     app.config["runtime"] = runtime
 
+    @app.before_request
+    def begin_api_debug_event():
+        if request.path.startswith("/api/"):
+            g.api_started_at = time.monotonic()
+
+    @app.after_request
+    def record_api_debug_event(response):
+        if request.path.startswith("/api/"):
+            started_at = getattr(g, "api_started_at", time.monotonic())
+            runtime.record_debug_event(
+                "api.call",
+                {
+                    "method": request.method,
+                    "path": request.path,
+                    "query": request.query_string.decode("utf-8", errors="replace"),
+                    "status_code": response.status_code,
+                    "elapsed_ms": _elapsed_ms(started_at),
+                    "payload": _request_debug_payload(),
+                },
+            )
+        return response
+
     @app.get("/")
     def dashboard():
         return render_template("dashboard.html")
@@ -2008,13 +2162,27 @@ def create_web_app(
     @app.post("/api/control/<action>")
     def api_control(action: str):
         payload = request.get_json(silent=True) or {}
+        runtime.record_debug_event("api.control.request", {"action": action, "payload": payload})
         try:
             result = runtime.control(action, payload)
             runtime.record_control_audit(action=action, payload=payload, result=result)
+            runtime.record_debug_event(
+                "api.control.response",
+                {"action": action, "ok": True, "message": result.get("message"), "runtime_target": runtime.status().get("runtime_target")},
+            )
             return jsonify(result)
         except Exception as exc:
             runtime.record_control_audit(action=action, payload=payload, error=str(exc))
+            runtime.record_debug_event("api.control.error", {"action": action, "payload": payload, "error": str(exc)})
             return jsonify({"ok": False, "message": str(exc)}), 400
+
+    @app.post("/api/debug/event")
+    def api_debug_event():
+        payload = request.get_json(silent=True) or {}
+        event = str(payload.get("event", "ui.event"))
+        details = payload.get("details", {})
+        runtime.record_debug_event(event, details if isinstance(details, dict) else {"value": details})
+        return jsonify({"ok": True})
 
     @app.get("/api/card/validate")
     def api_validate_card():
@@ -2110,26 +2278,40 @@ def create_web_app(
         payload = request.get_json(silent=True) or {}
         port = str(payload.get("port", "")).strip()
         baud_rate = int(payload.get("baud_rate", 115200))
+        runtime.record_debug_event("api.serial.connect.request", {"port": port or None, "baud_rate": baud_rate})
         try:
             result = runtime.serial_board.auto_connect() if not port else runtime.serial_board.connect(port, baud_rate)
+            runtime.record_debug_event(
+                "api.serial.connect.response",
+                {"ok": result.get("ok"), "port": result.get("port"), "message": result.get("message"), "state": result.get("connection_state")},
+            )
             return jsonify(result)
         except Exception as exc:
+            runtime.record_debug_event("api.serial.connect.error", {"port": port or None, "baud_rate": baud_rate, "error": str(exc)})
             return jsonify({"ok": False, "message": str(exc), **runtime.serial_board.status()}), 400
 
     @app.post("/api/serial/disconnect")
     def api_serial_disconnect():
+        runtime.record_debug_event("api.serial.disconnect.request", runtime.serial_board.status())
         try:
-            return jsonify(runtime.serial_board.disconnect())
+            result = runtime.serial_board.disconnect()
+            runtime.record_debug_event("api.serial.disconnect.response", {"ok": result.get("ok"), "message": result.get("message")})
+            return jsonify(result)
         except Exception as exc:
+            runtime.record_debug_event("api.serial.disconnect.error", {"error": str(exc)})
             return jsonify({"ok": False, "message": str(exc), **runtime.serial_board.status()}), 400
 
     @app.post("/api/serial/send")
     def api_serial_send():
         payload = request.get_json(silent=True) or {}
         command = str(payload.get("command", "")).strip()
+        runtime.record_debug_event("api.serial.send.request", {"command": command})
         try:
-            return jsonify(runtime.serial_board.send_command(command))
+            result = runtime.serial_board.send_command(command)
+            runtime.record_debug_event("api.serial.send.response", {"command": command, "ok": result.get("ok"), "message": result.get("message")})
+            return jsonify(result)
         except Exception as exc:
+            runtime.record_debug_event("api.serial.send.error", {"command": command, "error": str(exc)})
             return jsonify({"ok": False, "message": str(exc), **runtime.serial_board.status()}), 400
 
     @app.get("/api/serial/endstops")
@@ -2145,13 +2327,18 @@ def create_web_app(
         try:
             return jsonify(runtime.serial_board.send_status_poll("M114"))
         except Exception as exc:
+            runtime.record_debug_event("api.serial.heartbeat.error", {"error": str(exc)})
             return jsonify({"ok": False, "message": str(exc), **runtime.serial_board.status()}), 400
 
     @app.post("/api/serial/bltouch/<action>")
     def api_serial_bltouch(action: str):
+        runtime.record_debug_event("api.serial.bltouch.request", {"action": action})
         try:
-            return jsonify(runtime.serial_board.bltouch(action))
+            result = runtime.serial_board.bltouch(action)
+            runtime.record_debug_event("api.serial.bltouch.response", {"action": action, "ok": result.get("ok")})
+            return jsonify(result)
         except Exception as exc:
+            runtime.record_debug_event("api.serial.bltouch.error", {"action": action, "error": str(exc)})
             return jsonify({"ok": False, "message": str(exc), **runtime.serial_board.status()}), 400
 
     @app.get("/api/light-profiles")
