@@ -42,6 +42,18 @@ def test_web_pages_render():
         assert response.status_code == 200
 
 
+def test_card_back_training_defaults_to_local_data():
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+
+    root = app.config["runtime"].card_back_training.root
+
+    assert root.name == "card_back_training"
+    assert root.parent.name == "local_data"
+
+
 def test_card_back_training_model_plan_capture_and_label(tmp_path):
     settings = _sim_truth_settings()
     orchestrator = build_sim_orchestrator(settings)

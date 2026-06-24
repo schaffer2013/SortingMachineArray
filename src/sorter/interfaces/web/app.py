@@ -674,7 +674,7 @@ class WebRuntime:
         self.control_audit_path = self.repo_root / "data" / "logs" / "control_audit.jsonl"
         self.debug_events_path = self.repo_root / "data" / "logs" / "debug_events.jsonl"
         self.serial_log_path = self.repo_root / "data" / "logs" / "serial_commands.jsonl"
-        self.card_back_training = CardBackTrainingStore(self.repo_root / "data" / "vision" / "card_back_training")
+        self.card_back_training = CardBackTrainingStore(self.repo_root / "local_data" / "card_back_training")
         self.light_profiles = self._load_light_profiles()
         self.runtime_mode = runtime_mode
         self.hardware_runtime = bool(getattr(orchestrator, "hardware_runtime", False))
