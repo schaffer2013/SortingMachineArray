@@ -215,17 +215,18 @@ def refine_card_back_corners_to_truth(
         score_size=score_size,
         max_corner_adjust_px=max_corner_adjust_px,
     )
-    outer_seed_corners, outer_seed_metrics = _corner_orb_seeded_corners(
-        initial_warp_rgb,
-        seed_corners,
-        truth_features["corner_orbs_by_zone"],
-        score_size=score_size,
-        max_corner_adjust_px=max_corner_adjust_px,
-    )
     seed_score, _ = _card_back_feature_score(
         _warp_card_back_rgb_array(source_rgb, seed_corners, output_size=score_size),
         truth_rgb,
         truth_features,
+    )
+    seed_warp_rgb = _warp_card_back_rgb_array(source_rgb, seed_corners, output_size=score_size)
+    outer_seed_corners, outer_seed_metrics = _corner_orb_seeded_corners(
+        seed_warp_rgb,
+        seed_corners,
+        truth_features["corner_orbs_by_zone"],
+        score_size=score_size,
+        max_corner_adjust_px=max_corner_adjust_px,
     )
     outer_seed_score, _ = _card_back_feature_score(
         _warp_card_back_rgb_array(source_rgb, outer_seed_corners, output_size=score_size),
