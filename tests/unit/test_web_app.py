@@ -307,6 +307,19 @@ def test_serial_session_records_recent_command_log():
     assert log[-1]["response"] == ["M114 response", "ok"]
 
 
+def test_serial_session_adopts_shared_transport_without_owning_it():
+    shared_transport = RecordingTransport(serial_port="COM8")
+    session = web_app_module.SerialBoardSession(shared_transport=shared_transport)
+
+    connect = session.connect("COM8", 115200)
+    disconnect = session.disconnect()
+
+    assert connect["ok"] is True
+    assert shared_transport.commands == ["M115"]
+    assert disconnect["ok"] is True
+    assert shared_transport.closed is False
+
+
 def test_serial_session_persists_and_reloads_command_log(tmp_path):
     log_path = tmp_path / "serial_commands.jsonl"
     first_session = web_app_module.SerialBoardSession(serial_log_path=log_path)
@@ -618,6 +631,24 @@ def test_connected_serial_board_takes_over_movement_controls():
     assert "G1 X5.000 Y0.000 F600" in runtime.serial_board.sent_commands
     assert status["runtime_target"] == "hardware_serial"
     assert status["pose"]["x_mm"] == 5.0
+
+
+def test_connected_serial_board_takes_over_direct_hardware_movement_controls():
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    setattr(orchestrator, "hardware_runtime", True)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    runtime = app.config["runtime"]
+    runtime.serial_board = FakeSerialBoard()
+    runtime.serial_board.connect("COM8", 115200)
+    client = app.test_client()
+
+    response = client.post("/api/control/move_xy", json={"x_mm": 100.0, "y_mm": 50.0})
+
+    assert response.status_code == 200
+    assert "G1 X100.000 Y50.000 F6000" in runtime.serial_board.sent_commands
 
 
 def test_camera_space_z_move_applies_camera_offset_in_simulation():
@@ -1542,7 +1573,10 @@ class FakeSerialBoard:
 
 
 class RecordingTransport:
-    def __init__(self):
+    def __init__(self, serial_port="COM8"):
+        self.serial_port = serial_port
+        self.baud_rate = 115200
+        self.timeout_seconds = 2.0
         self.commands = []
         self.closed = False
 
