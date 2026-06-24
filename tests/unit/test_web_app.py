@@ -6,11 +6,12 @@ import json
 import re
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from sorter.bootstrap import build_sim_orchestrator
 from sorter.adapters.hardware.marlin_motion import MarlinMotionAdapter
 from sorter.adapters.hardware.marlin_transport import RecordingMarlinTransport
+from sorter.application.card_back_detection import detect_card_back
 from sorter.config.calibration import CalibrationProfile
 from sorter.config.settings import AppSettings
 from sorter.interfaces import web_runner
@@ -259,6 +260,54 @@ def test_lighting_score_penalizes_glare():
 
     assert glare_score["glare_fraction"] > balanced_score["glare_fraction"]
     assert glare_score["score"] < balanced_score["score"]
+
+
+def test_card_back_detector_finds_synthetic_card_back():
+    image = Image.new("RGB", (900, 650), "#111827")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((220, 80, 620, 640), fill="#3b2418")
+    draw.rectangle((245, 110, 595, 610), fill="#9b6239")
+    draw.ellipse((295, 145, 545, 545), outline="#53348a", width=10, fill="#d08a54")
+    draw.text((310, 180), "MAGIC", fill="#ced9e8")
+    draw.rectangle((330, 510, 510, 548), fill="#f5f0df")
+
+    detection = detect_card_back(image)
+
+    assert detection.found is True
+    assert detection.confidence > 0.55
+    assert detection.center_px is not None
+    assert 350 <= detection.center_px[0] <= 500
+    assert 300 <= detection.center_px[1] <= 430
+
+
+def test_card_back_detect_endpoint_uses_camera_without_motion(tmp_path):
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    runtime = app.config["runtime"]
+    runtime.runtime_mode = "hardware"
+    runtime.hardware_runtime = True
+    image_path = tmp_path / "card-back.jpg"
+    image = Image.new("RGB", (900, 650), "#111827")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((220, 80, 620, 640), fill="#3b2418")
+    draw.rectangle((245, 110, 595, 610), fill="#9b6239")
+    draw.ellipse((295, 145, 545, 545), outline="#53348a", width=10, fill="#d08a54")
+    image.save(image_path)
+    orchestrator.camera = StaticImageCamera(image_path)
+    transport = RecordingMarlinTransport()
+    orchestrator.motion = MarlinMotionAdapter(transport=transport)
+    client = app.test_client()
+
+    response = client.post("/api/card-back/detect", json={})
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["found"] is True
+    assert transport.command_log == []
+    assert runtime.last_card_back_detection["found"] is True
 
 
 def test_serial_api_lists_connects_sends_and_disconnects():
@@ -1434,6 +1483,24 @@ class SingleLedCamera:
             metadata={},
             captured_at_utc="2026-01-01T00:00:00Z",
             camera_id="single-led-test",
+            source_mode="test",
+        )
+
+
+class StaticImageCamera:
+    def __init__(self, image_path: Path):
+        self.image_path = image_path
+        self.index = 0
+
+    def capture_frame(self):
+        self.index += 1
+        return Frame(
+            frame_id=f"static-{self.index}",
+            path=str(self.image_path),
+            pile_id=None,
+            metadata={},
+            captured_at_utc="2026-01-01T00:00:00Z",
+            camera_id="static-card-back-test",
             source_mode="test",
         )
 
