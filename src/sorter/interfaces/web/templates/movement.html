@@ -42,6 +42,22 @@
     </div>
   </article>
 
+  <article class="panel saved-position-panel">
+    <p class="eyebrow">Local presets</p>
+    <h2>Saved XYZ positions</h2>
+    <div class="form-grid saved-position-form">
+      <input id="saved-position-id" type="hidden">
+      <label>Name<input id="saved-position-name" type="text" placeholder="Stack camera"></label>
+      <label>X mm<input id="saved-position-x" type="number" step="0.1" value="0"></label>
+      <label>Y mm<input id="saved-position-y" type="number" step="0.1" value="0"></label>
+      <label>Z mm<input id="saved-position-z" type="number" step="0.1" value="0"></label>
+      <button id="saved-position-use-current" type="button" class="secondary">Use current pose</button>
+      <button id="saved-position-save" type="button">Save position</button>
+      <button id="saved-position-cancel" type="button" class="secondary" hidden>Cancel edit</button>
+    </div>
+    <div id="saved-position-list" class="saved-position-list"></div>
+  </article>
+
   <article class="panel">
     <p class="eyebrow">Z axis</p>
     <h2>Vacuum carriage Z</h2>

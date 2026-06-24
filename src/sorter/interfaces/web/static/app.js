@@ -1378,6 +1378,17 @@ window.SorterPages = {
     const bltouchResponse = document.querySelector("#bltouch-response");
     const bltouchProbe = document.querySelector("#bltouch-probe");
     const bltouchState = document.querySelector("#bltouch-state");
+    const savedPositionId = document.querySelector("#saved-position-id");
+    const savedPositionName = document.querySelector("#saved-position-name");
+    const savedPositionX = document.querySelector("#saved-position-x");
+    const savedPositionY = document.querySelector("#saved-position-y");
+    const savedPositionZ = document.querySelector("#saved-position-z");
+    const savedPositionUseCurrent = document.querySelector("#saved-position-use-current");
+    const savedPositionSave = document.querySelector("#saved-position-save");
+    const savedPositionCancel = document.querySelector("#saved-position-cancel");
+    const savedPositionList = document.querySelector("#saved-position-list");
+    let currentMovementStatus = null;
+    let savedPositions = [];
     const controlPayload = action => {
       if (action === "move_xy" || action === "move_camera_xy") {
         return {
@@ -1431,6 +1442,122 @@ window.SorterPages = {
         sendControl("jog_zc_interface", {dz_mm: step}, button);
       };
     });
+    function savedPositionPayload() {
+      return {
+        name: savedPositionName.value,
+        x_mm: Number(savedPositionX.value),
+        y_mm: Number(savedPositionY.value),
+        z_mm: Number(savedPositionZ.value),
+      };
+    }
+    function resetSavedPositionForm() {
+      savedPositionId.value = "";
+      savedPositionName.value = "";
+      savedPositionX.value = "0";
+      savedPositionY.value = "0";
+      savedPositionZ.value = "0";
+      savedPositionSave.textContent = "Save position";
+      savedPositionCancel.hidden = true;
+    }
+    function fillSavedPositionForm(position) {
+      savedPositionId.value = position.id || "";
+      savedPositionName.value = position.name || "";
+      savedPositionX.value = Number(position.x_mm || 0).toFixed(3);
+      savedPositionY.value = Number(position.y_mm || 0).toFixed(3);
+      savedPositionZ.value = Number(position.z_mm || 0).toFixed(3);
+      savedPositionSave.textContent = position.id ? "Update position" : "Save position";
+      savedPositionCancel.hidden = !position.id;
+    }
+    function renderSavedPositions() {
+      savedPositionList.innerHTML = savedPositions.length
+        ? savedPositions.map(position => `
+          <article class="saved-position-row" data-position-id="${escapeHtml(position.id)}">
+            <div>
+              <strong>${escapeHtml(position.name)}</strong>
+              <div class="muted">X ${Number(position.x_mm).toFixed(3)} / Y ${Number(position.y_mm).toFixed(3)} / Z ${Number(position.z_mm).toFixed(3)}</div>
+            </div>
+            <div class="button-row saved-position-actions">
+              <button type="button" data-saved-go="vacuum">Go vacuum</button>
+              <button type="button" data-saved-go="camera" class="secondary">Go camera</button>
+              <button type="button" data-saved-edit class="secondary">Edit</button>
+              <button type="button" data-saved-delete class="secondary">Delete</button>
+            </div>
+          </article>
+        `).join("")
+        : `<p class="muted">No saved XYZ positions yet.</p>`;
+    }
+    async function loadSavedPositions() {
+      try {
+        const data = await json("/api/saved-positions");
+        savedPositions = data.positions || [];
+        renderSavedPositions();
+      } catch (error) {
+        savedPositionList.innerHTML = `<p class="muted">${escapeHtml(error.message)}</p>`;
+      }
+    }
+    savedPositionUseCurrent.onclick = () => {
+      const pose = currentMovementStatus?.pose;
+      if (!pose) return;
+      savedPositionX.value = Number(pose.x_mm || 0).toFixed(3);
+      savedPositionY.value = Number(pose.y_mm || 0).toFixed(3);
+      savedPositionZ.value = Number(pose.z_mm || 0).toFixed(3);
+    };
+    savedPositionCancel.onclick = resetSavedPositionForm;
+    savedPositionSave.onclick = async () => {
+      savedPositionSave.disabled = true;
+      const positionId = savedPositionId.value;
+      try {
+        const data = await json(positionId ? `/api/saved-positions/${encodeURIComponent(positionId)}` : "/api/saved-positions", {
+          method: positionId ? "PATCH" : "POST",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify(savedPositionPayload()),
+        });
+        savedPositions = data.positions || [];
+        renderSavedPositions();
+        resetSavedPositionForm();
+        message.textContent = positionId ? "Saved position updated." : "Saved position added.";
+      } catch (error) {
+        message.textContent = error.message;
+      } finally {
+        savedPositionSave.disabled = false;
+      }
+    };
+    savedPositionList.onclick = async event => {
+      const row = event.target.closest("[data-position-id]");
+      if (!row) return;
+      const positionId = row.dataset.positionId;
+      const position = savedPositions.find(item => item.id === positionId);
+      if (!position) return;
+      const button = event.target.closest("button");
+      if (!button) return;
+      if (button.hasAttribute("data-saved-edit")) {
+        fillSavedPositionForm(position);
+        return;
+      }
+      if (button.hasAttribute("data-saved-delete") && !confirm(`Delete saved position ${position.name}?`)) return;
+      button.disabled = true;
+      try {
+        if (button.hasAttribute("data-saved-delete")) {
+          const data = await json(`/api/saved-positions/${encodeURIComponent(positionId)}`, {method:"DELETE"});
+          savedPositions = data.positions || [];
+          renderSavedPositions();
+          if (savedPositionId.value === positionId) resetSavedPositionForm();
+          message.textContent = "Saved position deleted.";
+        } else if (button.dataset.savedGo) {
+          const result = await json(`/api/saved-positions/${encodeURIComponent(positionId)}/go`, {
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({coordinate_space: button.dataset.savedGo}),
+          });
+          message.textContent = result.message || "Saved position move sent.";
+          refresh();
+        }
+      } catch (error) {
+        message.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    };
     function renderEndstops(endstops) {
       const names = Object.keys(endstops).sort();
       endstopState.innerHTML = names.length
@@ -1481,6 +1608,7 @@ window.SorterPages = {
     bltouchState.onclick = () => refreshEndstops(false);
     async function refresh() {
       const status = await json("/api/status");
+      currentMovementStatus = status;
       renderRuntimeBanner(status);
       const hardwareMode = isHardwareMode(status);
       const hardwareLive = isHardwareLive(status);
@@ -1491,7 +1619,7 @@ window.SorterPages = {
           ? "LIVE HARDWARE"
           : isSimulationMode(status) ? "SIMULATION" : "HARDWARE NOT CONNECTED";
       statePill.className = hardwareLive && !controllerFault ? "pill good-pill" : "pill warn-pill";
-      setButtonsDisabled(document, "[data-control], [data-jog-axis], [data-paired-zc]", hardwareMode && (!hardwareLive || controllerFault));
+      setButtonsDisabled(document, "[data-control], [data-jog-axis], [data-paired-zc], [data-saved-go]", hardwareMode && (!hardwareLive || controllerFault));
       const hardwareOnlyDisabled = !hardwareLive || controllerFault;
       endstopRefresh.disabled = hardwareOnlyDisabled;
       bltouchProbe.disabled = hardwareOnlyDisabled;
@@ -1514,7 +1642,7 @@ window.SorterPages = {
       ].map(([k,v]) => `<article class="status-card"><div class="muted">${k}</div><strong>${v}</strong></article>`).join("");
       renderEndstops(status.serial_board?.last_endstops || {});
     }
-    refresh(); setInterval(refresh, 1200); setInterval(() => refreshEndstops(true), 2500);
+    loadSavedPositions(); refresh(); setInterval(refresh, 1200); setInterval(() => refreshEndstops(true), 2500);
   },
   recognition() {
     const query = document.querySelector("#card-query");

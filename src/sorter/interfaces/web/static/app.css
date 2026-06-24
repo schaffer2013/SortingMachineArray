@@ -270,6 +270,14 @@ table { width:100%; border-collapse:collapse; min-width: 720px; }
 th, td { text-align:left; border-bottom:1px solid var(--line); padding:12px 10px; }
 th { color:var(--muted); font-size:.82rem; text-transform:uppercase; letter-spacing:.08em; }
 .intro-copy p:last-child { color:var(--muted); max-width: 76ch; }
+.saved-position-panel { grid-column:span 2; }
+.saved-position-form { margin-bottom:14px; }
+.saved-position-list { display:grid; gap:10px; }
+.saved-position-row {
+  display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; align-items:center;
+  background:var(--panel-soft); border:1px solid var(--line); border-radius:12px; padding:12px;
+}
+.saved-position-actions { justify-content:flex-end; margin:0; }
 .status-ready { color: var(--good); }
 .status-partial { color: var(--warn); }
 .status-blocked { color: #ef4444; }
@@ -324,7 +332,9 @@ th { color:var(--muted); font-size:.82rem; text-transform:uppercase; letter-spac
   .app-layout { grid-template-columns: 1fr; }
   .app-layout nav { position:static; display:flex; overflow:auto; }
   .app-layout a { white-space:nowrap; }
-  .hero-grid, .dashboard-grid, .two-column, .camera-control-grid, .training-grid, .training-workflow-grid, .training-current-box { grid-template-columns: 1fr; }
+  .hero-grid, .dashboard-grid, .two-column, .camera-control-grid, .training-grid, .training-workflow-grid, .training-current-box, .saved-position-row { grid-template-columns: 1fr; }
+  .saved-position-panel { grid-column:auto; }
+  .saved-position-actions { justify-content:flex-start; }
   .camera-feed-layout { grid-template-columns: 1fr; }
   .training-tune-layout { grid-template-columns: 1fr; }
   .training-nudge-panel { grid-template-columns: 1fr; }

@@ -265,6 +265,96 @@ def test_status_snapshot_and_capabilities_are_available():
     assert any(item["name"] == "Camera preview" for item in capabilities["capabilities"])
 
 
+def test_saved_positions_crud_persists_to_local_json(tmp_path):
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration, runtime_mode="simulation")
+    app.testing = True
+    app.config["runtime"].saved_positions_path = tmp_path / "saved_positions.json"
+    client = app.test_client()
+
+    created = client.post(
+        "/api/saved-positions",
+        json={"name": "Input stack", "x_mm": 12.3456, "y_mm": 23.4567, "z_mm": 34.5678},
+    )
+
+    assert created.status_code == 200
+    position = created.get_json()["position"]
+    assert position["name"] == "Input stack"
+    assert position["x_mm"] == 12.346
+    assert json.loads((tmp_path / "saved_positions.json").read_text(encoding="utf-8"))["positions"][0]["id"] == position["id"]
+
+    updated = client.patch(
+        f"/api/saved-positions/{position['id']}",
+        json={"name": "Camera check", "x_mm": 40, "y_mm": 41, "z_mm": 42},
+    )
+    listed = client.get("/api/saved-positions")
+
+    assert updated.status_code == 200
+    assert listed.get_json()["positions"] == updated.get_json()["positions"]
+    assert listed.get_json()["positions"][0]["name"] == "Camera check"
+
+    deleted = client.delete(f"/api/saved-positions/{position['id']}")
+
+    assert deleted.status_code == 200
+    assert client.get("/api/saved-positions").get_json()["positions"] == []
+
+
+def test_saved_position_go_requires_all_axes_homed(tmp_path):
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration, runtime_mode="simulation")
+    app.testing = True
+    app.config["runtime"].saved_positions_path = tmp_path / "saved_positions.json"
+    client = app.test_client()
+    position = client.post(
+        "/api/saved-positions",
+        json={"name": "Blocked", "x_mm": 10, "y_mm": 20, "z_mm": 30},
+    ).get_json()["position"]
+
+    response = client.post(f"/api/saved-positions/{position['id']}/go", json={"coordinate_space": "vacuum"})
+
+    assert response.status_code == 400
+    assert response.get_json()["message"] == "Home all axes before going to a saved XYZ position"
+
+
+def test_saved_position_go_supports_vacuum_and_camera_coordinates(tmp_path):
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path).with_updates(
+        camera_offset_x_mm=10.0,
+        camera_offset_y_mm=15.0,
+        camera_offset_z_mm=5.0,
+    )
+    app = create_web_app(orchestrator, calibration, runtime_mode="simulation")
+    app.testing = True
+    app.config["runtime"].saved_positions_path = tmp_path / "saved_positions.json"
+    client = app.test_client()
+    position = client.post(
+        "/api/saved-positions",
+        json={"name": "Dual coordinate", "x_mm": 80, "y_mm": 90, "z_mm": 100},
+    ).get_json()["position"]
+
+    client.post("/api/control/home")
+    vacuum = client.post(f"/api/saved-positions/{position['id']}/go", json={"coordinate_space": "vacuum"})
+    vacuum_pose = client.get("/api/status").get_json()["pose"]
+    camera = client.post(f"/api/saved-positions/{position['id']}/go", json={"coordinate_space": "camera"})
+    camera_pose = client.get("/api/status").get_json()["pose"]
+
+    assert vacuum.status_code == 200
+    assert vacuum.get_json()["coordinate_space"] == "vacuum"
+    assert vacuum_pose["x_mm"] == pytest.approx(80.0)
+    assert vacuum_pose["y_mm"] == pytest.approx(90.0)
+    assert vacuum_pose["z_mm"] == pytest.approx(100.0)
+    assert camera.status_code == 200
+    assert camera.get_json()["coordinate_space"] == "camera"
+    assert camera_pose["x_mm"] == pytest.approx(70.0)
+    assert camera_pose["y_mm"] == pytest.approx(75.0)
+    assert camera_pose["z_mm"] == pytest.approx(95.0)
+
+
 def test_card_validation_uses_local_catalog():
     client = _client()
     response = client.get("/api/card/validate?q=Appeal%20to%20Eirdu")

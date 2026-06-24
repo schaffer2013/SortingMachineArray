@@ -10,6 +10,7 @@ import base64
 import json
 import os
 import random
+import re
 import sqlite3
 import subprocess
 import tempfile
@@ -674,6 +675,7 @@ class WebRuntime:
         self.control_audit_path = self.repo_root / "data" / "logs" / "control_audit.jsonl"
         self.debug_events_path = self.repo_root / "data" / "logs" / "debug_events.jsonl"
         self.serial_log_path = self.repo_root / "data" / "logs" / "serial_commands.jsonl"
+        self.saved_positions_path = self.repo_root / "local_data" / "saved_positions.json"
         self.card_back_training = CardBackTrainingStore(self.repo_root / "local_data" / "card_back_training")
         self.light_profiles = self._load_light_profiles()
         self.runtime_mode = runtime_mode
@@ -951,6 +953,115 @@ class WebRuntime:
                 "metrics": asdict(snapshot.run_state.metrics),
             },
         }
+
+    def saved_positions_payload(self) -> dict[str, Any]:
+        return {"positions": self._load_saved_positions()}
+
+    def create_saved_position(self, payload: dict[str, Any]) -> dict[str, Any]:
+        positions = self._load_saved_positions()
+        position = self._saved_position_from_payload(payload)
+        position["id"] = self._unique_saved_position_id(position["name"], positions)
+        now = _utc_now_iso()
+        position["created_at_utc"] = now
+        position["updated_at_utc"] = now
+        positions.append(position)
+        self._save_saved_positions(positions)
+        return {"ok": True, "position": position, "positions": positions}
+
+    def update_saved_position(self, position_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        positions = self._load_saved_positions()
+        for index, position in enumerate(positions):
+            if position.get("id") == position_id:
+                updated = {**position, **self._saved_position_from_payload(payload), "id": position_id}
+                updated["created_at_utc"] = position.get("created_at_utc") or _utc_now_iso()
+                updated["updated_at_utc"] = _utc_now_iso()
+                positions[index] = updated
+                self._save_saved_positions(positions)
+                return {"ok": True, "position": updated, "positions": positions}
+        raise ValueError(f"Unknown saved position: {position_id}")
+
+    def delete_saved_position(self, position_id: str) -> dict[str, Any]:
+        positions = self._load_saved_positions()
+        remaining = [position for position in positions if position.get("id") != position_id]
+        if len(remaining) == len(positions):
+            raise ValueError(f"Unknown saved position: {position_id}")
+        self._save_saved_positions(remaining)
+        return {"ok": True, "deleted_position_id": position_id, "positions": remaining}
+
+    def go_to_saved_position(self, position_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        if not all(axis in self.homed_axes for axis in ("x", "y", "z", "c")):
+            raise ValueError("Home all axes before going to a saved XYZ position")
+        position = next((item for item in self._load_saved_positions() if item.get("id") == position_id), None)
+        if position is None:
+            raise ValueError(f"Unknown saved position: {position_id}")
+        coordinate_space = str((payload or {}).get("coordinate_space") or "vacuum").strip().lower()
+        if coordinate_space not in {"vacuum", "camera"}:
+            raise ValueError(f"Unsupported saved position coordinate space: {coordinate_space}")
+        action = "move_camera_xy" if coordinate_space == "camera" else "move_xy"
+        result = self.control(
+            action,
+            {
+                "x_mm": position["x_mm"],
+                "y_mm": position["y_mm"],
+                "z_mm": position["z_mm"],
+                "coordinate_space": coordinate_space,
+                "confirm_large_move": True,
+            },
+        )
+        return {
+            "ok": True,
+            "position": position,
+            "coordinate_space": coordinate_space,
+            "message": f"Went to saved {coordinate_space} position {position['name']}: {result.get('message', '')}",
+        }
+
+    def _load_saved_positions(self) -> list[dict[str, Any]]:
+        if not self.saved_positions_path.exists():
+            return []
+        with self.saved_positions_path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        raw_positions = payload.get("positions", []) if isinstance(payload, dict) else []
+        return [
+            self._saved_position_from_payload(position, position_id=str(position.get("id", "")))
+            for position in raw_positions
+            if isinstance(position, dict) and position.get("id")
+        ]
+
+    def _save_saved_positions(self, positions: list[dict[str, Any]]) -> None:
+        self.saved_positions_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = self.saved_positions_path.with_suffix(".json.tmp")
+        temp_path.write_text(json.dumps({"positions": positions}, indent=2), encoding="utf-8")
+        temp_path.replace(self.saved_positions_path)
+
+    def _saved_position_from_payload(self, payload: dict[str, Any], *, position_id: str | None = None) -> dict[str, Any]:
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            raise ValueError("Saved position name is required")
+        position = {
+            "name": name,
+            "x_mm": round(float(payload["x_mm"]), 3),
+            "y_mm": round(float(payload["y_mm"]), 3),
+            "z_mm": round(float(payload["z_mm"]), 3),
+            "notes": str(payload.get("notes") or ""),
+        }
+        if position_id:
+            position["id"] = position_id
+        if payload.get("created_at_utc"):
+            position["created_at_utc"] = str(payload["created_at_utc"])
+        if payload.get("updated_at_utc"):
+            position["updated_at_utc"] = str(payload["updated_at_utc"])
+        return position
+
+    def _unique_saved_position_id(self, name: str, positions: list[dict[str, Any]]) -> str:
+        stem = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "position"
+        candidate = f"{stem}-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"
+        existing = {str(position.get("id")) for position in positions}
+        suffix = 1
+        unique = candidate
+        while unique in existing:
+            suffix += 1
+            unique = f"{candidate}-{suffix}"
+        return unique
 
     def _pile_payload(self, index: int, pile: PileState) -> dict[str, Any]:
         return {
@@ -2484,6 +2595,45 @@ def create_web_app(
         try:
             return jsonify(runtime.update_calibration(request.get_json(silent=True) or {}))
         except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
+
+    @app.get("/api/saved-positions")
+    def api_saved_positions():
+        try:
+            return jsonify(runtime.saved_positions_payload())
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
+
+    @app.post("/api/saved-positions")
+    def api_create_saved_position():
+        try:
+            return jsonify(runtime.create_saved_position(request.get_json(silent=True) or {}))
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
+
+    @app.patch("/api/saved-positions/<position_id>")
+    def api_update_saved_position(position_id: str):
+        try:
+            return jsonify(runtime.update_saved_position(position_id, request.get_json(silent=True) or {}))
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
+
+    @app.delete("/api/saved-positions/<position_id>")
+    def api_delete_saved_position(position_id: str):
+        try:
+            return jsonify(runtime.delete_saved_position(position_id))
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
+
+    @app.post("/api/saved-positions/<position_id>/go")
+    def api_go_to_saved_position(position_id: str):
+        payload = request.get_json(silent=True) or {}
+        try:
+            result = runtime.go_to_saved_position(position_id, payload)
+            runtime.record_control_audit(action="saved_position_go", payload={"position_id": position_id, **payload}, result=result)
+            return jsonify(result)
+        except Exception as exc:
+            runtime.record_control_audit(action="saved_position_go", payload={"position_id": position_id, **payload}, error=str(exc))
             return jsonify({"ok": False, "message": str(exc)}), 400
 
     @app.post("/api/run/start")
