@@ -856,6 +856,7 @@ window.SorterPages = {
     const profileSelect = document.querySelector("#light-profile");
     const profileForm = document.querySelector("#light-profile-form");
     const calibrationForm = document.querySelector("#calibration-form");
+    const calibrationMessage = document.querySelector("#calibration-message");
     const pixelGrid = document.querySelector("#pixel-grid");
     const pixelEditorPill = document.querySelector("#pixel-editor-pill");
     const pixelIndex = document.querySelector("#pixel-index");
@@ -884,6 +885,7 @@ window.SorterPages = {
     let selectedPixel = 0;
     let selectedPixels = new Set([0]);
     let copiedPixel = [0, 0, 32];
+    let calibrationSaving = false;
     document.querySelectorAll("[data-control]").forEach(button => button.onclick = async () => {
       const action = button.dataset.control;
       if (action === "light_profile") {
@@ -932,26 +934,39 @@ window.SorterPages = {
     calibrationForm.onsubmit = async event => {
       event.preventDefault();
       const form = new FormData(calibrationForm);
-      await json("/api/calibration", {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          camera_offset_x_mm: Number(form.get("camera_offset_x_mm")),
-          camera_offset_y_mm: Number(form.get("camera_offset_y_mm")),
-          camera_offset_z_mm: Number(form.get("camera_offset_z_mm")),
-          min_xy_travel_z_mm: Number(form.get("min_xy_travel_z_mm")),
-          z_home_mm: Number(form.get("z_home_mm")),
-          c_home_mm: Number(form.get("c_home_mm")),
-          safe_z_mm: Number(form.get("safe_z_mm")),
-          pick_z_mm: Number(form.get("pick_z_mm")),
-          place_z_mm: Number(form.get("place_z_mm")),
-          probe_enabled: calibrationForm.elements.probe_enabled.checked,
-          probe_retract_z_mm: Number(form.get("probe_retract_z_mm")),
-          probe_place_clearance_mm: Number(form.get("probe_place_clearance_mm")),
-          probe_max_contact_z_mm: form.get("probe_max_contact_z_mm") === "" ? null : Number(form.get("probe_max_contact_z_mm")),
-        }),
-      });
-      refresh();
+      const saveButton = calibrationForm.querySelector("button");
+      calibrationSaving = true;
+      if (saveButton) saveButton.disabled = true;
+      if (calibrationMessage) calibrationMessage.textContent = "Saving calibration...";
+      try {
+        const result = await json("/api/calibration", {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({
+            camera_offset_x_mm: Number(form.get("camera_offset_x_mm")),
+            camera_offset_y_mm: Number(form.get("camera_offset_y_mm")),
+            camera_offset_z_mm: Number(form.get("camera_offset_z_mm")),
+            min_xy_travel_z_mm: Number(form.get("min_xy_travel_z_mm")),
+            z_home_mm: Number(form.get("z_home_mm")),
+            c_home_mm: Number(form.get("c_home_mm")),
+            safe_z_mm: Number(form.get("safe_z_mm")),
+            pick_z_mm: Number(form.get("pick_z_mm")),
+            place_z_mm: Number(form.get("place_z_mm")),
+            probe_enabled: calibrationForm.elements.probe_enabled.checked,
+            probe_retract_z_mm: Number(form.get("probe_retract_z_mm")),
+            probe_place_clearance_mm: Number(form.get("probe_place_clearance_mm")),
+            probe_max_contact_z_mm: form.get("probe_max_contact_z_mm") === "" ? null : Number(form.get("probe_max_contact_z_mm")),
+          }),
+        });
+        const zOffset = Number(result.calibration?.camera_offset_z_mm ?? 0).toFixed(2);
+        if (calibrationMessage) calibrationMessage.textContent = `${result.message || "Calibration saved."} Camera Z offset is ${zOffset} mm.`;
+      } catch (error) {
+        if (calibrationMessage) calibrationMessage.textContent = `Calibration save failed: ${error.message}`;
+      } finally {
+        calibrationSaving = false;
+        if (saveButton) saveButton.disabled = false;
+      }
+      await refresh();
     };
     async function loadProfiles() {
       const data = await json("/api/neopixel/profile-options");
@@ -1224,11 +1239,14 @@ window.SorterPages = {
         ["BLTouch", status.calibration.probe_enabled ? "Enabled" : "Disabled"],
         ["Probe retract", `${status.calibration.probe_retract_z_mm.toFixed(2)} mm`],
       ];
-      ["camera_offset_x_mm", "camera_offset_y_mm", "camera_offset_z_mm", "min_xy_travel_z_mm", "z_home_mm", "c_home_mm", "safe_z_mm", "pick_z_mm", "place_z_mm", "probe_retract_z_mm", "probe_place_clearance_mm", "probe_max_contact_z_mm"].forEach(name => {
-        const input = calibrationForm.elements[name];
-        if (document.activeElement !== input) input.value = status.calibration[name] ?? "";
-      });
-      calibrationForm.elements.probe_enabled.checked = Boolean(status.calibration.probe_enabled);
+      const editingCalibration = calibrationForm.contains(document.activeElement);
+      if (!calibrationSaving && !editingCalibration) {
+        ["camera_offset_x_mm", "camera_offset_y_mm", "camera_offset_z_mm", "min_xy_travel_z_mm", "z_home_mm", "c_home_mm", "safe_z_mm", "pick_z_mm", "place_z_mm", "probe_retract_z_mm", "probe_place_clearance_mm", "probe_max_contact_z_mm"].forEach(name => {
+          const input = calibrationForm.elements[name];
+          input.value = status.calibration[name] ?? "";
+        });
+        calibrationForm.elements.probe_enabled.checked = Boolean(status.calibration.probe_enabled);
+      }
       statusRoot.innerHTML = cards.map(([k,v]) => `<article class="status-card"><div class="muted">${k}</div><strong>${v}</strong></article>`).join("");
     }
     renderPixels(); syncPixelInputs(); loadProfiles(); refresh(); setInterval(refresh, 1200);

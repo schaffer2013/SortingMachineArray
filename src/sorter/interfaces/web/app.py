@@ -626,9 +626,16 @@ class WebRuntime:
             raise ValueError("No supported calibration fields provided")
         with self.lock:
             self.calibration = self.calibration.with_updates(**updates)
+            saved_path = None
             if self.calibration_path is not None:
                 self.calibration.save(self.calibration_path)
-            return {"ok": True, "calibration": self.calibration_payload()}
+                saved_path = str(self.calibration_path)
+            message = (
+                f"Calibration saved to {saved_path}"
+                if saved_path
+                else "Calibration applied for this running session"
+            )
+            return {"ok": True, "message": message, "calibration": self.calibration_payload(), "saved_path": saved_path}
 
     def snapshot(self) -> dict[str, Any]:
         snapshot = self.orchestrator.world.snapshot
