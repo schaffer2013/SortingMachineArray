@@ -11,7 +11,7 @@ from PIL import Image, ImageDraw
 from sorter.bootstrap import build_sim_orchestrator
 from sorter.adapters.hardware.marlin_motion import MarlinMotionAdapter
 from sorter.adapters.hardware.marlin_transport import RecordingMarlinTransport
-from sorter.application.card_back_detection import detect_card_back
+from sorter.application.card_back_detection import detect_card_back, refine_card_back_corners_to_truth
 from sorter.config.calibration import CalibrationProfile
 from sorter.config.settings import AppSettings
 from sorter.interfaces import web_runner
@@ -283,6 +283,50 @@ def test_card_back_detector_finds_synthetic_card_back():
     assert 300 <= detection.center_px[1] <= 430
 
 
+def test_card_back_corner_refinement_improves_truth_alignment():
+    import cv2
+    import numpy as np
+
+    truth_path = (
+        Path(__file__).parents[2]
+        / "src"
+        / "sorter"
+        / "interfaces"
+        / "web"
+        / "static"
+        / "card-back-truth.jpg"
+    )
+    truth = Image.open(truth_path).convert("RGB").resize((630, 880))
+    canvas = Image.new("RGB", (1100, 1300), "#111827")
+    source = np.array(
+        [
+            [0.0, 0.0],
+            [629.0, 0.0],
+            [629.0, 879.0],
+            [0.0, 879.0],
+        ],
+        dtype="float32",
+    )
+    actual_corners = ((260.0, 170.0), (880.0, 205.0), (835.0, 1085.0), (220.0, 1030.0))
+    destination = np.array(actual_corners, dtype="float32")
+    matrix = cv2.getPerspectiveTransform(source, destination)
+    warped = cv2.warpPerspective(np.array(truth), matrix, canvas.size)
+    mask = cv2.warpPerspective(np.full((880, 630), 255, dtype="uint8"), matrix, canvas.size)
+    frame = np.array(canvas)
+    frame[mask > 0] = warped[mask > 0]
+    camera_image = Image.fromarray(frame)
+    loose_corners = ((244.0, 184.0), (865.0, 188.0), (856.0, 1066.0), (238.0, 1047.0))
+
+    refined_corners, metrics = refine_card_back_corners_to_truth(camera_image, loose_corners, truth)
+
+    assert metrics["applied"] is True
+    assert metrics["refined_score"] > metrics["initial_score"]
+    assert metrics["max_corner_adjust_px"] > 0
+    for refined, actual in zip(refined_corners, actual_corners):
+        assert abs(refined[0] - actual[0]) < 30
+        assert abs(refined[1] - actual[1]) < 30
+
+
 def test_card_back_detect_endpoint_uses_camera_without_motion(tmp_path):
     settings = _sim_truth_settings()
     orchestrator = build_sim_orchestrator(settings)
@@ -311,6 +355,8 @@ def test_card_back_detect_endpoint_uses_camera_without_motion(tmp_path):
     assert payload["found"] is True
     assert payload["warped_image_data_url"].startswith("data:image/jpeg;base64,")
     assert payload["warped_image_size"] == [630, 880]
+    assert payload["initial_corners_px"]
+    assert payload["corner_refinement"]["method"] == "bounded_corner_search"
     assert transport.command_log == []
     assert runtime.last_card_back_detection["found"] is True
     assert "warped_image_data_url" not in runtime.last_card_back_detection

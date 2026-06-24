@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 import math
 from typing import Any
 
-from PIL import Image
+from PIL import Image, ImageChops, ImageFilter
 
 
 CARD_ASPECT_WIDTH_OVER_HEIGHT = 63.0 / 88.0
@@ -178,6 +178,199 @@ def warp_card_back_image(
     matrix = cv2.getPerspectiveTransform(source, destination)
     warped = cv2.warpPerspective(np.array(image.convert("RGB")), matrix, (width, height))
     return Image.fromarray(warped)
+
+
+def refine_card_back_corners_to_truth(
+    image: Image.Image,
+    corners: tuple[tuple[float, float], ...] | list[list[float]],
+    truth_image: Image.Image,
+    *,
+    output_size: tuple[int, int] = (630, 880),
+    score_size: tuple[int, int] = (420, 587),
+    max_corner_adjust_px: float = 45.0,
+) -> tuple[tuple[tuple[float, float], ...], dict[str, Any]]:
+    if len(corners) != 4:
+        raise ValueError("Card corner refinement requires exactly four card corners")
+
+    ordered = _ordered_corners(tuple((float(point[0]), float(point[1])) for point in corners))
+    truth = truth_image.convert("RGB").resize(score_size, Image.Resampling.LANCZOS)
+    initial_warp = warp_card_back_image(image, ordered, output_size=score_size)
+    initial_score = _truth_similarity_score(initial_warp, truth)
+    seed_corners, feature_metrics = _feature_seeded_corners(
+        initial_warp,
+        truth,
+        ordered,
+        score_size=score_size,
+        max_corner_adjust_px=max_corner_adjust_px,
+    )
+    seed_score = _truth_similarity_score(warp_card_back_image(image, seed_corners, output_size=score_size), truth)
+    if seed_score < initial_score:
+        seed_corners = ordered
+        seed_score = initial_score
+    best_corners, best_score = _coordinate_descent_corners(
+        image,
+        seed_corners,
+        truth,
+        score_size=score_size,
+        initial_score=seed_score,
+        max_corner_adjust_px=max_corner_adjust_px,
+        original_corners=ordered,
+    )
+    ordered_best = _ordered_corners(best_corners)
+    return (
+        tuple((round(float(x), 2), round(float(y), 2)) for x, y in ordered_best),
+        {
+            "applied": best_score > initial_score + 0.0005,
+            "initial_score": round(initial_score, 5),
+            "refined_score": round(best_score, 5),
+            "score_delta": round(best_score - initial_score, 5),
+            "max_corner_adjust_px": round(_max_corner_delta(ordered, ordered_best), 2),
+            "method": "bounded_corner_search",
+            "output_size": [output_size[0], output_size[1]],
+            "score_size": [score_size[0], score_size[1]],
+            "feature_seed": feature_metrics,
+        },
+    )
+
+
+def _coordinate_descent_corners(
+    image: Image.Image,
+    corners: tuple[tuple[float, float], ...],
+    truth: Image.Image,
+    *,
+    score_size: tuple[int, int],
+    initial_score: float,
+    max_corner_adjust_px: float,
+    original_corners: tuple[tuple[float, float], ...] | None = None,
+) -> tuple[tuple[tuple[float, float], ...], float]:
+    original = tuple((float(x), float(y)) for x, y in (original_corners or corners))
+    best = original
+    if _max_corner_delta(original, corners) <= max_corner_adjust_px:
+        best = tuple((float(x), float(y)) for x, y in corners)
+    best_score = initial_score
+    for step in (14.0, 7.0, 3.5, 1.75, 0.9):
+        improved = True
+        while improved:
+            improved = False
+            for corner_index in range(4):
+                for dx, dy in (
+                    (step, 0.0),
+                    (-step, 0.0),
+                    (0.0, step),
+                    (0.0, -step),
+                    (step, step),
+                    (step, -step),
+                    (-step, step),
+                    (-step, -step),
+                ):
+                    candidate = [list(point) for point in best]
+                    candidate[corner_index][0] += dx
+                    candidate[corner_index][1] += dy
+                    candidate_tuple = tuple((float(x), float(y)) for x, y in candidate)
+                    if _max_corner_delta(original, candidate_tuple) > max_corner_adjust_px:
+                        continue
+                    score = _truth_similarity_score(
+                        warp_card_back_image(image, candidate_tuple, output_size=score_size),
+                        truth,
+                    )
+                    if score > best_score + 0.0005:
+                        best = candidate_tuple
+                        best_score = score
+                        improved = True
+    return best, best_score
+
+
+def _feature_seeded_corners(
+    initial_warp: Image.Image,
+    truth: Image.Image,
+    corners: tuple[tuple[float, float], ...],
+    *,
+    score_size: tuple[int, int],
+    max_corner_adjust_px: float,
+) -> tuple[tuple[tuple[float, float], ...], dict[str, Any]]:
+    try:
+        import cv2
+        import numpy as np
+    except Exception as exc:  # pragma: no cover - import availability is environment dependent
+        return corners, {"applied": False, "reason": f"OpenCV unavailable: {exc}"}
+
+    candidate_gray = cv2.cvtColor(np.array(initial_warp.convert("RGB")), cv2.COLOR_RGB2GRAY)
+    truth_gray = cv2.cvtColor(np.array(truth.convert("RGB")), cv2.COLOR_RGB2GRAY)
+    detector = cv2.ORB_create(nfeatures=700)
+    candidate_keypoints, candidate_descriptors = detector.detectAndCompute(candidate_gray, None)
+    truth_keypoints, truth_descriptors = detector.detectAndCompute(truth_gray, None)
+    if candidate_descriptors is None or truth_descriptors is None:
+        return corners, {"applied": False, "reason": "not_enough_features", "matches": 0}
+
+    matcher = cv2.BFMatcher(cv2.NORM_HAMMING)
+    raw_matches = matcher.knnMatch(candidate_descriptors, truth_descriptors, k=2)
+    matches = [
+        pair[0]
+        for pair in raw_matches
+        if len(pair) == 2 and pair[0].distance < pair[1].distance * 0.76
+    ]
+    if len(matches) < 8:
+        return corners, {"applied": False, "reason": "not_enough_matches", "matches": len(matches)}
+
+    source_points = np.float32([candidate_keypoints[match.queryIdx].pt for match in matches]).reshape(-1, 1, 2)
+    truth_points = np.float32([truth_keypoints[match.trainIdx].pt for match in matches]).reshape(-1, 1, 2)
+    alignment, inlier_mask = cv2.findHomography(source_points, truth_points, cv2.RANSAC, 4.0)
+    if alignment is None or inlier_mask is None:
+        return corners, {"applied": False, "reason": "homography_failed", "matches": len(matches)}
+
+    width, height = score_size
+    source = np.array(_ordered_corners(corners), dtype="float32")
+    destination = np.array(
+        [
+            [0.0, 0.0],
+            [float(width - 1), 0.0],
+            [float(width - 1), float(height - 1)],
+            [0.0, float(height - 1)],
+        ],
+        dtype="float32",
+    )
+    initial_matrix = cv2.getPerspectiveTransform(source, destination)
+    refined_matrix = alignment @ initial_matrix
+    inverse = np.linalg.inv(refined_matrix)
+    refined = cv2.perspectiveTransform(destination.reshape(-1, 1, 2), inverse).reshape(4, 2)
+    refined_corners = tuple((float(x), float(y)) for x, y in refined)
+    if _max_corner_delta(corners, refined_corners) > max_corner_adjust_px:
+        return corners, {
+            "applied": False,
+            "reason": "feature_adjustment_exceeded_limit",
+            "matches": len(matches),
+            "inliers": int(inlier_mask.sum()),
+        }
+    return _ordered_corners(refined_corners), {
+        "applied": True,
+        "matches": len(matches),
+        "inliers": int(inlier_mask.sum()),
+        "inlier_ratio": round(float(inlier_mask.sum()) / float(len(matches)), 4),
+    }
+
+
+def _truth_similarity_score(candidate: Image.Image, truth: Image.Image) -> float:
+    candidate = candidate.convert("RGB").resize(truth.size, Image.Resampling.LANCZOS)
+    candidate_edges = candidate.convert("L").filter(ImageFilter.FIND_EDGES)
+    truth_edges = truth.convert("L").filter(ImageFilter.FIND_EDGES)
+    edge_error = _mean_image_error(ImageChops.difference(candidate_edges, truth_edges))
+    color_error = _mean_image_error(ImageChops.difference(candidate, truth))
+    return max(0.0, 1.0 - (edge_error * 0.65 + color_error * 0.35))
+
+
+def _mean_image_error(diff: Image.Image) -> float:
+    histogram = diff.histogram()
+    channels = max(1, len(histogram) // 256)
+    pixels = max(1, diff.width * diff.height * channels)
+    mean_error = sum((index % 256) * count for index, count in enumerate(histogram)) / float(pixels * 255)
+    return mean_error
+
+
+def _max_corner_delta(
+    first: tuple[tuple[float, float], ...],
+    second: tuple[tuple[float, float], ...],
+) -> float:
+    return max((_distance(a, b) for a, b in zip(first, second)), default=0.0)
 
 
 def _expanded_card_corners(corners: tuple[tuple[float, float], ...]) -> tuple[tuple[float, float], ...]:

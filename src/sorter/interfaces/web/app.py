@@ -20,7 +20,11 @@ from typing import Any, Callable
 from flask import Flask, Response, g, jsonify, render_template, request, send_file
 from PIL import Image, ImageDraw, ImageStat
 
-from sorter.application.card_back_detection import detect_card_back, warp_card_back_image
+from sorter.application.card_back_detection import (
+    detect_card_back,
+    refine_card_back_corners_to_truth,
+    warp_card_back_image,
+)
 from sorter.application.orchestrator import Orchestrator
 from sorter.adapters.hardware.marlin_transport import MarlinSerialTransport
 from sorter.adapters.hardware.neopixel_lights import NeoPixelLightsAdapter
@@ -1857,7 +1861,12 @@ class WebRuntime:
         image = self.latest_camera_image()
         payload = detect_card_back(image).to_json()
         if payload.get("found") and payload.get("corners_px"):
-            warped = warp_card_back_image(image, payload["corners_px"])
+            initial_corners = payload["corners_px"]
+            refined_corners, refinement = self._refine_card_back_corners(image, initial_corners)
+            payload["initial_corners_px"] = initial_corners
+            payload["corners_px"] = [list(point) for point in refined_corners]
+            payload["corner_refinement"] = refinement
+            warped = warp_card_back_image(image, refined_corners)
             buffer = BytesIO()
             warped.save(buffer, format="JPEG", quality=88)
             payload["warped_image_data_url"] = "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
@@ -1874,6 +1883,28 @@ class WebRuntime:
             },
         )
         return payload
+
+    def _refine_card_back_corners(
+        self,
+        image: Image.Image,
+        corners: list[list[float]] | tuple[tuple[float, float], ...],
+    ) -> tuple[tuple[tuple[float, float], ...], dict[str, Any]]:
+        truth_path = self.repo_root / "src" / "sorter" / "interfaces" / "web" / "static" / "card-back-truth.jpg"
+        if not truth_path.exists():
+            return tuple((float(point[0]), float(point[1])) for point in corners), {
+                "applied": False,
+                "method": "bounded_corner_search",
+                "message": f"Truth image not found: {truth_path}",
+            }
+        try:
+            with Image.open(truth_path) as truth_image:
+                return refine_card_back_corners_to_truth(image, corners, truth_image)
+        except Exception as exc:
+            return tuple((float(point[0]), float(point[1])) for point in corners), {
+                "applied": False,
+                "method": "bounded_corner_search",
+                "message": f"Corner refinement failed: {exc}",
+            }
 
     def _recognize_image(
         self,
