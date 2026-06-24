@@ -6,6 +6,7 @@ from datetime import datetime, UTC
 from importlib.metadata import PackageNotFoundError, version
 from io import BytesIO
 from pathlib import Path
+import base64
 import json
 import os
 import sqlite3
@@ -19,7 +20,7 @@ from typing import Any, Callable
 from flask import Flask, Response, g, jsonify, render_template, request, send_file
 from PIL import Image, ImageDraw, ImageStat
 
-from sorter.application.card_back_detection import detect_card_back
+from sorter.application.card_back_detection import detect_card_back, warp_card_back_image
 from sorter.application.orchestrator import Orchestrator
 from sorter.adapters.hardware.marlin_transport import MarlinSerialTransport
 from sorter.adapters.hardware.neopixel_lights import NeoPixelLightsAdapter
@@ -1855,8 +1856,14 @@ class WebRuntime:
     def detect_card_back_from_camera(self) -> dict[str, Any]:
         image = self.latest_camera_image()
         payload = detect_card_back(image).to_json()
+        if payload.get("found") and payload.get("corners_px"):
+            warped = warp_card_back_image(image, payload["corners_px"])
+            buffer = BytesIO()
+            warped.save(buffer, format="JPEG", quality=88)
+            payload["warped_image_data_url"] = "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+            payload["warped_image_size"] = [warped.width, warped.height]
         payload["captured_at_utc"] = datetime.now(UTC).isoformat()
-        self.last_card_back_detection = payload
+        self.last_card_back_detection = {key: value for key, value in payload.items() if key != "warped_image_data_url"}
         self.record_debug_event(
             "camera.card_back.detect",
             {
