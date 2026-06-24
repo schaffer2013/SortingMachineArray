@@ -1616,6 +1616,9 @@ window.SorterPages = {
     let expectedCorners = null;
     let truthCorners = null;
     let frameImage = null;
+    let truthImage = null;
+    let tuneViewport = {x: 315, y: 440};
+    let tunePointer = null;
 
     const activeModelId = () => modelSelect.value || summary.active_model_id;
     const fieldNumber = id => Number(document.querySelector(id).value);
@@ -1626,12 +1629,67 @@ window.SorterPages = {
     };
     const cloneCorners = value => value ? Object.fromEntries(corners.map(corner => [corner, {...value[corner]}])) : null;
     const cornersToArray = value => corners.map(corner => [Number(value[corner].x), Number(value[corner].y)]);
+    const cardAspect = 63 / 88;
+    const outputSize = () => ({width: truthImage?.naturalWidth || 630, height: truthImage?.naturalHeight || 880});
+    const clampValue = (value, min, max) => Math.max(min, Math.min(max, value));
+    const defaultCardCorners = image => {
+      const height = image.height * 0.82;
+      const width = Math.min(image.width * 0.82, height * cardAspect);
+      const left = (image.width - width) / 2;
+      const top = (image.height - height) / 2;
+      return {
+        nw: {x: left, y: top},
+        ne: {x: left + width, y: top},
+        se: {x: left + width, y: top + height},
+        sw: {x: left, y: top + height},
+      };
+    };
     const loadImage = src => new Promise((resolve, reject) => {
       const image = new Image();
       image.onload = () => resolve(image);
       image.onerror = () => reject(new Error("Image unavailable"));
       image.src = `${src}${src.includes("?") ? "&" : "?"}t=${Date.now()}`;
     });
+    loadImage("/static/card-back-truth.jpg").then(image => {
+      truthImage = image;
+      const size = outputSize();
+      tuneViewport = {x: size.width / 2, y: size.height / 2};
+      renderTuning();
+    }).catch(() => {});
+    const projectiveMapForUnitSquare = points => {
+      const [topLeft, topRight, bottomRight, bottomLeft] = points;
+      const dx1 = topRight.x - bottomRight.x;
+      const dy1 = topRight.y - bottomRight.y;
+      const dx2 = bottomLeft.x - bottomRight.x;
+      const dy2 = bottomLeft.y - bottomRight.y;
+      const dx3 = topLeft.x - topRight.x + bottomRight.x - bottomLeft.x;
+      const dy3 = topLeft.y - topRight.y + bottomRight.y - bottomLeft.y;
+      let g = 0;
+      let h = 0;
+      if (Math.abs(dx3) > 0.000001 || Math.abs(dy3) > 0.000001) {
+        const determinant = dx1 * dy2 - dx2 * dy1;
+        if (Math.abs(determinant) < 0.000001) return null;
+        g = (dx3 * dy2 - dx2 * dy3) / determinant;
+        h = (dx1 * dy3 - dx3 * dy1) / determinant;
+      }
+      return {
+        a: topRight.x - topLeft.x + g * topRight.x,
+        b: bottomLeft.x - topLeft.x + h * bottomLeft.x,
+        c: topLeft.x,
+        d: topRight.y - topLeft.y + g * topRight.y,
+        e: bottomLeft.y - topLeft.y + h * bottomLeft.y,
+        f: topLeft.y,
+        g,
+        h,
+      };
+    };
+    const transformPoint = (matrix, x, y) => {
+      const denominator = matrix.g * x + matrix.h * y + 1;
+      return {
+        x: (matrix.a * x + matrix.b * y + matrix.c) / denominator,
+        y: (matrix.d * x + matrix.e * y + matrix.f) / denominator,
+      };
+    };
 
     async function refreshSummary() {
       summary = await json("/api/card-back-training");
@@ -1680,7 +1738,8 @@ window.SorterPages = {
       currentSample = sampleResponse.sample;
       frameImage = image;
       expectedCorners = cornerObjectFromArray(currentSample.label?.detection?.corners_px)
-        || cornerObjectFromArray(currentSample.label?.expected_crop?.corners_px);
+        || cornerObjectFromArray(currentSample.label?.expected_crop?.corners_px)
+        || defaultCardCorners(image);
       truthCorners = currentSample.label?.truth_corners_px && Object.keys(currentSample.label.truth_corners_px).length
         ? cloneCorners(currentSample.label.truth_corners_px)
         : cloneCorners(expectedCorners);
@@ -1824,9 +1883,9 @@ window.SorterPages = {
       summary = result.summary;
       currentSample = result.sample;
       const label = result.sample.label || {};
-      expectedCorners = cornerObjectFromArray(label.detection?.corners_px);
-      truthCorners = cloneCorners(expectedCorners);
       frameImage = await loadImage(`/api/card-back-training/models/${activeModelId()}/samples/${result.sample.sample_id}/image.jpg`);
+      expectedCorners = cornerObjectFromArray(label.detection?.corners_px) || defaultCardCorners(frameImage);
+      truthCorners = cloneCorners(expectedCorners);
       renderModels();
       renderTuning();
       lastResult.textContent = pretty(result.sample);
@@ -1872,11 +1931,13 @@ window.SorterPages = {
       try {
         const [detection, image] = await Promise.all([json("/api/card-back/detect", {method:"POST"}), loadImage("/api/camera/frame.jpg")]);
         frameImage = image;
-        expectedCorners = cornerObjectFromArray(detection.corners_px);
+        expectedCorners = cornerObjectFromArray(detection.corners_px) || defaultCardCorners(image);
         truthCorners = cloneCorners(expectedCorners);
         currentSample = null;
         lastResult.textContent = pretty(detection);
-        tuneMessage.textContent = detection.found ? "Detected corners. Use arrow keys to tune selected corner." : detection.message || "No card back found";
+        tuneMessage.textContent = detection.found
+          ? "Detected corners. Pan the reference view and tune the warped image with the arrow keys."
+          : "No card detected; seeded a centered manual box you can tune.";
         renderTuning();
       } catch (error) {
         tuneMessage.textContent = error.message;
@@ -1907,25 +1968,125 @@ window.SorterPages = {
       truthCorners[selectedCorner].y += delta[1];
       renderTuning();
     });
-    zoomInput.oninput = renderTuning;
+    zoomInput.oninput = () => {
+      clampViewport();
+      renderTuning();
+    };
+    const viewportWindow = () => {
+      const size = outputSize();
+      const zoom = Math.max(1, Number(zoomInput.value) || 4);
+      const viewWidth = size.width / zoom;
+      const viewHeight = viewWidth * (tuneCanvas.height / tuneCanvas.width);
+      return {
+        left: clampValue(tuneViewport.x - viewWidth / 2, 0, Math.max(0, size.width - viewWidth)),
+        top: clampValue(tuneViewport.y - viewHeight / 2, 0, Math.max(0, size.height - viewHeight)),
+        width: viewWidth,
+        height: viewHeight,
+        outputWidth: size.width,
+        outputHeight: size.height,
+      };
+    };
+    const clampViewport = () => {
+      const view = viewportWindow();
+      tuneViewport = {x: view.left + view.width / 2, y: view.top + view.height / 2};
+    };
+    const outputPointFromEvent = event => {
+      const rect = tuneCanvas.getBoundingClientRect();
+      const view = viewportWindow();
+      return {
+        x: view.left + ((event.clientX - rect.left) / rect.width) * view.width,
+        y: view.top + ((event.clientY - rect.top) / rect.height) * view.height,
+        view,
+      };
+    };
+    tuneCanvas.addEventListener("pointerdown", event => {
+      tuneCanvas.focus();
+      const point = outputPointFromEvent(event);
+      tunePointer = {
+        id: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startViewport: {...tuneViewport},
+        startOutput: point,
+        moved: false,
+      };
+      tuneCanvas.setPointerCapture(event.pointerId);
+    });
+    tuneCanvas.addEventListener("pointermove", event => {
+      if (!tunePointer || tunePointer.id !== event.pointerId) return;
+      const dx = event.clientX - tunePointer.startClientX;
+      const dy = event.clientY - tunePointer.startClientY;
+      if (Math.abs(dx) + Math.abs(dy) > 3) tunePointer.moved = true;
+      const rect = tuneCanvas.getBoundingClientRect();
+      const view = viewportWindow();
+      tuneViewport = {
+        x: tunePointer.startViewport.x - (dx / rect.width) * view.width,
+        y: tunePointer.startViewport.y - (dy / rect.height) * view.height,
+      };
+      clampViewport();
+      renderTuning();
+    });
+    tuneCanvas.addEventListener("pointerup", event => {
+      if (!tunePointer || tunePointer.id !== event.pointerId) return;
+      if (!tunePointer.moved) {
+        const point = outputPointFromEvent(event);
+        tuneViewport = {x: point.x, y: point.y};
+        clampViewport();
+        renderTuning();
+      }
+      tunePointer = null;
+    });
+    tuneCanvas.addEventListener("pointercancel", event => {
+      if (tunePointer?.id === event.pointerId) tunePointer = null;
+    });
     function renderTuning() {
       renderCornerOverlay();
       const context = tuneCanvas.getContext("2d");
       context.clearRect(0, 0, tuneCanvas.width, tuneCanvas.height);
-      if (!frameImage || !expectedCorners?.[selectedCorner]) {
+      if (!frameImage || !expectedCorners || !truthCorners) {
         context.fillStyle = "#111827";
         context.fillRect(0, 0, tuneCanvas.width, tuneCanvas.height);
         return;
       }
-      const center = truthCorners?.[selectedCorner] || expectedCorners[selectedCorner];
-      const zoom = Number(zoomInput.value) || 8;
-      const sourceSize = tuneCanvas.width / zoom;
-      const sx = Math.max(0, Math.min(frameImage.width - sourceSize, center.x - sourceSize / 2));
-      const sy = Math.max(0, Math.min(frameImage.height - sourceSize, center.y - sourceSize / 2));
-      context.drawImage(frameImage, sx, sy, sourceSize, sourceSize, 0, 0, tuneCanvas.width, tuneCanvas.height);
-      const drawPoint = (point, color, radius) => {
-        const x = ((point.x - sx) / sourceSize) * tuneCanvas.width;
-        const y = ((point.y - sy) / sourceSize) * tuneCanvas.height;
+      const view = viewportWindow();
+      const sourceCanvas = document.createElement("canvas");
+      sourceCanvas.width = frameImage.width;
+      sourceCanvas.height = frameImage.height;
+      const sourceContext = sourceCanvas.getContext("2d", {willReadFrequently: true});
+      sourceContext.drawImage(frameImage, 0, 0, frameImage.width, frameImage.height);
+      const source = sourceContext.getImageData(0, 0, frameImage.width, frameImage.height);
+      const matrix = projectiveMapForUnitSquare(corners.map(corner => truthCorners[corner]));
+      const warped = context.createImageData(tuneCanvas.width, tuneCanvas.height);
+      if (matrix) {
+        for (let y = 0; y < tuneCanvas.height; y += 1) {
+          const outputY = view.top + (y / Math.max(1, tuneCanvas.height - 1)) * view.height;
+          const normalizedY = outputY / Math.max(1, view.outputHeight - 1);
+          for (let x = 0; x < tuneCanvas.width; x += 1) {
+            const outputX = view.left + (x / Math.max(1, tuneCanvas.width - 1)) * view.width;
+            const normalizedX = outputX / Math.max(1, view.outputWidth - 1);
+            const sourcePoint = transformPoint(matrix, normalizedX, normalizedY);
+            const sourceX = clampValue(Math.round(sourcePoint.x), 0, frameImage.width - 1);
+            const sourceY = clampValue(Math.round(sourcePoint.y), 0, frameImage.height - 1);
+            const sourceIndex = (sourceY * frameImage.width + sourceX) * 4;
+            const outputIndex = (y * tuneCanvas.width + x) * 4;
+            warped.data[outputIndex] = source.data[sourceIndex];
+            warped.data[outputIndex + 1] = source.data[sourceIndex + 1];
+            warped.data[outputIndex + 2] = source.data[sourceIndex + 2];
+            warped.data[outputIndex + 3] = 255;
+          }
+        }
+        context.putImageData(warped, 0, 0);
+      }
+      if (truthImage) {
+        context.save();
+        context.globalAlpha = 0.52;
+        context.drawImage(truthImage, view.left, view.top, view.width, view.height, 0, 0, tuneCanvas.width, tuneCanvas.height);
+        context.restore();
+      }
+      const drawOutputMarker = (point, color, radius) => {
+        const x = ((point.x - view.left) / view.width) * tuneCanvas.width;
+        const y = ((point.y - view.top) / view.height) * tuneCanvas.height;
+        if (x < -radius || y < -radius || x > tuneCanvas.width + radius || y > tuneCanvas.height + radius) return;
         context.strokeStyle = color;
         context.lineWidth = 2;
         context.beginPath();
@@ -1938,11 +2099,16 @@ window.SorterPages = {
         context.lineTo(x, y + 18);
         context.stroke();
       };
-      drawPoint(expectedCorners[selectedCorner], "#38bdf8", 12);
-      if (truthCorners?.[selectedCorner]) drawPoint(truthCorners[selectedCorner], "#f59e0b", 18);
+      const referenceCorners = {
+        nw: {x: 0, y: 0},
+        ne: {x: view.outputWidth - 1, y: 0},
+        se: {x: view.outputWidth - 1, y: view.outputHeight - 1},
+        sw: {x: 0, y: view.outputHeight - 1},
+      };
+      drawOutputMarker(referenceCorners[selectedCorner], "#f59e0b", 16);
       const offsetX = truthCorners ? truthCorners[selectedCorner].x - expectedCorners[selectedCorner].x : 0;
       const offsetY = truthCorners ? truthCorners[selectedCorner].y - expectedCorners[selectedCorner].y : 0;
-      tuneMessage.textContent = `${selectedCorner.toUpperCase()} offset ${offsetX.toFixed(1)}, ${offsetY.toFixed(1)} px`;
+      tuneMessage.textContent = `${selectedCorner.toUpperCase()} source offset ${offsetX.toFixed(1)}, ${offsetY.toFixed(1)} px. Reference stays fixed; warped capture moves underneath.`;
     }
     function renderCornerOverlay() {
       if (!cornerOverlay || !frameImage || !expectedCorners) {
@@ -2040,7 +2206,7 @@ window.SorterPages = {
         ["Ahead of main", data.commits_ahead],
         ["Local changes", data.dirty ? "Yes" : "No"],
       ].map(([k,v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
-      message.textContent = data.restart_required ? "Update applied. Restart required." : (data.message || "");
+      message.textContent = data.message || (data.restart_required ? "Update applied. Restart required." : "");
       raw.textContent = pretty(data);
     };
     async function refreshRuntime() {

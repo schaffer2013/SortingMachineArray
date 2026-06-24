@@ -99,17 +99,16 @@
           <button type="button" data-training-corner="se" class="secondary">SE</button>
           <button type="button" data-training-corner="sw" class="secondary">SW</button>
         </div>
-        <label>Zoom<input id="training-zoom" type="range" min="4" max="16" step="1" value="8"></label>
+        <label>Zoom<input id="training-zoom" type="range" min="1" max="12" step="0.5" value="4"></label>
         <div class="training-zoom-stage">
-          <canvas id="training-tune-canvas" width="320" height="320" tabindex="0" aria-label="Corner tuning zoom canvas"></canvas>
-          <img src="/static/card-back-truth.jpg" alt="" class="training-truth-reference">
+          <canvas id="training-tune-canvas" width="420" height="420" tabindex="0" aria-label="Card alignment inspection canvas"></canvas>
         </div>
         <div class="button-row compact-button-row">
           <button id="training-label-train" type="button" class="secondary">Mark train</button>
           <button id="training-label-eval" type="button" class="secondary">Mark eval</button>
           <button id="training-save-label" type="button">Save tuning</button>
         </div>
-        <p id="training-tune-message" class="muted">Capture or detect a card back, choose a corner, then use arrow keys for 1 px moves. Hold Shift for 10 px.</p>
+        <p id="training-tune-message" class="muted">Capture or detect a card back. Click or drag the inspection view to pan anywhere on the card, select corners, then use arrow keys for 1 px moves. Hold Shift for 10 px.</p>
       </aside>
     </div>
   </article>
