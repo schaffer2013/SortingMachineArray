@@ -576,6 +576,10 @@ window.SorterPages = {
     const refreshButton = document.querySelector("#camera-refresh");
     const cropStage = document.querySelector("#camera-crop-stage");
     const cropOverlay = document.querySelector("#camera-crop-overlay");
+    const cardDetectOverlay = document.querySelector("#camera-card-detection-overlay");
+    const cardDetectButton = document.querySelector("#camera-card-detect");
+    const cardDetectSummary = document.querySelector("#camera-card-detect-summary");
+    const cardDetectResult = document.querySelector("#camera-card-detect-result");
     const cropToggle = document.querySelector("#camera-crop-toggle");
     const cropPreview = document.querySelector("#camera-crop-preview");
     const cropMeta = document.querySelector("#camera-crop-meta");
@@ -587,6 +591,7 @@ window.SorterPages = {
     let cropEnabled = false;
     let cropFrameLoading = false;
     let cropPointer = null;
+    let lastCardBackDetection = null;
     let cropFrame = {width: 0, height: 0};
     let crop = {x: 0.28, y: 0.08, width: 0.44, height: 0.82};
     const cropContext = cropPreview?.getContext("2d");
@@ -624,6 +629,43 @@ window.SorterPages = {
           top += (feedRect.height - height) / 2;
         }
         return {left, top, width, height, imageWidth, imageHeight};
+      };
+      const renderCardDetectionOverlay = detection => {
+        if (!cardDetectOverlay) return;
+        const bounds = visibleImageBounds();
+        const box = detection?.estimated_card_bbox_px || detection?.component_bbox_px;
+        if (!bounds || !box || box.length !== 4 || !detection?.found) {
+          cardDetectOverlay.hidden = true;
+          return;
+        }
+        const [left, top, right, bottom] = box.map(Number);
+        cardDetectOverlay.hidden = false;
+        cardDetectOverlay.style.left = `${bounds.left + (left / bounds.imageWidth) * bounds.width}px`;
+        cardDetectOverlay.style.top = `${bounds.top + (top / bounds.imageHeight) * bounds.height}px`;
+        cardDetectOverlay.style.width = `${((right - left) / bounds.imageWidth) * bounds.width}px`;
+        cardDetectOverlay.style.height = `${((bottom - top) / bounds.imageHeight) * bounds.height}px`;
+      };
+      const runCardBackDetection = async () => {
+        if (cardDetectButton) cardDetectButton.disabled = true;
+        if (cardDetectSummary) cardDetectSummary.textContent = "Detecting card back...";
+        try {
+          const response = await apiFetch("/api/card-back/detect", {method: "POST"});
+          lastCardBackDetection = response;
+          renderCardDetectionOverlay(response);
+          if (cardDetectSummary) {
+            cardDetectSummary.textContent = response.found
+              ? `Found card back: confidence ${Number(response.confidence || 0).toFixed(3)}, rotation ${Number(response.rotation_degrees || 0).toFixed(2)} deg`
+              : response.message || "No card back found";
+          }
+          if (cardDetectResult) cardDetectResult.textContent = JSON.stringify(response, null, 2);
+        } catch (error) {
+          if (cardDetectOverlay) cardDetectOverlay.hidden = true;
+          lastCardBackDetection = null;
+          if (cardDetectSummary) cardDetectSummary.textContent = error.message;
+          if (cardDetectResult) cardDetectResult.textContent = JSON.stringify({error: error.message}, null, 2);
+        } finally {
+          if (cardDetectButton) cardDetectButton.disabled = false;
+        }
       };
       const normalizeCrop = nextCrop => {
         const bounds = visibleImageBounds();
@@ -783,7 +825,9 @@ window.SorterPages = {
       window.addEventListener("resize", () => {
         renderCropOverlay();
         updateCropPreview();
+        renderCardDetectionOverlay(lastCardBackDetection);
       });
+      cardDetectButton?.addEventListener("click", runCardBackDetection);
     async function sendControl(action, payload = controlPayload(action), sourceButton = null) {
       if (sourceButton) sourceButton.disabled = true;
       message.textContent = `Sending ${action.replaceAll("_", " ")}...`;

@@ -19,6 +19,7 @@ from typing import Any, Callable
 from flask import Flask, Response, g, jsonify, render_template, request, send_file
 from PIL import Image, ImageDraw, ImageStat
 
+from sorter.application.card_back_detection import detect_card_back
 from sorter.application.orchestrator import Orchestrator
 from sorter.adapters.hardware.marlin_transport import MarlinSerialTransport
 from sorter.adapters.hardware.neopixel_lights import NeoPixelLightsAdapter
@@ -652,6 +653,7 @@ class WebRuntime:
         self.last_result: dict[str, Any] | None = None
         self.last_error: str | None = None
         self.last_manual_recognition: dict[str, Any] | None = None
+        self.last_card_back_detection: dict[str, Any] | None = None
         self.machine_initialized = False
         self.homed_axes: set[str] = set()
         self.light_profiles_path = light_profiles_path
@@ -764,6 +766,7 @@ class WebRuntime:
                 "last_error": self.last_error,
                 "last_recognition": getattr(self.orchestrator, "last_recognition", None),
                 "last_manual_recognition": self.last_manual_recognition,
+                "last_card_back_detection": self.last_card_back_detection,
                 "machine_initialized": self.machine_initialized,
                 "calibration": self.calibration_payload(),
                 "serial_board": serial_status,
@@ -1849,6 +1852,22 @@ class WebRuntime:
         image.save(temp_path, format="JPEG", quality=92)
         return self._recognize_image(temp_path, request_payload, camera_id="web_camera", source_mode="camera_web")
 
+    def detect_card_back_from_camera(self) -> dict[str, Any]:
+        image = self.latest_camera_image()
+        payload = detect_card_back(image).to_json()
+        payload["captured_at_utc"] = datetime.now(UTC).isoformat()
+        self.last_card_back_detection = payload
+        self.record_debug_event(
+            "camera.card_back.detect",
+            {
+                "found": payload.get("found"),
+                "confidence": payload.get("confidence"),
+                "center_px": payload.get("center_px"),
+                "rotation_degrees": payload.get("rotation_degrees"),
+            },
+        )
+        return payload
+
     def _recognize_image(
         self,
         image_path: Path,
@@ -2517,6 +2536,13 @@ def create_web_app(
             return jsonify(runtime.optimize_lighting(request.get_json(silent=True) or {}))
         except Exception as exc:
             return jsonify({"ok": False, "message": str(exc), "status": runtime.status()}), 400
+
+    @app.post("/api/card-back/detect")
+    def api_card_back_detect():
+        try:
+            return jsonify(runtime.detect_card_back_from_camera())
+        except Exception as exc:
+            return jsonify({"found": False, "confidence": 0.0, "message": str(exc), "status": runtime.status()}), 400
 
     @app.get("/api/camera/frame.jpg")
     def camera_frame():

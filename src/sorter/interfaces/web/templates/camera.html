@@ -14,6 +14,7 @@
     <div class="camera-feed-layout">
       <div id="camera-crop-stage" class="camera-crop-stage">
         <img id="camera-live-feed" class="camera-feed large-camera-feed" src="/camera/stream" alt="Live camera feed">
+        <div id="camera-card-detection-overlay" class="card-back-detection-overlay" hidden></div>
         <div id="camera-crop-overlay" class="camera-crop-overlay" hidden>
           <span class="crop-rule rule-v first"></span>
           <span class="crop-rule rule-v second"></span>
@@ -26,6 +27,15 @@
         </div>
       </div>
       <aside class="crop-preview-panel">
+        <div class="panel-heading compact-heading">
+          <div>
+            <p class="eyebrow">Alignment</p>
+            <h2>Card back</h2>
+          </div>
+          <button id="camera-card-detect" type="button" class="secondary">Detect</button>
+        </div>
+        <p id="camera-card-detect-summary" class="muted">No card-back detection yet.</p>
+        <pre id="camera-card-detect-result" class="code-block compact-code-block">Waiting for detection.</pre>
         <div class="panel-heading compact-heading">
           <div>
             <p class="eyebrow">Crop</p>

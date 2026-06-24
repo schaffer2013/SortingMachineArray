@@ -4,12 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "card-sorter-testbed"
-version = "0.5.5"
+version = "0.6.0"
 description = "Hexagonal architecture card sorting machine test bed"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "flask>=3.0.0",
+  "opencv-python-headless>=4.8",
   "pillow>=10.0.0",
   "pygame>=2.5.0",
 ]
