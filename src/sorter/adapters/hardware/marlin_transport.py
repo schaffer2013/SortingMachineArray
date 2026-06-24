@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import threading
 from typing import Protocol
 
 
@@ -42,6 +43,7 @@ class MarlinSerialTransport:
     timeout_seconds: float = 2.0
     connection: SerialConnection | None = None
     command_log: list[str] = field(default_factory=list)
+    command_lock: threading.Lock = field(default_factory=threading.Lock)
 
     def open(self) -> SerialConnection:
         if self.connection is None:
@@ -59,14 +61,15 @@ class MarlinSerialTransport:
         if not clean_command:
             raise ValueError("Marlin command cannot be empty")
 
-        connection = self.open()
-        self.command_log.append(clean_command)
-        connection.write(f"{clean_command}\n".encode("ascii"))
-        connection.flush()
+        with self.command_lock:
+            connection = self.open()
+            self.command_log.append(clean_command)
+            connection.write(f"{clean_command}\n".encode("ascii"))
+            connection.flush()
 
-        if not wait_for_ok:
-            return []
-        return self._read_until_ok(connection, clean_command)
+            if not wait_for_ok:
+                return []
+            return self._read_until_ok(connection, clean_command)
 
     def close(self) -> None:
         if self.connection is None:

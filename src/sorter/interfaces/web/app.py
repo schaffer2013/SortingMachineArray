@@ -81,11 +81,14 @@ class SerialBoardSession:
         self,
         event_logger: Callable[[str, dict[str, Any] | None], None] | None = None,
         serial_log_path: Path | None = None,
+        shared_transport: MarlinSerialTransport | None = None,
     ):
         self.event_logger = event_logger
         self.serial_log_path = serial_log_path
+        self.shared_transport = shared_transport
         self.transport: MarlinSerialTransport | None = None
         self.lights: NeoPixelLightsAdapter | None = None
+        self.owns_transport = True
         self.port: str | None = None
         self.baud_rate = 115200
         self.last_error: str | None = None
@@ -177,29 +180,28 @@ class SerialBoardSession:
         self._record_event("serial.connect.start", {"port": port, "baud_rate": int(baud_rate)})
         try:
             with self.state_lock:
-                if self.transport is not None:
+                if self.transport is not None and self.owns_transport:
                     self.transport.close()
                 self.transport = None
                 self.lights = None
+                self.owns_transport = True
                 self.port = port
                 self.baud_rate = int(baud_rate)
                 self.connection_state = "connecting"
                 self.last_error = None
-            transport = MarlinSerialTransport(
-                serial_port=port,
-                baud_rate=int(baud_rate),
-                timeout_seconds=SERIAL_CONNECT_TIMEOUT_SECONDS,
-            )
+            transport, owns_transport = self._transport_for_port(port, int(baud_rate))
             try:
                 sent_at = _utc_now_iso()
                 response = transport.send_command("M115")
                 _set_transport_timeout(transport, SERIAL_COMMAND_TIMEOUT_SECONDS)
             except Exception as exc:
                 self._record_serial_command("M115", sent_at, [], ok=False, error=str(exc))
-                transport.close()
+                if owns_transport:
+                    transport.close()
                 with self.state_lock:
                     self.transport = None
                     self.lights = None
+                    self.owns_transport = True
                     self.last_error = str(exc)
                     self.last_response = []
                     self.connection_state = "error"
@@ -210,6 +212,7 @@ class SerialBoardSession:
                 raise
             with self.state_lock:
                 self.transport = transport
+                self.owns_transport = owns_transport
                 self.lights = NeoPixelLightsAdapter(transport=transport)
                 self.last_error = None
                 self.last_response = response
@@ -237,8 +240,10 @@ class SerialBoardSession:
         try:
             with self.state_lock:
                 transport = self.transport
+                owns_transport = self.owns_transport
                 self.transport = None
                 self.lights = None
+                self.owns_transport = True
                 self.connection_state = "disconnecting"
             if transport is None:
                 with self.state_lock:
@@ -248,7 +253,7 @@ class SerialBoardSession:
                     self.last_error = None
                 self._record_event("serial.disconnect.noop", {})
                 return {"ok": True, "message": "Already disconnected", **self.status()}
-            if transport is not None:
+            if transport is not None and owns_transport:
                 transport.close()
             with self.state_lock:
                 self.port = None
@@ -301,6 +306,7 @@ class SerialBoardSession:
                     self.transport.close()
                 self.transport = None
                 self.lights = None
+                self.owns_transport = True
             raise
         pose = _parse_m114(response)
         with self.state_lock:
@@ -380,6 +386,7 @@ class SerialBoardSession:
                     self.transport.close()
                 self.transport = None
                 self.lights = None
+                self.owns_transport = True
             raise
         finally:
             self.command_lock.release()
@@ -405,6 +412,7 @@ class SerialBoardSession:
                     self.transport.close()
                 self.transport = None
                 self.lights = None
+                self.owns_transport = True
             raise
         finally:
             self.command_lock.release()
@@ -468,6 +476,21 @@ class SerialBoardSession:
             self.event_logger(event, details or {})
         except Exception:
             pass
+
+    def _transport_for_port(self, port: str, baud_rate: int) -> tuple[MarlinSerialTransport, bool]:
+        shared = self.shared_transport
+        if shared is not None and str(getattr(shared, "serial_port", "")) == str(port):
+            shared.baud_rate = baud_rate
+            shared.timeout_seconds = SERIAL_CONNECT_TIMEOUT_SECONDS
+            return shared, False
+        return (
+            MarlinSerialTransport(
+                serial_port=port,
+                baud_rate=baud_rate,
+                timeout_seconds=SERIAL_CONNECT_TIMEOUT_SECONDS,
+            ),
+            True,
+        )
 
     def _append_persistent_serial_log(self, entry: dict[str, Any]) -> None:
         if self.serial_log_path is None:
@@ -639,9 +662,14 @@ class WebRuntime:
         self.debug_events_path = self.repo_root / "data" / "logs" / "debug_events.jsonl"
         self.serial_log_path = self.repo_root / "data" / "logs" / "serial_commands.jsonl"
         self.light_profiles = self._load_light_profiles()
-        self.serial_board = SerialBoardSession(event_logger=self.record_debug_event, serial_log_path=self.serial_log_path)
         self.runtime_mode = runtime_mode
         self.hardware_runtime = bool(getattr(orchestrator, "hardware_runtime", False))
+        self.shared_marlin_transport = self._shared_marlin_transport()
+        self.serial_board = SerialBoardSession(
+            event_logger=self.record_debug_event,
+            serial_log_path=self.serial_log_path,
+            shared_transport=self.shared_marlin_transport,
+        )
         self.lock = threading.RLock()
 
     def start_run(self) -> dict[str, Any]:
@@ -1005,9 +1033,11 @@ class WebRuntime:
             return
 
     def _hardware_control(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
+        serial_status = self.serial_board.status()
+        if self.hardware_runtime and serial_status["session_open"] and action in MOTION_CONTROL_ACTIONS:
+            return self._hardware_serial_control(action, payload)
         if self.hardware_runtime:
             return self._direct_hardware_control(action, payload)
-        serial_status = self.serial_board.status()
         if action in {"vacuum_on", "vacuum_off"}:
             raise ValueError("Vacuum hardware control is not wired yet; select Simulation runtime to use simulated vacuum")
         if not serial_status["connected"]:
@@ -1548,6 +1578,13 @@ class WebRuntime:
                 message=f"Live board moved interface Z by {dz_mm:.2f} to Z {target_z:.2f} / C {target_c:.2f}",
             )
         raise ValueError(f"Unsupported live serial control action: {action}")
+
+    def _shared_marlin_transport(self) -> MarlinSerialTransport | None:
+        motion = getattr(self.orchestrator, "motion", None)
+        transport = getattr(motion, "transport", None)
+        if isinstance(transport, MarlinSerialTransport):
+            return transport
+        return None
 
     def _optional_serial_live_axis_position(self, axis: str) -> float | None:
         live_pose = self.serial_board.status().get("live_pose", {})
