@@ -983,8 +983,13 @@ def test_calibration_can_be_updated_from_web_app(tmp_path):
     )
     status = client.get("/api/status").get_json()
     saved = CalibrationProfile.from_file(calibration_path)
+    payload = response.get_json()
 
     assert response.status_code == 200
+    assert payload["ok"] is True
+    assert "Calibration saved" in payload["message"]
+    assert payload["calibration"]["camera_offset_z_mm"] == 11.0
+    assert payload["saved_path"] == str(calibration_path)
     assert status["calibration"]["camera_offset_x_mm"] == 4.5
     assert status["calibration"]["camera_offset_y_mm"] == -2.0
     assert status["calibration"]["camera_offset_z_mm"] == 11.0
@@ -1002,6 +1007,15 @@ def test_calibration_can_be_updated_from_web_app(tmp_path):
     assert saved.c_home_mm == 41.5
     assert saved.probe_enabled is True
     assert saved.probe_place_clearance_mm == 0.75
+
+
+def test_machine_page_has_calibration_save_message_target():
+    client = _client()
+
+    response = client.get("/machine")
+
+    assert response.status_code == 200
+    assert b'id="calibration-message"' in response.data
 
 
 def test_web_xy_control_blocks_when_vacuum_z_is_too_low():
