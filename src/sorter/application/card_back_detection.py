@@ -9,6 +9,13 @@ from PIL import Image
 
 CARD_ASPECT_WIDTH_OVER_HEIGHT = 63.0 / 88.0
 
+CARD_BACK_FEATURE_WEIGHTS = {
+    "center_circles": 0.55,
+    "oval": 0.25,
+    "corner_orbs": 0.12,
+    "texture": 0.08,
+}
+
 
 @dataclass(frozen=True)
 class CardBackDetection:
@@ -199,19 +206,19 @@ def refine_card_back_corners_to_truth(
     source_rgb = np.array(image.convert("RGB"))
     truth_rgb = np.array(truth)
     initial_warp_rgb = _warp_card_back_rgb_array(source_rgb, ordered, output_size=score_size)
-    truth_circles = _detect_center_circles(truth_rgb)
-    initial_score, initial_circle_metrics = _circle_truth_score(initial_warp_rgb, truth_rgb, truth_circles)
+    truth_features = _extract_card_back_truth_features(truth_rgb)
+    initial_score, initial_feature_metrics = _card_back_feature_score(initial_warp_rgb, truth_rgb, truth_features)
     seed_corners, seed_metrics = _circle_seeded_corners(
         initial_warp_rgb,
         ordered,
-        truth_circles,
+        truth_features["center_circles"],
         score_size=score_size,
         max_corner_adjust_px=max_corner_adjust_px,
     )
-    seed_score, _ = _circle_truth_score(
+    seed_score, _ = _card_back_feature_score(
         _warp_card_back_rgb_array(source_rgb, seed_corners, output_size=score_size),
         truth_rgb,
-        truth_circles,
+        truth_features,
     )
     if seed_score < initial_score:
         seed_corners = ordered
@@ -220,14 +227,14 @@ def refine_card_back_corners_to_truth(
         source_rgb,
         seed_corners,
         truth_rgb,
-        truth_circles,
+        truth_features,
         score_size=score_size,
         initial_score=initial_score,
         max_corner_adjust_px=max_corner_adjust_px,
         original_corners=ordered,
     )
     best_warp_rgb = _warp_card_back_rgb_array(source_rgb, best_corners, output_size=score_size)
-    _, final_circle_metrics = _circle_truth_score(best_warp_rgb, truth_rgb, truth_circles)
+    _, final_feature_metrics = _card_back_feature_score(best_warp_rgb, truth_rgb, truth_features)
     ordered_best = _ordered_corners(best_corners)
     return (
         tuple((round(float(x), 2), round(float(y), 2)) for x, y in ordered_best),
@@ -238,12 +245,15 @@ def refine_card_back_corners_to_truth(
             "score_delta": round(best_score - initial_score, 5),
             "max_corner_adjust_px": round(_max_corner_delta(ordered, ordered_best), 2),
             "corner_regularization_penalty": round(_corner_regularization_penalty(ordered, ordered_best, max_corner_adjust_px), 5),
-            "method": "bounded_center_circle_search",
+            "method": "bounded_card_back_feature_search",
             "output_size": [output_size[0], output_size[1]],
             "score_size": [score_size[0], score_size[1]],
+            "feature_weights": CARD_BACK_FEATURE_WEIGHTS,
             "circle_seed": seed_metrics,
-            "initial_circle_fit": initial_circle_metrics,
-            "final_circle_fit": final_circle_metrics,
+            "initial_feature_fit": initial_feature_metrics,
+            "final_feature_fit": final_feature_metrics,
+            "initial_circle_fit": initial_feature_metrics["center_circles"],
+            "final_circle_fit": final_feature_metrics["center_circles"],
         },
     )
 
@@ -252,7 +262,7 @@ def _coordinate_descent_corners(
     source_rgb: Any,
     corners: tuple[tuple[float, float], ...],
     truth_rgb: Any,
-    truth_circles: tuple[tuple[float, float, float], ...],
+    truth_features: dict[str, Any],
     *,
     score_size: tuple[int, int],
     initial_score: float,
@@ -284,10 +294,10 @@ def _coordinate_descent_corners(
                     candidate_tuple = tuple((float(x), float(y)) for x, y in candidate)
                     if _max_corner_delta(original, candidate_tuple) > max_corner_adjust_px:
                         continue
-                    raw_score, _ = _circle_truth_score(
+                    raw_score, _ = _card_back_feature_score(
                         _warp_card_back_rgb_array(source_rgb, candidate_tuple, output_size=score_size),
                         truth_rgb,
-                        truth_circles,
+                        truth_features,
                     )
                     score = raw_score - _corner_regularization_penalty(original, candidate_tuple, max_corner_adjust_px)
                     if score > best_score + 0.0005:
@@ -379,21 +389,48 @@ def _warp_card_back_rgb_array(
     return cv2.warpPerspective(source_rgb, matrix, (width, height))
 
 
-def _circle_truth_score(
+def _extract_card_back_truth_features(truth_rgb: Any) -> dict[str, Any]:
+    return {
+        "center_circles": _detect_center_circles(truth_rgb),
+        "oval_mask": _purple_oval_mask(truth_rgb),
+        "corner_orbs": _detect_corner_orbs(truth_rgb),
+    }
+
+
+def _card_back_feature_score(
     candidate_rgb: Any,
     truth_rgb: Any,
-    truth_circles: tuple[tuple[float, float, float], ...],
+    truth_features: dict[str, Any],
 ) -> tuple[float, dict[str, Any]]:
-    candidate_circles = _detect_center_circles(candidate_rgb)
-    circle_score, mean_error = _circle_center_score(candidate_circles, truth_circles)
+    center_metrics = _center_circle_fit(candidate_rgb, truth_features["center_circles"])
+    oval_metrics = _oval_fit(candidate_rgb, truth_features["oval_mask"])
+    corner_metrics = _corner_orb_fit(candidate_rgb, truth_features["corner_orbs"])
     texture_score = _texture_similarity_score(candidate_rgb, truth_rgb)
-    score = circle_score * 0.88 + texture_score * 0.12
+    score = (
+        center_metrics["score"] * CARD_BACK_FEATURE_WEIGHTS["center_circles"]
+        + oval_metrics["score"] * CARD_BACK_FEATURE_WEIGHTS["oval"]
+        + corner_metrics["score"] * CARD_BACK_FEATURE_WEIGHTS["corner_orbs"]
+        + texture_score * CARD_BACK_FEATURE_WEIGHTS["texture"]
+    )
     return score, {
+        "center_circles": center_metrics,
+        "oval": oval_metrics,
+        "corner_orbs": corner_metrics,
+        "texture_score": round(texture_score, 5),
+    }
+
+
+def _center_circle_fit(
+    candidate_rgb: Any,
+    truth_circles: tuple[tuple[float, float, float], ...],
+) -> dict[str, Any]:
+    candidate_circles = _detect_center_circles(candidate_rgb)
+    score, mean_error = _circle_center_score(candidate_circles, truth_circles)
+    return {
         "truth_circle_count": len(truth_circles),
         "detected_circle_count": len(candidate_circles),
         "mean_center_error_px": None if mean_error is None else round(mean_error, 2),
-        "circle_score": round(circle_score, 5),
-        "texture_score": round(texture_score, 5),
+        "score": round(score, 5),
         "truth_centers_px": [[round(x, 2), round(y, 2)] for x, y, _ in truth_circles],
         "detected_centers_px": [[round(x, 2), round(y, 2)] for x, y, _ in candidate_circles],
     }
@@ -436,6 +473,138 @@ def _detect_center_circles(rgb: Any) -> tuple[tuple[float, float, float], ...]:
     return tuple(sorted(selected, key=lambda circle: (circle[1], circle[0])))
 
 
+def _purple_oval_mask(rgb: Any) -> Any:
+    import cv2
+    import numpy as np
+
+    height, width = rgb.shape[:2]
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    hue, saturation, value = cv2.split(hsv)
+    mask = (
+        (hue >= 92)
+        & (hue <= 145)
+        & (saturation >= 35)
+        & (value >= 45)
+    )
+    region = np.zeros((height, width), dtype=bool)
+    region[int(height * 0.08) : int(height * 0.88), int(width * 0.08) : int(width * 0.92)] = True
+    # Exclude the blue logo and the lower nameplate so the broad oval boundary dominates.
+    region[int(height * 0.16) : int(height * 0.36), :] = False
+    region[int(height * 0.78) :, :] = False
+    mask = (mask & region).astype("uint8") * 255
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    return cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+
+
+def _oval_fit(candidate_rgb: Any, truth_mask: Any) -> dict[str, Any]:
+    import cv2
+    import numpy as np
+
+    candidate_mask = _purple_oval_mask(candidate_rgb)
+    truth_bool = truth_mask > 0
+    candidate_bool = candidate_mask > 0
+    union = int(np.count_nonzero(truth_bool | candidate_bool))
+    intersection = int(np.count_nonzero(truth_bool & candidate_bool))
+    if union <= 0:
+        score = 0.0
+    else:
+        iou = intersection / float(union)
+        truth_edges = cv2.Canny(truth_mask, 50, 120)
+        candidate_edges = cv2.Canny(candidate_mask, 50, 120)
+        edge_error = float(np.mean(cv2.absdiff(candidate_edges, truth_edges))) / 255.0
+        score = max(0.0, min(1.0, iou * 0.7 + (1.0 - edge_error) * 0.3))
+    return {
+        "score": round(score, 5),
+        "truth_pixel_count": int(np.count_nonzero(truth_bool)),
+        "detected_pixel_count": int(np.count_nonzero(candidate_bool)),
+        "intersection_pixel_count": intersection,
+    }
+
+
+def _detect_corner_orbs(rgb: Any) -> tuple[tuple[float, float, float], ...]:
+    import cv2
+    import numpy as np
+
+    height, width = rgb.shape[:2]
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    zones = [
+        (0.0, 0.0, 0.22, 0.18, 0.12, 0.065),
+        (0.78, 0.0, 1.0, 0.18, 0.88, 0.065),
+        (0.0, 0.78, 0.22, 1.0, 0.12, 0.915),
+        (0.78, 0.78, 1.0, 1.0, 0.88, 0.915),
+    ]
+    orbs: list[tuple[float, float, float]] = []
+    for min_x, min_y, max_x, max_y, expected_x, expected_y in zones:
+        x0 = int(width * min_x)
+        y0 = int(height * min_y)
+        x1 = int(width * max_x)
+        y1 = int(height * max_y)
+        crop = cv2.GaussianBlur(gray[y0:y1, x0:x1], (7, 7), 1.4)
+        circles = cv2.HoughCircles(
+            crop,
+            cv2.HOUGH_GRADIENT,
+            dp=1.2,
+            minDist=max(12, int(width * 0.08)),
+            param1=70,
+            param2=8,
+            minRadius=max(3, int(width * 0.012)),
+            maxRadius=max(8, int(width * 0.045)),
+        )
+        if circles is None:
+            continue
+        expected = np.array([width * expected_x, height * expected_y])
+        candidates: list[tuple[float, float, float, float]] = []
+        for local_x, local_y, radius in circles[0]:
+            x = float(local_x + x0)
+            y = float(local_y + y0)
+            color_score = _warm_circle_fraction(hsv, x, y, float(radius))
+            if color_score < 0.12:
+                continue
+            distance_score = float(np.linalg.norm(np.array([x, y]) - expected))
+            candidates.append((distance_score - color_score * 18.0, x, y, float(radius)))
+        if candidates:
+            _, x, y, radius = min(candidates, key=lambda item: item[0])
+            orbs.append((x, y, radius))
+    return tuple(orbs)
+
+
+def _warm_circle_fraction(hsv: Any, center_x: float, center_y: float, radius: float) -> float:
+    import cv2
+    import numpy as np
+
+    height, width = hsv.shape[:2]
+    mask = np.zeros((height, width), dtype="uint8")
+    cv2.circle(mask, (int(round(center_x)), int(round(center_y))), max(2, int(round(radius))), 255, -1)
+    hue, saturation, value = cv2.split(hsv)
+    warm = (
+        (mask > 0)
+        & (saturation >= 55)
+        & (value >= 45)
+        & (((hue <= 35) | (hue >= 165)))
+    )
+    area = max(1, int(np.count_nonzero(mask)))
+    return float(np.count_nonzero(warm)) / float(area)
+
+
+def _corner_orb_fit(
+    candidate_rgb: Any,
+    truth_orbs: tuple[tuple[float, float, float], ...],
+) -> dict[str, Any]:
+    candidate_orbs = _detect_corner_orbs(candidate_rgb)
+    score, mean_error = _optional_circle_score(candidate_orbs, truth_orbs, max_error_px=28.0)
+    visibility = 1.0 if len(candidate_orbs) >= 3 else max(0.35, len(candidate_orbs) / 4.0)
+    score *= visibility
+    return {
+        "truth_orb_count": len(truth_orbs),
+        "detected_orb_count": len(candidate_orbs),
+        "mean_center_error_px": None if mean_error is None else round(mean_error, 2),
+        "score": round(score, 5),
+        "truth_centers_px": [[round(x, 2), round(y, 2)] for x, y, _ in truth_orbs],
+        "detected_centers_px": [[round(x, 2), round(y, 2)] for x, y, _ in candidate_orbs],
+    }
+
+
 def _circle_center_score(
     candidate_circles: tuple[tuple[float, float, float], ...],
     truth_circles: tuple[tuple[float, float, float], ...],
@@ -444,6 +613,18 @@ def _circle_center_score(
     if best_error is None:
         return 0.0, None
     return max(0.0, 1.0 - best_error / 35.0), best_error
+
+
+def _optional_circle_score(
+    candidate_circles: tuple[tuple[float, float, float], ...],
+    truth_circles: tuple[tuple[float, float, float], ...],
+    *,
+    max_error_px: float,
+) -> tuple[float, float | None]:
+    candidate_points, _, mean_error = _best_partial_circle_center_match(candidate_circles, truth_circles)
+    if mean_error is None or candidate_points is None:
+        return 0.0, None
+    return max(0.0, 1.0 - mean_error / max_error_px), mean_error
 
 
 def _best_circle_center_match(
@@ -466,6 +647,33 @@ def _best_circle_center_match(
     assert best_error is not None
     assert best_permutation is not None
     return list(best_permutation), truth_centers, best_error
+
+
+def _best_partial_circle_center_match(
+    candidate_circles: tuple[tuple[float, float, float], ...],
+    truth_circles: tuple[tuple[float, float, float], ...],
+) -> tuple[list[tuple[float, float]] | None, list[tuple[float, float]] | None, float | None]:
+    import itertools
+
+    if not candidate_circles or not truth_circles:
+        return None, None, None
+    candidate_centers = [(x, y) for x, y, _ in candidate_circles]
+    truth_centers = [(x, y) for x, y, _ in truth_circles]
+    match_count = min(len(candidate_centers), len(truth_centers))
+    best_error: float | None = None
+    best_candidate: tuple[tuple[float, float], ...] | None = None
+    best_truth: tuple[tuple[float, float], ...] | None = None
+    for candidate_subset in itertools.permutations(candidate_centers, match_count):
+        for truth_subset in itertools.permutations(truth_centers, match_count):
+            error = sum(_distance(candidate, truth) for candidate, truth in zip(candidate_subset, truth_subset)) / match_count
+            if best_error is None or error < best_error:
+                best_error = error
+                best_candidate = candidate_subset
+                best_truth = truth_subset
+    if best_error is None or best_candidate is None or best_truth is None:
+        return None, None, None
+    return list(best_candidate), list(best_truth), best_error
+
 
 
 def _corner_regularization_penalty(

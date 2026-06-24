@@ -320,11 +320,13 @@ def test_card_back_corner_refinement_improves_truth_alignment():
     refined_corners, metrics = refine_card_back_corners_to_truth(camera_image, loose_corners, truth)
 
     assert metrics["applied"] is True
-    assert metrics["method"] == "bounded_center_circle_search"
+    assert metrics["method"] == "bounded_card_back_feature_search"
     assert metrics["refined_score"] > metrics["initial_score"]
     assert metrics["final_circle_fit"]["truth_circle_count"] == 5
     assert metrics["final_circle_fit"]["detected_circle_count"] == 5
     assert metrics["final_circle_fit"]["mean_center_error_px"] < metrics["initial_circle_fit"]["mean_center_error_px"]
+    assert metrics["final_feature_fit"]["oval"]["score"] > 0
+    assert metrics["final_feature_fit"]["corner_orbs"]["truth_orb_count"] == 4
     assert metrics["max_corner_adjust_px"] > 0
     for refined, actual in zip(refined_corners, actual_corners):
         assert abs(refined[0] - actual[0]) < 30
@@ -360,7 +362,7 @@ def test_card_back_detect_endpoint_uses_camera_without_motion(tmp_path):
     assert payload["warped_image_data_url"].startswith("data:image/jpeg;base64,")
     assert payload["warped_image_size"] == [630, 880]
     assert payload["initial_corners_px"]
-    assert payload["corner_refinement"]["method"] == "bounded_center_circle_search"
+    assert payload["corner_refinement"]["method"] == "bounded_card_back_feature_search"
     assert transport.command_log == []
     assert runtime.last_card_back_detection["found"] is True
     assert "warped_image_data_url" not in runtime.last_card_back_detection
