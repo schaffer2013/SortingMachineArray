@@ -10,9 +10,9 @@ from PIL import Image
 CARD_ASPECT_WIDTH_OVER_HEIGHT = 63.0 / 88.0
 
 CARD_BACK_FEATURE_WEIGHTS = {
-    "center_circles": 0.55,
-    "oval": 0.25,
-    "corner_orbs": 0.12,
+    "center_circles": 0.38,
+    "oval": 0.19,
+    "corner_orbs": 0.35,
     "texture": 0.08,
 }
 
@@ -215,21 +215,37 @@ def refine_card_back_corners_to_truth(
         score_size=score_size,
         max_corner_adjust_px=max_corner_adjust_px,
     )
+    outer_seed_corners, outer_seed_metrics = _corner_orb_seeded_corners(
+        initial_warp_rgb,
+        seed_corners,
+        truth_features["corner_orbs_by_zone"],
+        score_size=score_size,
+        max_corner_adjust_px=max_corner_adjust_px,
+    )
     seed_score, _ = _card_back_feature_score(
         _warp_card_back_rgb_array(source_rgb, seed_corners, output_size=score_size),
         truth_rgb,
         truth_features,
     )
+    outer_seed_score, _ = _card_back_feature_score(
+        _warp_card_back_rgb_array(source_rgb, outer_seed_corners, output_size=score_size),
+        truth_rgb,
+        truth_features,
+    )
+    if outer_seed_score >= seed_score:
+        seed_corners = outer_seed_corners
+        seed_score = outer_seed_score
     if seed_score < initial_score:
         seed_corners = ordered
         seed_metrics = {"applied": False, "reason": "circle_seed_did_not_improve"}
+        outer_seed_metrics = {"applied": False, "reason": "outer_seed_not_evaluated"}
     best_corners, best_score = _coordinate_descent_corners(
         source_rgb,
         seed_corners,
         truth_rgb,
         truth_features,
         score_size=score_size,
-        initial_score=initial_score,
+        initial_score=seed_score,
         max_corner_adjust_px=max_corner_adjust_px,
         original_corners=ordered,
     )
@@ -250,6 +266,7 @@ def refine_card_back_corners_to_truth(
             "score_size": [score_size[0], score_size[1]],
             "feature_weights": CARD_BACK_FEATURE_WEIGHTS,
             "circle_seed": seed_metrics,
+            "corner_orb_seed": outer_seed_metrics,
             "initial_feature_fit": initial_feature_metrics,
             "final_feature_fit": final_feature_metrics,
             "initial_circle_fit": initial_feature_metrics["center_circles"],
@@ -364,6 +381,82 @@ def _circle_seeded_corners(
     }
 
 
+def _corner_orb_seeded_corners(
+    initial_warp_rgb: Any,
+    corners: tuple[tuple[float, float], ...],
+    truth_orbs_by_zone: tuple[tuple[float, float, float] | None, ...],
+    *,
+    score_size: tuple[int, int],
+    max_corner_adjust_px: float,
+) -> tuple[tuple[tuple[float, float], ...], dict[str, Any]]:
+    import cv2
+    import numpy as np
+
+    candidate_orbs_by_zone = _detect_corner_orbs_by_zone(initial_warp_rgb)
+    candidate_points: list[tuple[float, float]] = []
+    truth_points: list[tuple[float, float]] = []
+    errors: list[float] = []
+    for candidate, truth in zip(candidate_orbs_by_zone, truth_orbs_by_zone):
+        if candidate is None or truth is None:
+            continue
+        candidate_point = (candidate[0], candidate[1])
+        truth_point = (truth[0], truth[1])
+        candidate_points.append(candidate_point)
+        truth_points.append(truth_point)
+        errors.append(_distance(candidate_point, truth_point))
+    if len(candidate_points) < 3:
+        return tuple((float(x), float(y)) for x, y in corners), {
+            "applied": False,
+            "reason": "not_enough_corner_orbs",
+            "matched_orb_count": len(candidate_points),
+        }
+
+    affine, inlier_mask = cv2.estimateAffinePartial2D(
+        np.array(candidate_points, dtype="float32").reshape(-1, 1, 2),
+        np.array(truth_points, dtype="float32").reshape(-1, 1, 2),
+        method=cv2.LMEDS,
+    )
+    if affine is None:
+        return corners, {
+            "applied": False,
+            "reason": "corner_orb_affine_failed",
+            "matched_orb_count": len(candidate_points),
+        }
+    alignment = np.vstack([affine, [0.0, 0.0, 1.0]])
+
+    width, height = score_size
+    source = np.array(_ordered_corners(corners), dtype="float32")
+    destination = np.array(
+        [
+            [0.0, 0.0],
+            [float(width - 1), 0.0],
+            [float(width - 1), float(height - 1)],
+            [0.0, float(height - 1)],
+        ],
+        dtype="float32",
+    )
+    initial_matrix = cv2.getPerspectiveTransform(source, destination)
+    refined_matrix = alignment @ initial_matrix
+    refined = cv2.perspectiveTransform(destination.reshape(-1, 1, 2), np.linalg.inv(refined_matrix)).reshape(4, 2)
+    refined_corners = _ordered_corners(tuple((float(x), float(y)) for x, y in refined))
+    max_delta = _max_corner_delta(corners, refined_corners)
+    if max_delta > max_corner_adjust_px:
+        return corners, {
+            "applied": False,
+            "reason": "corner_orb_adjustment_exceeded_limit",
+            "matched_orb_count": len(candidate_points),
+            "mean_center_error_px": round(sum(errors) / len(errors), 2),
+            "max_corner_adjust_px": round(max_delta, 2),
+        }
+    return refined_corners, {
+        "applied": True,
+        "matched_orb_count": len(candidate_points),
+        "mean_center_error_px": round(sum(errors) / len(errors), 2),
+        "max_corner_adjust_px": round(max_delta, 2),
+        "inliers": None if inlier_mask is None else int(inlier_mask.sum()),
+    }
+
+
 def _warp_card_back_rgb_array(
     source_rgb: Any,
     corners: tuple[tuple[float, float], ...],
@@ -390,10 +483,12 @@ def _warp_card_back_rgb_array(
 
 
 def _extract_card_back_truth_features(truth_rgb: Any) -> dict[str, Any]:
+    corner_orbs_by_zone = _detect_corner_orbs_by_zone(truth_rgb)
     return {
         "center_circles": _detect_center_circles(truth_rgb),
         "oval_mask": _purple_oval_mask(truth_rgb),
-        "corner_orbs": _detect_corner_orbs(truth_rgb),
+        "corner_orbs": tuple(orb for orb in corner_orbs_by_zone if orb is not None),
+        "corner_orbs_by_zone": corner_orbs_by_zone,
     }
 
 
@@ -404,7 +499,7 @@ def _card_back_feature_score(
 ) -> tuple[float, dict[str, Any]]:
     center_metrics = _center_circle_fit(candidate_rgb, truth_features["center_circles"])
     oval_metrics = _oval_fit(candidate_rgb, truth_features["oval_mask"])
-    corner_metrics = _corner_orb_fit(candidate_rgb, truth_features["corner_orbs"])
+    corner_metrics = _corner_orb_fit(candidate_rgb, truth_features["corner_orbs_by_zone"])
     texture_score = _texture_similarity_score(candidate_rgb, truth_rgb)
     score = (
         center_metrics["score"] * CARD_BACK_FEATURE_WEIGHTS["center_circles"]
@@ -521,7 +616,7 @@ def _oval_fit(candidate_rgb: Any, truth_mask: Any) -> dict[str, Any]:
     }
 
 
-def _detect_corner_orbs(rgb: Any) -> tuple[tuple[float, float, float], ...]:
+def _detect_corner_orbs_by_zone(rgb: Any) -> tuple[tuple[float, float, float] | None, ...]:
     import cv2
     import numpy as np
 
@@ -534,7 +629,7 @@ def _detect_corner_orbs(rgb: Any) -> tuple[tuple[float, float, float], ...]:
         (0.0, 0.78, 0.22, 1.0, 0.12, 0.915),
         (0.78, 0.78, 1.0, 1.0, 0.88, 0.915),
     ]
-    orbs: list[tuple[float, float, float]] = []
+    orbs: list[tuple[float, float, float] | None] = []
     for min_x, min_y, max_x, max_y, expected_x, expected_y in zones:
         x0 = int(width * min_x)
         y0 = int(height * min_y)
@@ -566,7 +661,13 @@ def _detect_corner_orbs(rgb: Any) -> tuple[tuple[float, float, float], ...]:
         if candidates:
             _, x, y, radius = min(candidates, key=lambda item: item[0])
             orbs.append((x, y, radius))
+        else:
+            orbs.append(None)
     return tuple(orbs)
+
+
+def _detect_corner_orbs(rgb: Any) -> tuple[tuple[float, float, float], ...]:
+    return tuple(orb for orb in _detect_corner_orbs_by_zone(rgb) if orb is not None)
 
 
 def _warm_circle_fraction(hsv: Any, center_x: float, center_y: float, radius: float) -> float:
@@ -589,10 +690,12 @@ def _warm_circle_fraction(hsv: Any, center_x: float, center_y: float, radius: fl
 
 def _corner_orb_fit(
     candidate_rgb: Any,
-    truth_orbs: tuple[tuple[float, float, float], ...],
+    truth_orbs_by_zone: tuple[tuple[float, float, float] | None, ...],
 ) -> dict[str, Any]:
-    candidate_orbs = _detect_corner_orbs(candidate_rgb)
-    score, mean_error = _optional_circle_score(candidate_orbs, truth_orbs, max_error_px=28.0)
+    candidate_orbs_by_zone = _detect_corner_orbs_by_zone(candidate_rgb)
+    candidate_orbs = tuple(orb for orb in candidate_orbs_by_zone if orb is not None)
+    truth_orbs = tuple(orb for orb in truth_orbs_by_zone if orb is not None)
+    score, mean_error = _zone_matched_circle_score(candidate_orbs_by_zone, truth_orbs_by_zone, max_error_px=28.0)
     visibility = 1.0 if len(candidate_orbs) >= 3 else max(0.35, len(candidate_orbs) / 4.0)
     score *= visibility
     return {
@@ -624,6 +727,23 @@ def _optional_circle_score(
     candidate_points, _, mean_error = _best_partial_circle_center_match(candidate_circles, truth_circles)
     if mean_error is None or candidate_points is None:
         return 0.0, None
+    return max(0.0, 1.0 - mean_error / max_error_px), mean_error
+
+
+def _zone_matched_circle_score(
+    candidate_by_zone: tuple[tuple[float, float, float] | None, ...],
+    truth_by_zone: tuple[tuple[float, float, float] | None, ...],
+    *,
+    max_error_px: float,
+) -> tuple[float, float | None]:
+    errors = [
+        _distance((candidate[0], candidate[1]), (truth[0], truth[1]))
+        for candidate, truth in zip(candidate_by_zone, truth_by_zone)
+        if candidate is not None and truth is not None
+    ]
+    if not errors:
+        return 0.0, None
+    mean_error = sum(errors) / len(errors)
     return max(0.0, 1.0 - mean_error / max_error_px), mean_error
 
 

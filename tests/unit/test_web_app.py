@@ -327,6 +327,7 @@ def test_card_back_corner_refinement_improves_truth_alignment():
     assert metrics["final_circle_fit"]["mean_center_error_px"] < metrics["initial_circle_fit"]["mean_center_error_px"]
     assert metrics["final_feature_fit"]["oval"]["score"] > 0
     assert metrics["final_feature_fit"]["corner_orbs"]["truth_orb_count"] == 4
+    assert metrics["corner_orb_seed"]["matched_orb_count"] >= 3
     assert metrics["max_corner_adjust_px"] > 0
     for refined, actual in zip(refined_corners, actual_corners):
         assert abs(refined[0] - actual[0]) < 30
