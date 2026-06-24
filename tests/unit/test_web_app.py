@@ -171,6 +171,8 @@ def test_card_back_training_capture_confirms_generated_camera_z_move(tmp_path):
     runtime = app.config["runtime"]
     runtime.serial_board = FakeSerialBoard()
     runtime.serial_board.connect("COM8", 115200)
+    runtime.serial_board.live_pose["x"] = 79.502
+    runtime.serial_board.live_pose["y"] = 69.503
     runtime.serial_board.live_pose["z"] = 150.0
     client = app.test_client()
 
@@ -187,7 +189,8 @@ def test_card_back_training_capture_confirms_generated_camera_z_move(tmp_path):
     )
 
     assert response.status_code == 200
-    assert "G1 X79.502 Y69.503 Z144.510 F6000" in runtime.serial_board.sent_commands
+    assert "G1 X79.502 Y69.503 Z144.510 F3000" in runtime.serial_board.sent_commands
+    assert "G1 X79.502 Y69.503 Z144.510 F6000" not in runtime.serial_board.sent_commands
     assert runtime.serial_board.live_pose["z"] == 144.51
 
 
@@ -846,6 +849,26 @@ def test_serial_session_marks_marlin_kill_as_controller_fault():
     assert log["error"] == "Marlin rejected 'G28 Y': Error:Printer halted. kill() called!"
 
 
+def test_serial_session_marks_marlin_stopped_response_as_controller_fault():
+    session = web_app_module.SerialBoardSession()
+    session.transport = StoppedResponseTransport()
+    session.port = "COM8"
+    session.connection_state = "verified"
+    session.last_success_monotonic = web_app_module.time.monotonic()
+
+    with pytest.raises(RuntimeError, match="Printer stopped"):
+        session.send_command("G1 Z161.490 F300")
+
+    status = session.status()
+    log = status["serial_command_log"][-1]
+    assert status["controller_fault"] is True
+    assert status["connection_state"] == "faulted"
+    assert status["session_open"] is True
+    assert log["ok"] is False
+    assert log["command"] == "G1 Z161.490 F300"
+    assert log["error"] == "Printer stopped due to errors. Fix the error and use M999 to restart."
+
+
 def test_serial_session_keeps_last_500_lines_per_log():
     session = web_app_module.SerialBoardSession()
     session.transport = RecordingTransport()
@@ -1119,13 +1142,16 @@ def test_live_serial_move_vacuum_xy_includes_requested_vacuum_z():
     runtime = app.config["runtime"]
     runtime.serial_board = FakeSerialBoard()
     runtime.serial_board.connect("COM8", 115200)
+    runtime.serial_board.live_pose["x"] = 100.0
+    runtime.serial_board.live_pose["y"] = 50.0
     runtime.serial_board.live_pose["z"] = 10.0
     client = app.test_client()
 
     response = client.post("/api/control/move_xy", json={"x_mm": 100.0, "y_mm": 50.0, "z_mm": 12.0})
 
     assert response.status_code == 200
-    assert "G1 X100.000 Y50.000 Z12.000 F6000" in runtime.serial_board.sent_commands
+    assert "G1 X100.000 Y50.000 Z12.000 F3000" in runtime.serial_board.sent_commands
+    assert "G1 X100.000 Y50.000 Z12.000 F6000" not in runtime.serial_board.sent_commands
     assert runtime.serial_board.live_pose["z"] == 12.0
 
 
@@ -1142,7 +1168,7 @@ def test_live_serial_move_camera_xy_includes_camera_space_z_offset():
     runtime = app.config["runtime"]
     runtime.serial_board = FakeSerialBoard()
     runtime.serial_board.connect("COM8", 115200)
-    runtime.serial_board.live_pose["z"] = 7.0
+    runtime.serial_board.live_pose.update({"x": 90.0, "y": 35.0, "z": 5.0})
     client = app.test_client()
 
     response = client.post(
@@ -1151,8 +1177,23 @@ def test_live_serial_move_camera_xy_includes_camera_space_z_offset():
     )
 
     assert response.status_code == 200
-    assert "G1 X90.000 Y35.000 Z7.000 F6000" in runtime.serial_board.sent_commands
+    assert "G1 X90.000 Y35.000 Z7.000 F3000" in runtime.serial_board.sent_commands
+    assert "G1 X90.000 Y35.000 Z7.000 F6000" not in runtime.serial_board.sent_commands
     assert runtime.serial_board.live_pose["z"] == 7.0
+
+
+def test_live_serial_xyz_feedrate_caps_z_component_with_tunable_limit():
+    feedrate = web_app_module._live_xyz_feedrate_mm_per_min(
+        current_x_mm=0.0,
+        current_y_mm=0.0,
+        current_z_mm=0.0,
+        target_x_mm=3.0,
+        target_y_mm=4.0,
+        target_z_mm=5.0,
+    )
+
+    assert web_app_module.MAX_SERIAL_COMBINED_Z_SPEED_MM_PER_S == 50.0
+    assert feedrate == pytest.approx((50.0 * 60.0) * ((3.0**2 + 4.0**2 + 5.0**2) ** 0.5) / 5.0)
 
 
 def test_live_serial_z_jog_uses_absolute_target_not_relative_mode():
@@ -2037,6 +2078,21 @@ class FaultingTransport:
         error = RuntimeError(f"Marlin rejected {command!r}: Error:Printer halted. kill() called!")
         error.responses = ["Error:Printer halted. kill() called!"]
         raise error
+
+    def close(self):
+        self.closed = True
+
+
+class StoppedResponseTransport:
+    def __init__(self):
+        self.closed = False
+
+    def send_command(self, command, *, wait_for_ok=True):
+        return [
+            "Printer stopped due to errors. Fix the error and use M999 to restart.",
+            "//action:notification STOPPED.",
+            "ok",
+        ]
 
     def close(self):
         self.closed = True

@@ -8,6 +8,7 @@ from io import BytesIO
 from pathlib import Path
 import base64
 import json
+import math
 import os
 import random
 import re
@@ -67,6 +68,8 @@ MAX_SERIAL_Z_JOG_MM = 5.0
 MAX_SERIAL_C_JOG_MM = 5.0
 MAX_SERIAL_ABSOLUTE_Z_MOVE_MM = 5.0
 MAX_SERIAL_ABSOLUTE_C_MOVE_MM = 5.0
+MAX_SERIAL_XY_FEEDRATE_MM_PER_MIN = 6000.0
+MAX_SERIAL_COMBINED_Z_SPEED_MM_PER_S = 50.0
 SERIAL_CONNECT_TIMEOUT_SECONDS = 3.0
 SERIAL_COMMAND_TIMEOUT_SECONDS = 10.0
 
@@ -322,6 +325,15 @@ class SerialBoardSession:
                 self.owns_transport = True
             raise
         pose = _parse_m114(response)
+        fault_response = next((line for line in response if _is_controller_fault(line)), None)
+        if fault_response is not None:
+            with self.state_lock:
+                self.last_error = fault_response
+                self.last_response = response
+                self._record_serial_command(clean_command, sent_at, response, ok=False, error=fault_response, log_kind=log_kind)
+                self.controller_fault = True
+                self.connection_state = "faulted"
+            raise RuntimeError(fault_response)
         with self.state_lock:
             self.last_error = None
             self.last_response = response
@@ -612,7 +624,15 @@ def _trim_debug_payload(payload: dict[str, Any], *, max_value_length: int = 500)
 
 def _is_controller_fault(message: str) -> bool:
     normalized = message.lower()
-    return "printer halted" in normalized or "kill() called" in normalized
+    return any(
+        marker in normalized
+        for marker in (
+            "printer halted",
+            "printer stopped",
+            "kill() called",
+            "//action:notification stopped",
+        )
+    )
 
 
 def _parse_m119(lines: list[str]) -> dict[str, str]:
@@ -1701,15 +1721,26 @@ class WebRuntime:
                 x_mm, y_mm = self.calibration.camera_baseline_xy_for_vacuum_target(x_mm, y_mm)
             command = f"G1 X{_format_mm(x_mm)} Y{_format_mm(y_mm)}"
             if z_mm is not None:
+                current_z = self._optional_serial_live_axis_position("z")
                 self._reject_large_absolute_move(
                     axis="Z",
                     target_mm=z_mm,
-                    current_mm=self._optional_serial_live_axis_position("z"),
+                    current_mm=current_z,
                     limit_mm=MAX_SERIAL_ABSOLUTE_Z_MOVE_MM,
                     confirmed=bool(payload.get("confirm_large_move")),
                 )
+                feedrate_mm_per_min = _live_xyz_feedrate_mm_per_min(
+                    current_x_mm=self._optional_serial_live_axis_position("x"),
+                    current_y_mm=self._optional_serial_live_axis_position("y"),
+                    current_z_mm=current_z,
+                    target_x_mm=x_mm,
+                    target_y_mm=y_mm,
+                    target_z_mm=z_mm,
+                )
                 command += f" Z{_format_mm(z_mm)}"
-            command += " F6000"
+            else:
+                feedrate_mm_per_min = MAX_SERIAL_XY_FEEDRATE_MM_PER_MIN
+            command += f" F{_format_feedrate(feedrate_mm_per_min)}"
             return self.serial_board.send_commands(
                 ["G90", command, "M400", "M114"],
                 message=(
@@ -3074,6 +3105,34 @@ def _crop_image(image: Image.Image, crop: dict[str, float] | None) -> Image.Imag
 
 def _format_mm(value: float) -> str:
     return f"{float(value):.3f}"
+
+
+def _format_feedrate(value: float) -> str:
+    return f"{float(value):.0f}"
+
+
+def _live_xyz_feedrate_mm_per_min(
+    *,
+    current_x_mm: float | None,
+    current_y_mm: float | None,
+    current_z_mm: float | None,
+    target_x_mm: float,
+    target_y_mm: float,
+    target_z_mm: float,
+) -> float:
+    max_z_feedrate_mm_per_min = MAX_SERIAL_COMBINED_Z_SPEED_MM_PER_S * 60.0
+    if current_z_mm is None:
+        return min(MAX_SERIAL_XY_FEEDRATE_MM_PER_MIN, max_z_feedrate_mm_per_min)
+    dz_mm = abs(float(target_z_mm) - float(current_z_mm))
+    if dz_mm <= 0:
+        return MAX_SERIAL_XY_FEEDRATE_MM_PER_MIN
+    if current_x_mm is None or current_y_mm is None:
+        return min(MAX_SERIAL_XY_FEEDRATE_MM_PER_MIN, max_z_feedrate_mm_per_min)
+    dx_mm = float(target_x_mm) - float(current_x_mm)
+    dy_mm = float(target_y_mm) - float(current_y_mm)
+    move_length_mm = math.sqrt(dx_mm * dx_mm + dy_mm * dy_mm + dz_mm * dz_mm)
+    z_limited_feedrate_mm_per_min = max_z_feedrate_mm_per_min * move_length_mm / dz_mm
+    return min(MAX_SERIAL_XY_FEEDRATE_MM_PER_MIN, z_limited_feedrate_mm_per_min)
 
 
 def _package_version() -> str:
