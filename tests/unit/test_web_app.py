@@ -276,6 +276,9 @@ def test_card_back_detector_finds_synthetic_card_back():
     assert detection.found is True
     assert detection.confidence > 0.55
     assert detection.center_px is not None
+    assert detection.component_bbox_px is not None
+    assert detection.estimated_card_bbox_px is not None
+    assert detection.estimated_card_bbox_px[0] < detection.component_bbox_px[0]
     assert 350 <= detection.center_px[0] <= 500
     assert 300 <= detection.center_px[1] <= 430
 

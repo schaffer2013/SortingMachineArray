@@ -633,17 +633,29 @@ window.SorterPages = {
       const renderCardDetectionOverlay = detection => {
         if (!cardDetectOverlay) return;
         const bounds = visibleImageBounds();
+        const corners = detection?.corners_px;
         const box = detection?.estimated_card_bbox_px || detection?.component_bbox_px;
-        if (!bounds || !box || box.length !== 4 || !detection?.found) {
+        if (!bounds || !detection?.found || ((!corners || corners.length !== 4) && (!box || box.length !== 4))) {
           cardDetectOverlay.hidden = true;
           return;
         }
-        const [left, top, right, bottom] = box.map(Number);
         cardDetectOverlay.hidden = false;
-        cardDetectOverlay.style.left = `${bounds.left + (left / bounds.imageWidth) * bounds.width}px`;
-        cardDetectOverlay.style.top = `${bounds.top + (top / bounds.imageHeight) * bounds.height}px`;
-        cardDetectOverlay.style.width = `${((right - left) / bounds.imageWidth) * bounds.width}px`;
-        cardDetectOverlay.style.height = `${((bottom - top) / bounds.imageHeight) * bounds.height}px`;
+        cardDetectOverlay.style.left = `${bounds.left}px`;
+        cardDetectOverlay.style.top = `${bounds.top}px`;
+        cardDetectOverlay.style.width = `${bounds.width}px`;
+        cardDetectOverlay.style.height = `${bounds.height}px`;
+        const polygonPoints = corners && corners.length === 4
+          ? corners.map(([x, y]) => `${(Number(x) / bounds.imageWidth) * bounds.width},${(Number(y) / bounds.imageHeight) * bounds.height}`).join(" ")
+          : (() => {
+              const [left, top, right, bottom] = box.map(Number);
+              return [
+                `${(left / bounds.imageWidth) * bounds.width},${(top / bounds.imageHeight) * bounds.height}`,
+                `${(right / bounds.imageWidth) * bounds.width},${(top / bounds.imageHeight) * bounds.height}`,
+                `${(right / bounds.imageWidth) * bounds.width},${(bottom / bounds.imageHeight) * bounds.height}`,
+                `${(left / bounds.imageWidth) * bounds.width},${(bottom / bounds.imageHeight) * bounds.height}`,
+              ].join(" ");
+            })();
+        cardDetectOverlay.innerHTML = `<svg aria-hidden="true"><polygon points="${escapeHtml(polygonPoints)}"></polygon></svg>`;
       };
       const runCardBackDetection = async () => {
         if (cardDetectButton) cardDetectButton.disabled = true;
