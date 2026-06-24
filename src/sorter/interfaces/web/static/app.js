@@ -1583,6 +1583,409 @@ window.SorterPages = {
       }
     };
   },
+  cardBackTraining() {
+    const modelSelect = document.querySelector("#training-model-select");
+    const baseModelSelect = document.querySelector("#training-base-model");
+    const modelForm = document.querySelector("#training-model-form");
+    const modelPill = document.querySelector("#training-model-pill");
+    const modelMessage = document.querySelector("#training-model-message");
+    const countsRoot = document.querySelector("#training-counts");
+    const activateModel = document.querySelector("#training-model-activate");
+    const generatePlan = document.querySelector("#training-plan-generate");
+    const captureSelected = document.querySelector("#training-capture-selected");
+    const captureAll = document.querySelector("#training-capture-all");
+    const planMessage = document.querySelector("#training-plan-message");
+    const planPill = document.querySelector("#training-plan-pill");
+    const planList = document.querySelector("#training-plan-list");
+    const boxCanvas = document.querySelector("#training-box-canvas");
+    const detectButton = document.querySelector("#training-detect");
+    const tuneCanvas = document.querySelector("#training-tune-canvas");
+    const tuneMessage = document.querySelector("#training-tune-message");
+    const cornerOverlay = document.querySelector("#training-corner-overlay");
+    const zoomInput = document.querySelector("#training-zoom");
+    const saveLabel = document.querySelector("#training-save-label");
+    const labelTrain = document.querySelector("#training-label-train");
+    const labelEval = document.querySelector("#training-label-eval");
+    const lastResult = document.querySelector("#training-last-result");
+    const corners = ["nw", "ne", "se", "sw"];
+    let summary = {models: []};
+    let plan = [];
+    let selectedPlanIndex = 0;
+    let currentSample = null;
+    let selectedCorner = "nw";
+    let expectedCorners = null;
+    let truthCorners = null;
+    let frameImage = null;
+
+    const activeModelId = () => modelSelect.value || summary.active_model_id;
+    const fieldNumber = id => Number(document.querySelector(id).value);
+    const selectedSplit = () => document.querySelector("#training-split").value;
+    const cornerObjectFromArray = points => {
+      if (!Array.isArray(points) || points.length < 4) return null;
+      return Object.fromEntries(corners.map((corner, index) => [corner, {x: Number(points[index][0]), y: Number(points[index][1])}]));
+    };
+    const cloneCorners = value => value ? Object.fromEntries(corners.map(corner => [corner, {...value[corner]}])) : null;
+    const cornersToArray = value => corners.map(corner => [Number(value[corner].x), Number(value[corner].y)]);
+    const loadImage = src => new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error("Image unavailable"));
+      image.src = `${src}${src.includes("?") ? "&" : "?"}t=${Date.now()}`;
+    });
+
+    async function refreshSummary() {
+      summary = await json("/api/card-back-training");
+      renderModels();
+    }
+    function renderModels() {
+      const models = summary.models || [];
+      const active = models.find(model => model.model_id === summary.active_model_id) || models[0] || null;
+      document.querySelectorAll(".training-sample-list").forEach(root => root.remove());
+      const options = models.length
+        ? models.map(model => `<option value="${escapeHtml(model.model_id)}">${escapeHtml(model.name)} (${model.train_count}/${model.eval_count}/${model.staged_count})</option>`).join("")
+        : `<option value="">No models yet</option>`;
+      modelSelect.innerHTML = options;
+      baseModelSelect.innerHTML = `<option value="">None</option>${options}`;
+      if (active) modelSelect.value = active.model_id;
+      modelPill.textContent = active ? active.name : "No model";
+      modelPill.className = active ? "pill good-pill" : "pill warn-pill";
+      countsRoot.innerHTML = active ? [
+        ["Train", active.train_count],
+        ["Eval", active.eval_count],
+        ["Staged", active.staged_count],
+        ["Tuned", active.truth_count],
+      ].map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join("") : `<div><dt>Dataset</dt><dd>0</dd></div>`;
+      renderRecentSamples(active);
+    }
+    function renderRecentSamples(model) {
+      const samples = model?.recent_samples || [];
+      if (!samples.length) return;
+      const sampleRows = samples.map(sample => `
+        <button type="button" class="training-sample-row secondary" data-sample-id="${escapeHtml(sample.sample_id)}">
+          <span>${escapeHtml(sample.split)}</span>
+          <strong>${escapeHtml(sample.sample_id)}</strong>
+          <span>${sample.has_truth ? "tuned" : "needs tune"}</span>
+        </button>
+      `).join("");
+      countsRoot.insertAdjacentHTML("afterend", `<div class="training-sample-list">${sampleRows}</div>`);
+      document.querySelectorAll(".training-sample-row").forEach(button => {
+        button.onclick = () => loadExistingSample(model, button.dataset.sampleId);
+      });
+    }
+    async function loadExistingSample(model, sampleId) {
+      const [sampleResponse, image] = await Promise.all([
+        json(`/api/card-back-training/models/${model.model_id}/samples/${sampleId}`),
+        loadImage(`/api/card-back-training/models/${model.model_id}/samples/${sampleId}/image.jpg`),
+      ]);
+      currentSample = sampleResponse.sample;
+      frameImage = image;
+      expectedCorners = cornerObjectFromArray(currentSample.label?.detection?.corners_px)
+        || cornerObjectFromArray(currentSample.label?.expected_crop?.corners_px);
+      truthCorners = currentSample.label?.truth_corners_px && Object.keys(currentSample.label.truth_corners_px).length
+        ? cloneCorners(currentSample.label.truth_corners_px)
+        : cloneCorners(expectedCorners);
+      renderTuning();
+      tuneMessage.textContent = expectedCorners
+        ? `Loaded ${sampleId}. Choose a corner and tune with arrow keys.`
+        : `Loaded ${sampleId}. No detection corners were saved for this sample.`;
+    }
+    modelForm.onsubmit = async event => {
+      event.preventDefault();
+      const form = new FormData(modelForm);
+      try {
+        const result = await json("/api/card-back-training/models", {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({name: form.get("name"), base_model_id: form.get("base_model_id"), notes: form.get("notes")}),
+        });
+        summary = result.summary;
+        modelForm.reset();
+        renderModels();
+        modelSelect.value = result.model.model_id;
+        modelMessage.textContent = `Created ${result.model.name}`;
+      } catch (error) {
+        modelMessage.textContent = error.message;
+      }
+    };
+    activateModel.onclick = async () => {
+      try {
+        const result = await json("/api/card-back-training/models/active", {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({model_id: activeModelId()}),
+        });
+        summary = result.summary;
+        renderModels();
+        modelMessage.textContent = `Activated ${result.model.name}`;
+      } catch (error) {
+        modelMessage.textContent = error.message;
+      }
+    };
+
+    function planPayload() {
+      return {
+        box: {
+          min_x_mm: fieldNumber("#training-min-x"),
+          max_x_mm: fieldNumber("#training-max-x"),
+          min_y_mm: fieldNumber("#training-min-y"),
+          max_y_mm: fieldNumber("#training-max-y"),
+          min_z_mm: fieldNumber("#training-min-z"),
+          max_z_mm: fieldNumber("#training-max-z"),
+        },
+        count: fieldNumber("#training-point-count"),
+        seed: document.querySelector("#training-seed").value,
+        light_min: fieldNumber("#training-light-min"),
+        light_max: fieldNumber("#training-light-max"),
+      };
+    }
+    generatePlan.onclick = async () => {
+      try {
+        const result = await json("/api/card-back-training/plan", {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify(planPayload()),
+        });
+        plan = result.plan || [];
+        selectedPlanIndex = 0;
+        renderPlan();
+        drawBox();
+        planMessage.textContent = `Generated ${plan.length} spring-spaced points`;
+      } catch (error) {
+        planMessage.textContent = error.message;
+      }
+    };
+    function renderPlan() {
+      planPill.textContent = `${plan.length} points`;
+      planList.innerHTML = plan.length ? plan.map((entry, index) => {
+        const pixel = entry.lighting?.pixels?.[0] || [0, 0, 0];
+        const point = entry.point;
+        return `
+          <button type="button" class="training-plan-entry${index === selectedPlanIndex ? " selected" : ""}" data-plan-index="${index}">
+            <span class="color-swatch" style="background:${rgbToHex(pixel)}"></span>
+            <strong>#${entry.index}</strong>
+            <span>X ${point.x_mm} / Y ${point.y_mm} / Z ${point.z_mm}</span>
+          </button>
+        `;
+      }).join("") : `<p class="muted">No generated points yet.</p>`;
+      planList.querySelectorAll("[data-plan-index]").forEach(button => {
+        button.onclick = () => {
+          selectedPlanIndex = Number(button.dataset.planIndex);
+          renderPlan();
+          drawBox();
+        };
+      });
+    }
+    function drawBox() {
+      const context = boxCanvas.getContext("2d");
+      const width = boxCanvas.width;
+      const height = boxCanvas.height;
+      context.clearRect(0, 0, width, height);
+      context.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--code-bg").trim() || "#020617";
+      context.fillRect(0, 0, width, height);
+      if (!plan.length) return;
+      const xs = plan.map(item => item.point.x_mm);
+      const ys = plan.map(item => item.point.y_mm);
+      const zs = plan.map(item => item.point.z_mm);
+      const min = {x: Math.min(...xs), y: Math.min(...ys), z: Math.min(...zs)};
+      const max = {x: Math.max(...xs), y: Math.max(...ys), z: Math.max(...zs)};
+      const project = point => {
+        const nx = (point.x_mm - min.x) / Math.max(0.001, max.x - min.x) - 0.5;
+        const ny = (point.y_mm - min.y) / Math.max(0.001, max.y - min.y) - 0.5;
+        const nz = (point.z_mm - min.z) / Math.max(0.001, max.z - min.z) - 0.5;
+        return {x: width / 2 + nx * 430 + ny * 150, y: height / 2 + nz * -210 + ny * 90};
+      };
+      context.strokeStyle = "rgba(148,163,184,.35)";
+      context.lineWidth = 2;
+      context.strokeRect(84, 52, width - 168, height - 104);
+      plan.forEach((entry, index) => {
+        const point = project(entry.point);
+        const radius = index === selectedPlanIndex ? 9 : 6;
+        context.beginPath();
+        context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+        context.fillStyle = index === selectedPlanIndex ? "#f59e0b" : "#38bdf8";
+        context.fill();
+      });
+    }
+
+    async function capturePlanEntry(entry) {
+      const result = await json("/api/card-back-training/capture", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model_id: activeModelId(),
+          point: entry.point,
+          lighting: entry.lighting,
+          split: selectedSplit(),
+          settle_ms: fieldNumber("#training-settle-ms"),
+          execute_motion: document.querySelector("#training-execute-motion").checked,
+          run_detection: true,
+        }),
+      });
+      summary = result.summary;
+      currentSample = result.sample;
+      const label = result.sample.label || {};
+      expectedCorners = cornerObjectFromArray(label.detection?.corners_px);
+      truthCorners = cloneCorners(expectedCorners);
+      frameImage = await loadImage(`/api/card-back-training/models/${activeModelId()}/samples/${result.sample.sample_id}/image.jpg`);
+      renderModels();
+      renderTuning();
+      lastResult.textContent = pretty(result.sample);
+      return result;
+    }
+    captureSelected.onclick = async () => {
+      if (!plan.length) {
+        planMessage.textContent = "Generate a plan first";
+        return;
+      }
+      captureSelected.disabled = true;
+      try {
+        const result = await capturePlanEntry(plan[selectedPlanIndex]);
+        planMessage.textContent = `Captured ${result.sample.sample_id}`;
+      } catch (error) {
+        planMessage.textContent = error.message;
+      } finally {
+        captureSelected.disabled = false;
+      }
+    };
+    captureAll.onclick = async () => {
+      if (!plan.length) return;
+      captureAll.disabled = true;
+      try {
+        for (let index = 0; index < plan.length; index += 1) {
+          selectedPlanIndex = index;
+          renderPlan();
+          drawBox();
+          planMessage.textContent = `Capturing ${index + 1} of ${plan.length}...`;
+          await capturePlanEntry(plan[index]);
+        }
+        planMessage.textContent = `Captured ${plan.length} samples`;
+      } catch (error) {
+        planMessage.textContent = error.message;
+      } finally {
+        captureAll.disabled = false;
+      }
+    };
+
+    detectButton.onclick = async () => {
+      detectButton.disabled = true;
+      tuneMessage.textContent = "Detecting live card back...";
+      try {
+        const [detection, image] = await Promise.all([json("/api/card-back/detect", {method:"POST"}), loadImage("/api/camera/frame.jpg")]);
+        frameImage = image;
+        expectedCorners = cornerObjectFromArray(detection.corners_px);
+        truthCorners = cloneCorners(expectedCorners);
+        currentSample = null;
+        lastResult.textContent = pretty(detection);
+        tuneMessage.textContent = detection.found ? "Detected corners. Use arrow keys to tune selected corner." : detection.message || "No card back found";
+        renderTuning();
+      } catch (error) {
+        tuneMessage.textContent = error.message;
+      } finally {
+        detectButton.disabled = false;
+      }
+    };
+    document.querySelectorAll("[data-training-corner]").forEach(button => {
+      button.onclick = () => {
+        selectedCorner = button.dataset.trainingCorner;
+        document.querySelectorAll("[data-training-corner]").forEach(item => item.classList.toggle("secondary", item.dataset.trainingCorner !== selectedCorner));
+        renderTuning();
+        tuneCanvas.focus();
+      };
+    });
+    tuneCanvas.addEventListener("keydown", event => {
+      if (!truthCorners?.[selectedCorner]) return;
+      const step = event.shiftKey ? 10 : 1;
+      const delta = {
+        ArrowLeft: [-step, 0],
+        ArrowRight: [step, 0],
+        ArrowUp: [0, -step],
+        ArrowDown: [0, step],
+      }[event.key];
+      if (!delta) return;
+      event.preventDefault();
+      truthCorners[selectedCorner].x += delta[0];
+      truthCorners[selectedCorner].y += delta[1];
+      renderTuning();
+    });
+    zoomInput.oninput = renderTuning;
+    function renderTuning() {
+      renderCornerOverlay();
+      const context = tuneCanvas.getContext("2d");
+      context.clearRect(0, 0, tuneCanvas.width, tuneCanvas.height);
+      if (!frameImage || !expectedCorners?.[selectedCorner]) {
+        context.fillStyle = "#111827";
+        context.fillRect(0, 0, tuneCanvas.width, tuneCanvas.height);
+        return;
+      }
+      const center = truthCorners?.[selectedCorner] || expectedCorners[selectedCorner];
+      const zoom = Number(zoomInput.value) || 8;
+      const sourceSize = tuneCanvas.width / zoom;
+      const sx = Math.max(0, Math.min(frameImage.width - sourceSize, center.x - sourceSize / 2));
+      const sy = Math.max(0, Math.min(frameImage.height - sourceSize, center.y - sourceSize / 2));
+      context.drawImage(frameImage, sx, sy, sourceSize, sourceSize, 0, 0, tuneCanvas.width, tuneCanvas.height);
+      const drawPoint = (point, color, radius) => {
+        const x = ((point.x - sx) / sourceSize) * tuneCanvas.width;
+        const y = ((point.y - sy) / sourceSize) * tuneCanvas.height;
+        context.strokeStyle = color;
+        context.lineWidth = 2;
+        context.beginPath();
+        context.arc(x, y, radius, 0, Math.PI * 2);
+        context.stroke();
+        context.beginPath();
+        context.moveTo(x - 18, y);
+        context.lineTo(x + 18, y);
+        context.moveTo(x, y - 18);
+        context.lineTo(x, y + 18);
+        context.stroke();
+      };
+      drawPoint(expectedCorners[selectedCorner], "#38bdf8", 12);
+      if (truthCorners?.[selectedCorner]) drawPoint(truthCorners[selectedCorner], "#f59e0b", 18);
+      const offsetX = truthCorners ? truthCorners[selectedCorner].x - expectedCorners[selectedCorner].x : 0;
+      const offsetY = truthCorners ? truthCorners[selectedCorner].y - expectedCorners[selectedCorner].y : 0;
+      tuneMessage.textContent = `${selectedCorner.toUpperCase()} offset ${offsetX.toFixed(1)}, ${offsetY.toFixed(1)} px`;
+    }
+    function renderCornerOverlay() {
+      if (!cornerOverlay || !frameImage || !expectedCorners) {
+        if (cornerOverlay) cornerOverlay.innerHTML = "";
+        return;
+      }
+      cornerOverlay.setAttribute("viewBox", `0 0 ${frameImage.width} ${frameImage.height}`);
+      const polygon = cornersToArray(expectedCorners).map(([x, y]) => `${x},${y}`).join(" ");
+      const truth = truthCorners ? cornersToArray(truthCorners).map(([x, y]) => `${x},${y}`).join(" ") : "";
+      cornerOverlay.innerHTML = `
+        <polygon class="expected" points="${escapeHtml(polygon)}"></polygon>
+        ${truth ? `<polygon class="truth" points="${escapeHtml(truth)}"></polygon>` : ""}
+      `;
+    }
+    async function saveCurrentLabel(split = null) {
+      if (!currentSample?.sample_id || !truthCorners) {
+        tuneMessage.textContent = "Capture a sample before saving tuning";
+        return;
+      }
+      const modelId = activeModelId();
+      const result = await json(`/api/card-back-training/models/${modelId}/samples/${currentSample.sample_id}`, {
+        method:"PATCH",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          truth_corners_px: truthCorners,
+          expected_crop: expectedCorners ? {corners_px: cornersToArray(expectedCorners)} : {},
+          ...(split ? {split} : {}),
+        }),
+      });
+      summary = result.summary;
+      currentSample = result.sample;
+      renderModels();
+      tuneMessage.textContent = `Saved ${currentSample.sample_id}`;
+      lastResult.textContent = pretty(result.sample.label);
+    }
+    saveLabel.onclick = () => saveCurrentLabel().catch(error => tuneMessage.textContent = error.message);
+    labelTrain.onclick = () => saveCurrentLabel("train").catch(error => tuneMessage.textContent = error.message);
+    labelEval.onclick = () => saveCurrentLabel("eval").catch(error => tuneMessage.textContent = error.message);
+
+    refreshSummary();
+    renderPlan();
+    drawBox();
+  },
   runs() {
     const root = document.querySelector("#runs-table");
     (async () => {

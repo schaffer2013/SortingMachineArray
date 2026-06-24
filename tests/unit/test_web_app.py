@@ -11,7 +11,8 @@ from PIL import Image, ImageDraw
 from sorter.bootstrap import build_sim_orchestrator
 from sorter.adapters.hardware.marlin_motion import MarlinMotionAdapter
 from sorter.adapters.hardware.marlin_transport import RecordingMarlinTransport
-from sorter.application.card_back_detection import detect_card_back
+from sorter.application.card_back_detection import detect_card_back, refine_card_back_corners_to_truth
+from sorter.application.card_back_training import CardBackTrainingStore
 from sorter.config.calibration import CalibrationProfile
 from sorter.config.settings import AppSettings
 from sorter.interfaces import web_runner
@@ -36,9 +37,82 @@ def _sim_truth_settings():
 
 def test_web_pages_render():
     client = _client()
-    for path in ("/", "/movement", "/machine", "/recognition", "/runs", "/system", "/about"):
+    for path in ("/", "/movement", "/machine", "/recognition", "/card-back-training", "/runs", "/system", "/about"):
         response = client.get(path)
         assert response.status_code == 200
+
+
+def test_card_back_training_model_plan_capture_and_label(tmp_path):
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    app.config["runtime"].runtime_mode = "simulation"
+    app.config["runtime"].card_back_training = CardBackTrainingStore(tmp_path / "card_back_training")
+    app.testing = True
+    client = app.test_client()
+
+    created = client.post("/api/card-back-training/models", json={"name": "corner model v1"}).get_json()
+    model_id = created["model"]["model_id"]
+    plan_response = client.post(
+        "/api/card-back-training/plan",
+        json={
+            "box": {
+                "min_x_mm": 80,
+                "max_x_mm": 120,
+                "min_y_mm": 90,
+                "max_y_mm": 130,
+                "min_z_mm": 8,
+                "max_z_mm": 18,
+            },
+            "count": 5,
+            "seed": 7,
+            "light_min": 0,
+            "light_max": 80,
+        },
+    )
+    plan = plan_response.get_json()["plan"]
+    capture_response = client.post(
+        "/api/card-back-training/capture",
+        json={
+            "model_id": model_id,
+            "point": plan[0]["point"],
+            "lighting": plan[0]["lighting"],
+            "run_detection": False,
+            "split": "staged",
+        },
+    )
+    captured = capture_response.get_json()["sample"]
+    sample_id = captured["sample_id"]
+    label_response = client.patch(
+        f"/api/card-back-training/models/{model_id}/samples/{sample_id}",
+        json={
+            "split": "train",
+            "truth_corners_px": {
+                "nw": {"x": 10, "y": 12},
+                "ne": {"x": 110, "y": 13},
+                "se": {"x": 112, "y": 180},
+                "sw": {"x": 11, "y": 179},
+            },
+        },
+    )
+    summary = client.get("/api/card-back-training").get_json()
+    sample_payload_response = client.get(f"/api/card-back-training/models/{model_id}/samples/{sample_id}")
+    image_response = client.get(f"/api/card-back-training/models/{model_id}/samples/{sample_id}/image.jpg")
+
+    assert plan_response.status_code == 200
+    assert len(plan) == 5
+    assert all(80 <= item["point"]["x_mm"] <= 120 for item in plan)
+    assert capture_response.status_code == 200
+    assert captured["split"] == "staged"
+    assert label_response.status_code == 200
+    assert label_response.get_json()["sample"]["split"] == "train"
+    assert summary["models"][0]["train_count"] == 1
+    assert summary["models"][0]["truth_count"] == 1
+    assert sample_payload_response.status_code == 200
+    assert sample_payload_response.get_json()["sample"]["label"]["truth_corners_px"]["nw"] == [10.0, 12.0]
+    assert image_response.status_code == 200
+    assert image_response.mimetype == "image/jpeg"
 
 
 def test_status_snapshot_and_capabilities_are_available():
@@ -283,6 +357,61 @@ def test_card_back_detector_finds_synthetic_card_back():
     assert 300 <= detection.center_px[1] <= 430
 
 
+def test_card_back_corner_refinement_improves_truth_alignment():
+    import cv2
+    import numpy as np
+
+    truth_path = (
+        Path(__file__).parents[2]
+        / "src"
+        / "sorter"
+        / "interfaces"
+        / "web"
+        / "static"
+        / "card-back-truth.jpg"
+    )
+    truth = Image.open(truth_path).convert("RGB").resize((630, 880))
+    canvas = Image.new("RGB", (1100, 1300), "#111827")
+    source = np.array(
+        [
+            [0.0, 0.0],
+            [629.0, 0.0],
+            [629.0, 879.0],
+            [0.0, 879.0],
+        ],
+        dtype="float32",
+    )
+    actual_corners = ((260.0, 170.0), (880.0, 205.0), (835.0, 1085.0), (220.0, 1030.0))
+    destination = np.array(actual_corners, dtype="float32")
+    matrix = cv2.getPerspectiveTransform(source, destination)
+    warped = cv2.warpPerspective(np.array(truth), matrix, canvas.size)
+    mask = cv2.warpPerspective(np.full((880, 630), 255, dtype="uint8"), matrix, canvas.size)
+    frame = np.array(canvas)
+    frame[mask > 0] = warped[mask > 0]
+    camera_image = Image.fromarray(frame)
+    loose_corners = ((244.0, 184.0), (865.0, 188.0), (856.0, 1066.0), (238.0, 1047.0))
+
+    refined_corners, metrics = refine_card_back_corners_to_truth(camera_image, loose_corners, truth)
+
+    assert metrics["applied"] is True
+    assert metrics["method"] == "bounded_card_back_feature_search"
+    assert metrics["refined_score"] > metrics["initial_score"]
+    assert metrics["final_circle_fit"]["truth_circle_count"] == 5
+    assert metrics["final_circle_fit"]["detected_circle_count"] == 5
+    initial_center_error = metrics["initial_circle_fit"]["mean_center_error_px"]
+    final_center_error = metrics["final_circle_fit"]["mean_center_error_px"]
+    assert final_center_error is not None
+    assert initial_center_error is None or final_center_error < initial_center_error
+    assert metrics["final_feature_fit"]["oval"]["score"] > 0
+    assert metrics["final_feature_fit"]["corner_orbs"]["truth_orb_count"] == 4
+    assert metrics["final_feature_fit"]["corner_orbs"]["mean_center_error_px"] < 5
+    assert metrics["corner_orb_seed"]["matched_orb_count"] >= 3
+    assert metrics["max_corner_adjust_px"] > 0
+    for refined, actual in zip(refined_corners, actual_corners):
+        assert abs(refined[0] - actual[0]) < 30
+        assert abs(refined[1] - actual[1]) < 30
+
+
 def test_card_back_detect_endpoint_uses_camera_without_motion(tmp_path):
     settings = _sim_truth_settings()
     orchestrator = build_sim_orchestrator(settings)
@@ -311,6 +440,8 @@ def test_card_back_detect_endpoint_uses_camera_without_motion(tmp_path):
     assert payload["found"] is True
     assert payload["warped_image_data_url"].startswith("data:image/jpeg;base64,")
     assert payload["warped_image_size"] == [630, 880]
+    assert payload["initial_corners_px"]
+    assert payload["corner_refinement"]["method"] == "bounded_card_back_feature_search"
     assert transport.command_log == []
     assert runtime.last_card_back_detection["found"] is True
     assert "warped_image_data_url" not in runtime.last_card_back_detection
@@ -325,6 +456,7 @@ def test_camera_page_has_card_back_truth_overlay_controls():
     assert b'id="camera-card-detect"' in response.data
     assert b'id="camera-card-truth-toggle"' in response.data
     assert b'id="camera-card-truth-overlay"' in response.data
+    assert b"/static/card-back-truth.jpg" in response.data
 
 
 def test_serial_api_lists_connects_sends_and_disconnects():

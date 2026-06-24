@@ -9,6 +9,7 @@ from pathlib import Path
 import base64
 import json
 import os
+import random
 import sqlite3
 import subprocess
 import tempfile
@@ -20,7 +21,16 @@ from typing import Any, Callable
 from flask import Flask, Response, g, jsonify, render_template, request, send_file
 from PIL import Image, ImageDraw, ImageStat
 
-from sorter.application.card_back_detection import detect_card_back, warp_card_back_image
+from sorter.application.card_back_detection import (
+    detect_card_back,
+    refine_card_back_corners_to_truth,
+    warp_card_back_image,
+)
+from sorter.application.card_back_training import (
+    CaptureBox,
+    CardBackTrainingStore,
+    generate_spring_capture_points,
+)
 from sorter.application.orchestrator import Orchestrator
 from sorter.adapters.hardware.marlin_transport import MarlinSerialTransport
 from sorter.adapters.hardware.neopixel_lights import NeoPixelLightsAdapter
@@ -664,6 +674,7 @@ class WebRuntime:
         self.control_audit_path = self.repo_root / "data" / "logs" / "control_audit.jsonl"
         self.debug_events_path = self.repo_root / "data" / "logs" / "debug_events.jsonl"
         self.serial_log_path = self.repo_root / "data" / "logs" / "serial_commands.jsonl"
+        self.card_back_training = CardBackTrainingStore(self.repo_root / "data" / "vision" / "card_back_training")
         self.light_profiles = self._load_light_profiles()
         self.runtime_mode = runtime_mode
         self.hardware_runtime = bool(getattr(orchestrator, "hardware_runtime", False))
@@ -783,6 +794,110 @@ class WebRuntime:
 
     def calibration_payload(self) -> dict[str, Any]:
         return self.calibration.to_json_dict()
+
+    def card_back_training_summary(self) -> dict[str, Any]:
+        return self.card_back_training.summary()
+
+    def create_card_back_training_model(self, payload: dict[str, Any]) -> dict[str, Any]:
+        model = self.card_back_training.create_model(
+            str(payload.get("name", "")),
+            base_model_id=payload.get("base_model_id") or None,
+            notes=str(payload.get("notes", "")),
+        )
+        return {"ok": True, "model": model, "summary": self.card_back_training_summary()}
+
+    def set_active_card_back_training_model(self, payload: dict[str, Any]) -> dict[str, Any]:
+        model = self.card_back_training.set_active_model(str(payload.get("model_id", "")))
+        return {"ok": True, "model": model, "summary": self.card_back_training_summary()}
+
+    def generate_card_back_capture_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
+        raw_box = payload.get("box") if isinstance(payload.get("box"), dict) else payload
+        capture_box = CaptureBox.from_payload(raw_box)
+        count = int(payload.get("count", payload.get("point_count", 12)))
+        seed = payload.get("seed")
+        seed_value = int(seed) if seed not in (None, "") else None
+        points = generate_spring_capture_points(capture_box, count, seed=seed_value)
+        rng = random.Random(seed_value)
+        light_min = max(0, min(255, int(payload.get("light_min", 0))))
+        light_max = max(light_min, min(255, int(payload.get("light_max", 96))))
+        plan = [
+            {
+                "index": index,
+                "point": point,
+                "lighting": {"mode": "random_pixels", "pixels": self._random_training_pixels(rng, light_min, light_max)},
+                "split": "staged",
+            }
+            for index, point in enumerate(points, start=1)
+        ]
+        return {"ok": True, "box": raw_box, "seed": seed_value, "count": len(plan), "plan": plan}
+
+    def capture_card_back_training_sample(self, payload: dict[str, Any]) -> dict[str, Any]:
+        model_id = str(payload.get("model_id") or self.card_back_training_summary().get("active_model_id") or "")
+        if not model_id:
+            raise ValueError("Create or select a training model before capturing samples")
+        point = payload.get("point") if isinstance(payload.get("point"), dict) else None
+        lighting = payload.get("lighting") if isinstance(payload.get("lighting"), dict) else {}
+        settle_ms = max(0, min(5000, int(payload.get("settle_ms", 120))))
+        if payload.get("execute_motion") and point:
+            self.control(
+                "move_camera_xy",
+                {
+                    "x_mm": float(point["x_mm"]),
+                    "y_mm": float(point["y_mm"]),
+                    "z_mm": float(point["z_mm"]),
+                    "coordinate_space": "camera",
+                },
+            )
+            self.control("wait_idle", {})
+        if lighting.get("pixels"):
+            self._set_light_pixels(lighting["pixels"], profile_name="training-capture")
+        elif all(key in lighting for key in ("red", "green", "blue")):
+            self._set_light_rgb(lighting["red"], lighting["green"], lighting["blue"], profile_name="training-capture")
+        if settle_ms:
+            time.sleep(settle_ms / 1000)
+        image = self.latest_camera_image()
+        detection = payload.get("detection") if isinstance(payload.get("detection"), dict) else None
+        if detection is None and payload.get("run_detection", True):
+            detection = detect_card_back(image).to_json()
+            if detection.get("found") and detection.get("corners_px"):
+                refined_corners, refinement = self._refine_card_back_corners(image, detection["corners_px"])
+                detection["initial_corners_px"] = detection["corners_px"]
+                detection["corners_px"] = [list(point) for point in refined_corners]
+                detection["corner_refinement"] = refinement
+        sample = self.card_back_training.capture_sample(
+            model_id,
+            image,
+            point=point,
+            lighting=lighting,
+            detection=detection,
+            expected_crop=payload.get("expected_crop") if isinstance(payload.get("expected_crop"), dict) else None,
+            truth_corners=payload.get("truth_corners_px") if isinstance(payload.get("truth_corners_px"), dict) else None,
+            split=str(payload.get("split", "staged")),
+        )
+        self.record_debug_event(
+            "camera.card_back.training_capture",
+            {"model_id": model_id, "sample_id": sample["sample_id"], "split": sample["split"], "point": sample.get("point")},
+        )
+        return {"ok": True, "sample": sample, "summary": self.card_back_training_summary()}
+
+    def update_card_back_training_sample(self, model_id: str, sample_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        sample = self.card_back_training.update_sample_label(model_id, sample_id, payload)
+        return {"ok": True, "sample": sample, "summary": self.card_back_training_summary()}
+
+    def register_card_back_training_run(self, model_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        result = self.card_back_training.register_training_run(model_id, payload)
+        return {"ok": True, **result, "summary": self.card_back_training_summary()}
+
+    def _random_training_pixels(self, rng: random.Random, light_min: int, light_max: int) -> list[list[int]]:
+        base = [rng.randint(light_min, light_max) for _ in range(3)]
+        jitter = max(6, int((light_max - light_min) * 0.35))
+        pixels = []
+        for _ in range(16):
+            pixels.append([
+                _clamp_channel(base[channel] + rng.randint(-jitter, jitter))
+                for channel in range(3)
+            ])
+        return pixels
 
     def update_calibration(self, payload: dict[str, Any]) -> dict[str, Any]:
         allowed_fields = {
@@ -1857,7 +1972,12 @@ class WebRuntime:
         image = self.latest_camera_image()
         payload = detect_card_back(image).to_json()
         if payload.get("found") and payload.get("corners_px"):
-            warped = warp_card_back_image(image, payload["corners_px"])
+            initial_corners = payload["corners_px"]
+            refined_corners, refinement = self._refine_card_back_corners(image, initial_corners)
+            payload["initial_corners_px"] = initial_corners
+            payload["corners_px"] = [list(point) for point in refined_corners]
+            payload["corner_refinement"] = refinement
+            warped = warp_card_back_image(image, refined_corners)
             buffer = BytesIO()
             warped.save(buffer, format="JPEG", quality=88)
             payload["warped_image_data_url"] = "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
@@ -1874,6 +1994,28 @@ class WebRuntime:
             },
         )
         return payload
+
+    def _refine_card_back_corners(
+        self,
+        image: Image.Image,
+        corners: list[list[float]] | tuple[tuple[float, float], ...],
+    ) -> tuple[tuple[tuple[float, float], ...], dict[str, Any]]:
+        truth_path = self.repo_root / "src" / "sorter" / "interfaces" / "web" / "static" / "card-back-truth.jpg"
+        if not truth_path.exists():
+            return tuple((float(point[0]), float(point[1])) for point in corners), {
+                "applied": False,
+                "method": "bounded_corner_search",
+                "message": f"Truth image not found: {truth_path}",
+            }
+        try:
+            with Image.open(truth_path) as truth_image:
+                return refine_card_back_corners_to_truth(image, corners, truth_image)
+        except Exception as exc:
+            return tuple((float(point[0]), float(point[1])) for point in corners), {
+                "applied": False,
+                "method": "bounded_corner_search",
+                "message": f"Corner refinement failed: {exc}",
+            }
 
     def _recognize_image(
         self,
@@ -2264,6 +2406,10 @@ def create_web_app(
     def recognition():
         return render_template("recognition.html")
 
+    @app.get("/card-back-training")
+    def card_back_training():
+        return render_template("card_back_training.html")
+
     @app.get("/runs")
     def runs():
         return render_template("runs.html")
@@ -2550,6 +2696,66 @@ def create_web_app(
             return jsonify(runtime.detect_card_back_from_camera())
         except Exception as exc:
             return jsonify({"found": False, "confidence": 0.0, "message": str(exc), "status": runtime.status()}), 400
+
+    @app.get("/api/card-back-training")
+    def api_card_back_training_summary():
+        return jsonify(runtime.card_back_training_summary())
+
+    @app.post("/api/card-back-training/models")
+    def api_create_card_back_training_model():
+        try:
+            return jsonify(runtime.create_card_back_training_model(request.get_json(silent=True) or {}))
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
+
+    @app.post("/api/card-back-training/models/active")
+    def api_set_active_card_back_training_model():
+        try:
+            return jsonify(runtime.set_active_card_back_training_model(request.get_json(silent=True) or {}))
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
+
+    @app.post("/api/card-back-training/plan")
+    def api_card_back_training_plan():
+        try:
+            return jsonify(runtime.generate_card_back_capture_plan(request.get_json(silent=True) or {}))
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
+
+    @app.post("/api/card-back-training/capture")
+    def api_card_back_training_capture():
+        try:
+            return jsonify(runtime.capture_card_back_training_sample(request.get_json(silent=True) or {}))
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc), "status": runtime.status()}), 400
+
+    @app.patch("/api/card-back-training/models/<model_id>/samples/<sample_id>")
+    def api_card_back_training_update_sample(model_id: str, sample_id: str):
+        try:
+            return jsonify(runtime.update_card_back_training_sample(model_id, sample_id, request.get_json(silent=True) or {}))
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
+
+    @app.get("/api/card-back-training/models/<model_id>/samples/<sample_id>/image.jpg")
+    def api_card_back_training_sample_image(model_id: str, sample_id: str):
+        try:
+            return send_file(runtime.card_back_training.sample_image_path(model_id, sample_id), mimetype="image/jpeg")
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 404
+
+    @app.get("/api/card-back-training/models/<model_id>/samples/<sample_id>")
+    def api_card_back_training_sample(model_id: str, sample_id: str):
+        try:
+            return jsonify({"ok": True, "sample": runtime.card_back_training.sample_payload(model_id, sample_id)})
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 404
+
+    @app.post("/api/card-back-training/models/<model_id>/training-runs")
+    def api_card_back_training_run(model_id: str):
+        try:
+            return jsonify(runtime.register_card_back_training_run(model_id, request.get_json(silent=True) or {}))
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
 
     @app.get("/api/camera/frame.jpg")
     def camera_frame():
