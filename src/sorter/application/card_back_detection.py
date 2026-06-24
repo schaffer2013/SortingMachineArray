@@ -117,10 +117,11 @@ def detect_card_back(image: Image.Image) -> CardBackDetection:
         )
 
     rect = cv2.minAreaRect(best["contour"])
-    box = cv2.boxPoints(rect)
-    corners = tuple((round(float(x), 2), round(float(y), 2)) for x, y in box)
+    component_corners = tuple((float(x), float(y)) for x, y in cv2.boxPoints(rect))
+    expanded_corners = _expanded_card_corners(component_corners)
+    corners = tuple((round(float(x), 2), round(float(y), 2)) for x, y in expanded_corners)
     component_bbox = best["bbox"]
-    estimated_bbox = _expanded_card_bbox(component_bbox, width, height)
+    estimated_bbox = _bbox_from_corners(expanded_corners, width, height)
     center = (
         round((estimated_bbox[0] + estimated_bbox[2]) / 2.0, 2),
         round((estimated_bbox[1] + estimated_bbox[3]) / 2.0, 2),
@@ -151,33 +152,52 @@ def detect_card_back(image: Image.Image) -> CardBackDetection:
     )
 
 
-def _expanded_card_bbox(
-    bbox: tuple[float, float, float, float],
+def _expanded_card_corners(corners: tuple[tuple[float, float], ...]) -> tuple[tuple[float, float], ...]:
+    top_left, top_right, bottom_right, bottom_left = _ordered_corners(corners)
+    left_height = _distance(top_left, bottom_left)
+    right_height = _distance(top_right, bottom_right)
+    card_height = max(left_height, right_height)
+    top_width = _distance(top_left, top_right)
+    bottom_width = _distance(bottom_left, bottom_right)
+    current_width = max(1.0, (top_width + bottom_width) / 2.0)
+    target_width = card_height * CARD_ASPECT_WIDTH_OVER_HEIGHT
+    if target_width <= current_width:
+        return (top_left, top_right, bottom_right, bottom_left)
+
+    right_mid = ((top_right[0] + bottom_right[0]) / 2.0, (top_right[1] + bottom_right[1]) / 2.0)
+    left_mid = ((top_left[0] + bottom_left[0]) / 2.0, (top_left[1] + bottom_left[1]) / 2.0)
+    left_direction = _unit((left_mid[0] - right_mid[0], left_mid[1] - right_mid[1]))
+    extra_width = target_width - current_width
+    expanded_top_left = (
+        top_left[0] + left_direction[0] * extra_width,
+        top_left[1] + left_direction[1] * extra_width,
+    )
+    expanded_bottom_left = (
+        bottom_left[0] + left_direction[0] * extra_width,
+        bottom_left[1] + left_direction[1] * extra_width,
+    )
+    return (expanded_top_left, top_right, bottom_right, expanded_bottom_left)
+
+
+def _bbox_from_corners(
+    corners: tuple[tuple[float, float], ...],
     image_width: int,
     image_height: int,
 ) -> tuple[float, float, float, float]:
-    left, top, right, bottom = bbox
-    center_x = (left + right) / 2.0
-    center_y = (top + bottom) / 2.0
-    box_width = max(1.0, right - left) * 1.08
-    box_height = max(1.0, bottom - top) * 1.04
-    if box_width / box_height < CARD_ASPECT_WIDTH_OVER_HEIGHT:
-        box_width = box_height * CARD_ASPECT_WIDTH_OVER_HEIGHT
-    else:
-        box_height = box_width / CARD_ASPECT_WIDTH_OVER_HEIGHT
+    x_values = [point[0] for point in corners]
+    y_values = [point[1] for point in corners]
     return (
-        max(0.0, center_x - box_width / 2.0),
-        max(0.0, center_y - box_height / 2.0),
-        min(float(image_width), center_x + box_width / 2.0),
-        min(float(image_height), center_y + box_height / 2.0),
+        max(0.0, min(x_values)),
+        max(0.0, min(y_values)),
+        min(float(image_width), max(x_values)),
+        min(float(image_height), max(y_values)),
     )
 
 
 def _rotation_from_corners(corners: tuple[tuple[float, float], ...]) -> float:
     if len(corners) != 4:
         return 0.0
-    ordered = sorted(corners, key=lambda point: point[1])
-    top_left, top_right = sorted(ordered[:2], key=lambda point: point[0])
+    top_left, top_right, _, _ = _ordered_corners(corners)
     dx = top_right[0] - top_left[0]
     dy = top_right[1] - top_left[1]
     if dx == 0 and dy == 0:
@@ -188,3 +208,26 @@ def _rotation_from_corners(corners: tuple[tuple[float, float], ...]) -> float:
     if angle < -45:
         angle += 90
     return angle
+
+
+def _ordered_corners(corners: tuple[tuple[float, float], ...]) -> tuple[
+    tuple[float, float],
+    tuple[float, float],
+    tuple[float, float],
+    tuple[float, float],
+]:
+    ordered = sorted(corners, key=lambda point: point[1])
+    top_left, top_right = sorted(ordered[:2], key=lambda point: point[0])
+    bottom_left, bottom_right = sorted(ordered[2:], key=lambda point: point[0])
+    return top_left, top_right, bottom_right, bottom_left
+
+
+def _distance(first: tuple[float, float], second: tuple[float, float]) -> float:
+    return math.hypot(first[0] - second[0], first[1] - second[1])
+
+
+def _unit(vector: tuple[float, float]) -> tuple[float, float]:
+    length = math.hypot(vector[0], vector[1])
+    if length <= 0.0001:
+        return (-1.0, 0.0)
+    return (vector[0] / length, vector[1] / length)

@@ -105,12 +105,12 @@ body {
 .camera-crop-stage { position:relative; min-width:0; overflow:hidden; border-radius:16px; }
 .camera-crop-stage .camera-feed { border-radius:16px; }
 .card-back-detection-overlay {
-  position:absolute; left:0; top:0; width:0; height:0; border:3px solid #22c55e; border-radius:4px;
-  box-shadow:0 0 0 9999px rgba(2,6,23,.18), 0 0 24px rgba(34,197,94,.45); pointer-events:none;
+  position:absolute; left:0; top:0; width:0; height:0; pointer-events:none;
 }
-.card-back-detection-overlay::after {
-  content:""; position:absolute; left:50%; top:50%; width:16px; height:16px; transform:translate(-50%, -50%);
-  border:2px solid #f8fafc; border-radius:50%; background:rgba(34,197,94,.45);
+.card-back-detection-overlay svg { display:block; width:100%; height:100%; overflow:visible; }
+.card-back-detection-overlay polygon {
+  fill:rgba(250,204,21,.06); stroke:#facc15; stroke-width:3; vector-effect:non-scaling-stroke;
+  filter:drop-shadow(0 0 12px rgba(250,204,21,.5));
 }
 .card-back-detection-overlay[hidden] { display:none; }
 .camera-crop-overlay {
