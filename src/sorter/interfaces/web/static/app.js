@@ -580,6 +580,9 @@ window.SorterPages = {
     const cardDetectButton = document.querySelector("#camera-card-detect");
     const cardDetectSummary = document.querySelector("#camera-card-detect-summary");
     const cardDetectResult = document.querySelector("#camera-card-detect-result");
+    const cardTruthToggle = document.querySelector("#camera-card-truth-toggle");
+    const cardTruthOverlay = document.querySelector("#camera-card-truth-overlay");
+    const cardWarpPreviewStage = document.querySelector(".card-warp-preview-stage");
     const cropToggle = document.querySelector("#camera-crop-toggle");
     const cropPreview = document.querySelector("#camera-crop-preview");
     const cropMeta = document.querySelector("#camera-crop-meta");
@@ -672,6 +675,15 @@ window.SorterPages = {
               : response.message || "No card back found";
           }
           if (cardDetectResult) cardDetectResult.textContent = JSON.stringify(response, null, 2);
+          if (response.warped_image_data_url && cropContext && cropPreview) {
+            const warpedImage = new Image();
+            warpedImage.onload = () => {
+              cropContext.clearRect(0, 0, cropPreview.width, cropPreview.height);
+              cropContext.drawImage(warpedImage, 0, 0, cropPreview.width, cropPreview.height);
+              if (cropMeta) cropMeta.textContent = `${response.warped_image_size?.[0] || cropPreview.width} x ${response.warped_image_size?.[1] || cropPreview.height} px warped card back`;
+            };
+            warpedImage.src = response.warped_image_data_url;
+          }
         } catch (error) {
           if (cardDetectOverlay) cardDetectOverlay.hidden = true;
           lastCardBackDetection = null;
@@ -680,6 +692,11 @@ window.SorterPages = {
         } finally {
           if (cardDetectButton) cardDetectButton.disabled = false;
         }
+      };
+      const updateTruthOverlay = () => {
+        const enabled = Boolean(cardTruthToggle?.checked);
+        if (cardTruthOverlay) cardTruthOverlay.hidden = !enabled;
+        cardWarpPreviewStage?.classList.toggle("truth-overlay-enabled", enabled);
       };
       const normalizeCrop = nextCrop => {
         const bounds = visibleImageBounds();
@@ -842,6 +859,8 @@ window.SorterPages = {
         renderCardDetectionOverlay(lastCardBackDetection);
       });
       cardDetectButton?.addEventListener("click", runCardBackDetection);
+      cardTruthToggle?.addEventListener("change", updateTruthOverlay);
+      updateTruthOverlay();
     async function sendControl(action, payload = controlPayload(action), sourceButton = null) {
       if (sourceButton) sourceButton.disabled = true;
       message.textContent = `Sending ${action.replaceAll("_", " ")}...`;

@@ -152,6 +152,34 @@ def detect_card_back(image: Image.Image) -> CardBackDetection:
     )
 
 
+def warp_card_back_image(
+    image: Image.Image,
+    corners: tuple[tuple[float, float], ...] | list[list[float]],
+    *,
+    output_size: tuple[int, int] = (630, 880),
+) -> Image.Image:
+    import cv2
+    import numpy as np
+
+    if len(corners) != 4:
+        raise ValueError("Card warp requires exactly four card corners")
+    ordered = _ordered_corners(tuple((float(point[0]), float(point[1])) for point in corners))
+    width, height = output_size
+    source = np.array(ordered, dtype="float32")
+    destination = np.array(
+        [
+            [0.0, 0.0],
+            [float(width - 1), 0.0],
+            [float(width - 1), float(height - 1)],
+            [0.0, float(height - 1)],
+        ],
+        dtype="float32",
+    )
+    matrix = cv2.getPerspectiveTransform(source, destination)
+    warped = cv2.warpPerspective(np.array(image.convert("RGB")), matrix, (width, height))
+    return Image.fromarray(warped)
+
+
 def _expanded_card_corners(corners: tuple[tuple[float, float], ...]) -> tuple[tuple[float, float], ...]:
     top_left, top_right, bottom_right, bottom_left = _ordered_corners(corners)
     left_height = _distance(top_left, bottom_left)

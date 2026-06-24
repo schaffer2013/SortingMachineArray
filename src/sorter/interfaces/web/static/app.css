@@ -155,6 +155,15 @@ body {
   display:block; width:100%; aspect-ratio:63 / 88; border:1px solid var(--line); border-radius:8px;
   background:var(--code-bg); object-fit:contain;
 }
+.card-warp-preview-stage { position:relative; width:100%; }
+.card-warp-preview-stage.truth-overlay-enabled .camera-crop-preview { opacity:.5; }
+.card-truth-overlay {
+  position:absolute; inset:0; width:100%; height:100%; object-fit:contain; opacity:.5;
+  pointer-events:none; border-radius:8px;
+}
+.card-truth-overlay[hidden] { display:none; }
+.inline-toggle { display:flex; align-items:center; gap:8px; margin:8px 0 10px; }
+.inline-toggle input { width:auto; }
 .compact-code-block { max-height:170px; font-size:.78rem; }
 .camera-panel, .compact-motion-panel { min-width:0; }
 .camera-motion-tools { display:grid; gap:16px; }

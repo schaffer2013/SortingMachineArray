@@ -309,8 +309,22 @@ def test_card_back_detect_endpoint_uses_camera_without_motion(tmp_path):
 
     assert response.status_code == 200
     assert payload["found"] is True
+    assert payload["warped_image_data_url"].startswith("data:image/jpeg;base64,")
+    assert payload["warped_image_size"] == [630, 880]
     assert transport.command_log == []
     assert runtime.last_card_back_detection["found"] is True
+    assert "warped_image_data_url" not in runtime.last_card_back_detection
+
+
+def test_camera_page_has_card_back_truth_overlay_controls():
+    client = _client()
+
+    response = client.get("/camera")
+
+    assert response.status_code == 200
+    assert b'id="camera-card-detect"' in response.data
+    assert b'id="camera-card-truth-toggle"' in response.data
+    assert b'id="camera-card-truth-overlay"' in response.data
 
 
 def test_serial_api_lists_connects_sends_and_disconnects():

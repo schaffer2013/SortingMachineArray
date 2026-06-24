@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 630 880" role="img" aria-label="Magic card back truth guide">
+  <rect width="630" height="880" rx="28" fill="#1f1510"/>
+  <rect x="38" y="42" width="554" height="796" rx="10" fill="none" stroke="#d8a847" stroke-width="14"/>
+  <rect x="66" y="70" width="498" height="740" rx="6" fill="none" stroke="#3a2417" stroke-width="8"/>
+  <ellipse cx="315" cy="438" rx="188" ry="308" fill="#c88955" fill-opacity=".5" stroke="#6b3fb0" stroke-width="10"/>
+  <text x="315" y="190" text-anchor="middle" font-family="Georgia, serif" font-size="84" font-weight="700" fill="#dbeafe" stroke="#6b3326" stroke-width="5">MAGIC</text>
+  <text x="315" y="236" text-anchor="middle" font-family="Georgia, serif" font-size="32" font-weight="700" fill="#f8fafc">The Gathering</text>
+  <circle cx="184" cy="342" r="18" fill="#f8fafc" stroke="#8a6f45" stroke-width="4"/>
+  <circle cx="257" cy="392" r="18" fill="#e8f5a5" stroke="#8a6f45" stroke-width="4"/>
+  <circle cx="374" cy="392" r="18" fill="#b8edf5" stroke="#8a6f45" stroke-width="4"/>
+  <circle cx="279" cy="474" r="18" fill="#f8c79e" stroke="#8a6f45" stroke-width="4"/>
+  <circle cx="354" cy="474" r="18" fill="#d8b4fe" stroke="#8a6f45" stroke-width="4"/>
+  <rect x="155" y="707" width="320" height="54" fill="#f5f0df" stroke="#4b5563" stroke-width="5"/>
+  <text x="315" y="745" text-anchor="middle" font-family="Georgia, serif" font-size="34" fill="#334155">DECKMASTER</text>
+</svg>
