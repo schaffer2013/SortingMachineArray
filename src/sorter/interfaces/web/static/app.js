@@ -649,7 +649,9 @@ window.SorterPages = {
         if (cardDetectButton) cardDetectButton.disabled = true;
         if (cardDetectSummary) cardDetectSummary.textContent = "Detecting card back...";
         try {
-          const response = await apiFetch("/api/card-back/detect", {method: "POST"});
+          const response = await json("/api/card-back/detect", {
+            method: "POST",
+          });
           lastCardBackDetection = response;
           renderCardDetectionOverlay(response);
           if (cardDetectSummary) {
