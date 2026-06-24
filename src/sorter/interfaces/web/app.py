@@ -77,8 +77,13 @@ MOTION_CONTROL_ACTIONS = {
 
 
 class SerialBoardSession:
-    def __init__(self, event_logger: Callable[[str, dict[str, Any] | None], None] | None = None):
+    def __init__(
+        self,
+        event_logger: Callable[[str, dict[str, Any] | None], None] | None = None,
+        serial_log_path: Path | None = None,
+    ):
         self.event_logger = event_logger
+        self.serial_log_path = serial_log_path
         self.transport: MarlinSerialTransport | None = None
         self.lights: NeoPixelLightsAdapter | None = None
         self.port: str | None = None
@@ -94,6 +99,7 @@ class SerialBoardSession:
         self.connection_state = "disconnected"
         self.state_lock = threading.RLock()
         self.command_lock = threading.Lock()
+        self._load_persistent_serial_log()
 
     def _acquire_command(self, *, poll: bool = False) -> bool:
         if poll:
@@ -442,6 +448,7 @@ class SerialBoardSession:
             self.serial_poll_log.append(entry)
         else:
             self.serial_command_log.append(entry)
+        self._append_persistent_serial_log({**entry, "kind": log_kind})
         self._record_event(
             f"serial.{log_kind}",
             {
@@ -461,6 +468,33 @@ class SerialBoardSession:
             self.event_logger(event, details or {})
         except Exception:
             pass
+
+    def _append_persistent_serial_log(self, entry: dict[str, Any]) -> None:
+        if self.serial_log_path is None:
+            return
+        try:
+            self.serial_log_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.serial_log_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(_json_safe(entry), sort_keys=True) + "\n")
+        except Exception:
+            pass
+
+    def _load_persistent_serial_log(self) -> None:
+        if self.serial_log_path is None or not self.serial_log_path.exists():
+            return
+        try:
+            lines = self.serial_log_path.read_text(encoding="utf-8").splitlines()[-1000:]
+            for line in lines:
+                if not line.strip():
+                    continue
+                entry = json.loads(line)
+                kind = entry.pop("kind", "command")
+                if kind == "poll":
+                    self.serial_poll_log.append(entry)
+                else:
+                    self.serial_command_log.append(entry)
+        except Exception:
+            return
 
 
 def _port_auto_score(port: dict[str, str]) -> tuple[int, str]:
@@ -583,6 +617,7 @@ class WebRuntime:
         calibration: CalibrationProfile,
         slow_ms: int = 0,
         light_profiles_path: Path | None = None,
+        light_profiles_seed_path: Path | None = None,
         calibration_path: Path | None = None,
         runtime_mode: str = "hardware",
     ):
@@ -597,12 +632,14 @@ class WebRuntime:
         self.machine_initialized = False
         self.homed_axes: set[str] = set()
         self.light_profiles_path = light_profiles_path
+        self.light_profiles_seed_path = light_profiles_seed_path
         self.calibration_path = calibration_path
         self.repo_root = _repo_root()
         self.control_audit_path = self.repo_root / "data" / "logs" / "control_audit.jsonl"
         self.debug_events_path = self.repo_root / "data" / "logs" / "debug_events.jsonl"
+        self.serial_log_path = self.repo_root / "data" / "logs" / "serial_commands.jsonl"
         self.light_profiles = self._load_light_profiles()
-        self.serial_board = SerialBoardSession(event_logger=self.record_debug_event)
+        self.serial_board = SerialBoardSession(event_logger=self.record_debug_event, serial_log_path=self.serial_log_path)
         self.runtime_mode = runtime_mode
         self.hardware_runtime = bool(getattr(orchestrator, "hardware_runtime", False))
         self.lock = threading.RLock()
@@ -831,7 +868,8 @@ class WebRuntime:
             x_mm = float(payload["x_mm"])
             y_mm = float(payload["y_mm"])
             self.orchestrator.move_vac_xy_when_safe(self.calibration, x_mm, y_mm)
-            return {"ok": True, "message": f"Moved vacuum XY to ({x_mm:.2f}, {y_mm:.2f})"}
+            z_message = self._apply_optional_z(payload, default_coordinate_space="vacuum")
+            return {"ok": True, "message": f"Moved vacuum XY to ({x_mm:.2f}, {y_mm:.2f}){z_message}"}
         if action == "jog_xy":
             dx_mm = float(payload.get("dx_mm", 0.0))
             dy_mm = float(payload.get("dy_mm", 0.0))
@@ -848,11 +886,12 @@ class WebRuntime:
             y_mm = float(payload["y_mm"])
             self.orchestrator.move_camera_to_vacuum_xy_when_safe(self.calibration, x_mm, y_mm)
             target_x_mm, target_y_mm = self.calibration.camera_baseline_xy_for_vacuum_target(x_mm, y_mm)
+            z_message = self._apply_optional_z(payload, default_coordinate_space="camera")
             return {
                 "ok": True,
                 "message": (
                     f"Moved camera over ({x_mm:.2f}, {y_mm:.2f}) "
-                    f"using vacuum baseline ({target_x_mm:.2f}, {target_y_mm:.2f})"
+                    f"using vacuum baseline ({target_x_mm:.2f}, {target_y_mm:.2f}){z_message}"
                 ),
             }
         if action == "move_z":
@@ -1055,12 +1094,14 @@ class WebRuntime:
             x_mm = float(payload["x_mm"])
             y_mm = float(payload["y_mm"])
             self.orchestrator.move_vac_xy_when_safe(self.calibration, x_mm, y_mm)
-            return {"ok": True, "message": f"Moved vacuum XY to ({x_mm:.2f}, {y_mm:.2f})"}
+            z_message = self._apply_optional_z(payload, default_coordinate_space="vacuum")
+            return {"ok": True, "message": f"Moved vacuum XY to ({x_mm:.2f}, {y_mm:.2f}){z_message}"}
         if action == "move_camera_xy":
             x_mm = float(payload["x_mm"])
             y_mm = float(payload["y_mm"])
             self.orchestrator.move_camera_to_vacuum_xy_when_safe(self.calibration, x_mm, y_mm)
-            return {"ok": True, "message": f"Moved camera over ({x_mm:.2f}, {y_mm:.2f})"}
+            z_message = self._apply_optional_z(payload, default_coordinate_space="camera")
+            return {"ok": True, "message": f"Moved camera over ({x_mm:.2f}, {y_mm:.2f}){z_message}"}
         if action == "move_z":
             z_mm, z_label = self._vacuum_z_from_payload(payload)
             self.orchestrator.move_vac_z(z_mm)
@@ -1387,11 +1428,29 @@ class WebRuntime:
         if action in {"move_xy", "move_camera_xy"}:
             x_mm = float(payload["x_mm"])
             y_mm = float(payload["y_mm"])
+            z_mm = self._optional_vacuum_z_from_payload(
+                payload,
+                default_coordinate_space="camera" if action == "move_camera_xy" else "vacuum",
+            )
             if action == "move_camera_xy":
                 x_mm, y_mm = self.calibration.camera_baseline_xy_for_vacuum_target(x_mm, y_mm)
+            command = f"G1 X{_format_mm(x_mm)} Y{_format_mm(y_mm)}"
+            if z_mm is not None:
+                self._reject_large_absolute_move(
+                    axis="Z",
+                    target_mm=z_mm,
+                    current_mm=self._optional_serial_live_axis_position("z"),
+                    limit_mm=MAX_SERIAL_ABSOLUTE_Z_MOVE_MM,
+                    confirmed=bool(payload.get("confirm_large_move")),
+                )
+                command += f" Z{_format_mm(z_mm)}"
+            command += " F6000"
             return self.serial_board.send_commands(
-                [f"G90", f"G1 X{_format_mm(x_mm)} Y{_format_mm(y_mm)} F6000", "M400", "M114"],
-                message=f"Live board moved XY to ({x_mm:.2f}, {y_mm:.2f})",
+                ["G90", command, "M400", "M114"],
+                message=(
+                    f"Live board moved XY to ({x_mm:.2f}, {y_mm:.2f})"
+                    + (f" and vacuum Z to {z_mm:.2f}" if z_mm is not None else "")
+                ),
             )
         if action == "jog_xy":
             dx_mm = _bounded_jog_delta(payload.get("dx_mm", 0.0), axis="X", limit_mm=MAX_SERIAL_XY_JOG_MM)
@@ -1506,6 +1565,26 @@ class WebRuntime:
             raise ValueError(f"Unsupported Z coordinate space: {coordinate_space}")
         return requested_z, "vacuum"
 
+    def _optional_vacuum_z_from_payload(
+        self,
+        payload: dict[str, Any],
+        *,
+        default_coordinate_space: str,
+    ) -> float | None:
+        if "z_mm" not in payload or payload.get("z_mm") in {None, ""}:
+            return None
+        next_payload = dict(payload)
+        next_payload.setdefault("coordinate_space", default_coordinate_space)
+        z_mm, _ = self._vacuum_z_from_payload(next_payload)
+        return z_mm
+
+    def _apply_optional_z(self, payload: dict[str, Any], *, default_coordinate_space: str) -> str:
+        z_mm = self._optional_vacuum_z_from_payload(payload, default_coordinate_space=default_coordinate_space)
+        if z_mm is None:
+            return ""
+        self.orchestrator.move_vac_z(z_mm)
+        return f" and vacuum Z to {z_mm:.2f}"
+
     def _reject_large_absolute_move(
         self,
         *,
@@ -1536,9 +1615,10 @@ class WebRuntime:
                 "warning": {"red": 16, "green": 8, "blue": 0},
                 "fault": {"red": 16, "green": 0, "blue": 0},
             }
-        if self.light_profiles_path is None or not self.light_profiles_path.exists():
+        source_path = self.light_profiles_path if self.light_profiles_path and self.light_profiles_path.exists() else self.light_profiles_seed_path
+        if source_path is None or not source_path.exists():
             return default_profiles
-        with self.light_profiles_path.open("r", encoding="utf-8") as handle:
+        with source_path.open("r", encoding="utf-8") as handle:
             raw = json.load(handle)
         loaded = {
             str(item["name"]): {
@@ -2063,6 +2143,7 @@ def create_web_app(
     calibration: CalibrationProfile,
     slow_ms: int = 0,
     light_profiles_path: Path | None = None,
+    light_profiles_seed_path: Path | None = None,
     calibration_path: Path | None = None,
     runtime_mode: str = "hardware",
 ) -> Flask:
@@ -2072,6 +2153,7 @@ def create_web_app(
         calibration,
         slow_ms=slow_ms,
         light_profiles_path=light_profiles_path,
+        light_profiles_seed_path=light_profiles_seed_path,
         calibration_path=calibration_path,
         runtime_mode=runtime_mode,
     )

@@ -210,7 +210,15 @@ const commandTitle = command => {
 };
 const SERIAL_LOG_PAGE_SIZE = 25;
 const serialLogPages = {command: 0, poll: 0};
+const serialLogOpenEntries = {command: new Set(), poll: new Set()};
+const serialLogEntryKey = entry => `${entry.sent_at || ""}|${entry.command || ""}|${entry.ok ? "ok" : "err"}`;
 const renderSerialLog = (root, entries, emptyText, logKey) => {
+  root.querySelectorAll("details.serial-log-entry").forEach(detail => {
+    const key = detail.dataset.entryKey;
+    if (!key) return;
+    if (detail.open) serialLogOpenEntries[logKey].add(key);
+    else serialLogOpenEntries[logKey].delete(key);
+  });
   const newestFirst = [...entries].reverse();
   const totalPages = Math.max(1, Math.ceil(newestFirst.length / SERIAL_LOG_PAGE_SIZE));
   serialLogPages[logKey] = Math.min(serialLogPages[logKey] || 0, totalPages - 1);
@@ -223,8 +231,10 @@ const renderSerialLog = (root, entries, emptyText, logKey) => {
         const response = entry.response?.length ? entry.response.join("\n") : "(no immediate response)";
         const error = entry.error ? `\nERROR: ${entry.error}` : "";
         const title = commandTitle(entry.command);
+        const key = serialLogEntryKey(entry);
+        const isOpen = serialLogOpenEntries[logKey].has(key);
         return `
-          <details class="serial-log-entry">
+          <details class="serial-log-entry" data-entry-key="${escapeHtml(key)}" ${isOpen ? "open" : ""}>
             <summary>
               <span>${escapeHtml(entry.sent_at)}</span>
               <strong class="${entry.ok ? "status-ready" : "status-partial"}">${entry.ok ? "OK" : "ERR"}</strong>
@@ -585,6 +595,8 @@ window.SorterPages = {
         return {
           x_mm: Number(document.querySelector("#camera-move-x").value),
           y_mm: Number(document.querySelector("#camera-move-y").value),
+          z_mm: Number(document.querySelector("#camera-move-z").value),
+          coordinate_space: action === "move_camera_xy" ? "camera" : "vacuum",
         };
       }
       if (action === "move_z") return {z_mm: Number(document.querySelector("#camera-move-z").value), coordinate_space: "camera"};

@@ -170,6 +170,7 @@ data/runs.sqlite3
 data/cache/
 data/catalog/
 data/recognition_reports/
+local_data/
 .tmp_pytest/
 data/vision/raw/*
 !data/vision/raw/.gitkeep
