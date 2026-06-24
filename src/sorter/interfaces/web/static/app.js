@@ -5,6 +5,33 @@ const json = async (url, options = {}) => {
   return body;
 };
 const pretty = value => JSON.stringify(value, null, 2);
+const logDebugEvent = (event, details = {}) => {
+  const payload = JSON.stringify({event, details});
+  try {
+    if (navigator.sendBeacon) {
+      const blob = new Blob([payload], {type: "application/json"});
+      if (navigator.sendBeacon("/api/debug/event", blob)) return;
+    }
+    fetch("/api/debug/event", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: payload,
+      keepalive: true,
+    }).catch(() => {});
+  } catch (error) {
+  }
+};
+document.addEventListener("click", event => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  logDebugEvent("ui.button.click", {
+    path: window.location.pathname,
+    id: button.id || null,
+    text: button.textContent.trim(),
+    disabled: Boolean(button.disabled),
+    dataset: {...button.dataset},
+  });
+}, {capture: true});
 const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, character => ({
   "&": "&amp;",
   "<": "&lt;",
@@ -560,7 +587,7 @@ window.SorterPages = {
           y_mm: Number(document.querySelector("#camera-move-y").value),
         };
       }
-      if (action === "move_z") return {z_mm: Number(document.querySelector("#camera-move-z").value)};
+      if (action === "move_z") return {z_mm: Number(document.querySelector("#camera-move-z").value), coordinate_space: "camera"};
       if (action === "move_c") return {c_mm: Number(document.querySelector("#camera-move-c").value)};
       return {};
     };

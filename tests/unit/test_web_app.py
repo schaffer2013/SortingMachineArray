@@ -549,6 +549,42 @@ def test_connected_serial_board_takes_over_movement_controls():
     assert status["pose"]["x_mm"] == 5.0
 
 
+def test_camera_space_z_move_applies_camera_offset_in_simulation():
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path).with_updates(camera_offset_z_mm=5.0)
+    app = create_web_app(orchestrator, calibration)
+    app.config["runtime"].runtime_mode = "simulation"
+    app.testing = True
+    client = app.test_client()
+
+    response = client.post("/api/control/move_z", json={"z_mm": 12.0, "coordinate_space": "camera"})
+    status = client.get("/api/status").get_json()
+
+    assert response.status_code == 200
+    assert status["pose"]["z_mm"] == 7.0
+    assert "camera Z" in response.get_json()["message"]
+
+
+def test_camera_space_z_move_applies_camera_offset_for_live_serial():
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path).with_updates(camera_offset_z_mm=5.0)
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    runtime = app.config["runtime"]
+    runtime.serial_board = FakeSerialBoard()
+    runtime.serial_board.connect("COM8", 115200)
+    runtime.serial_board.live_pose["z"] = 7.0
+    client = app.test_client()
+
+    response = client.post("/api/control/move_z", json={"z_mm": 12.0, "coordinate_space": "camera"})
+
+    assert response.status_code == 200
+    assert "G1 Z7.000 F1200" in runtime.serial_board.sent_commands
+    assert "camera Z" in response.get_json()["message"]
+
+
 def test_live_serial_z_jog_uses_absolute_target_not_relative_mode():
     settings = _sim_truth_settings()
     orchestrator = build_sim_orchestrator(settings)
@@ -653,6 +689,26 @@ def test_direct_hardware_z_jog_sends_relative_move_without_known_position():
     assert transport.command_log == ["G91", "G1 Z-1.000 F300", "M400", "G90"]
 
 
+def test_direct_hardware_camera_space_z_move_applies_camera_offset():
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    transport = RecordingMarlinTransport()
+    orchestrator.motion = MarlinMotionAdapter(transport=transport)
+    calibration = CalibrationProfile.from_file(settings.calibration_path).with_updates(camera_offset_z_mm=5.0)
+    app = create_web_app(orchestrator, calibration)
+    app.testing = True
+    runtime = app.config["runtime"]
+    runtime.runtime_mode = "hardware"
+    runtime.hardware_runtime = True
+    client = app.test_client()
+
+    response = client.post("/api/control/move_z", json={"z_mm": 12.0, "coordinate_space": "camera"})
+
+    assert response.status_code == 200
+    assert transport.command_log == ["G90", "G1 Z7.000 F1200"]
+    assert "camera Z" in response.get_json()["message"]
+
+
 def test_direct_hardware_homed_z_allows_large_jog():
     settings = _sim_truth_settings()
     orchestrator = build_sim_orchestrator(settings)
@@ -687,6 +743,71 @@ def test_control_requests_are_written_to_persistent_audit_log(tmp_path):
     assert entries[-1]["payload"] == {"dz_mm": 1.0}
     assert entries[-1]["ok"] is True
     assert entries[-1]["runtime_target"] == "simulation"
+
+
+def test_debug_events_log_api_and_ui_events(tmp_path):
+    client = _client(runtime_mode="simulation")
+    runtime = client.application.config["runtime"]
+    runtime.debug_events_path = tmp_path / "debug_events.jsonl"
+
+    event = client.post("/api/debug/event", json={"event": "ui.button.click", "details": {"id": "save"}})
+    status = client.get("/api/status")
+
+    assert event.status_code == 200
+    assert status.status_code == 200
+    entries = [json.loads(line) for line in runtime.debug_events_path.read_text(encoding="utf-8").splitlines()]
+    assert any(entry["event"] == "ui.button.click" and entry["details"]["id"] == "save" for entry in entries)
+    assert any(entry["event"] == "api.call" and entry["details"]["path"] == "/api/debug/event" for entry in entries)
+    assert any(entry["event"] == "api.call" and entry["details"]["path"] == "/api/status" for entry in entries)
+
+
+def test_serial_session_writes_debug_events():
+    events = []
+    session = web_app_module.SerialBoardSession(event_logger=lambda event, details: events.append((event, details)))
+    session.transport = RecordingTransport()
+    session.port = "COM8"
+    session.connection_state = "verified"
+    session.last_success_monotonic = web_app_module.time.monotonic()
+
+    session.send_command("M114")
+
+    assert any(event == "serial.command" and details["command"] == "M114" for event, details in events)
+
+
+def test_serial_connect_uses_short_probe_timeout(monkeypatch):
+    created = []
+
+    class FakeConnection:
+        timeout = None
+
+    class FakeTransport:
+        def __init__(self, *, serial_port, baud_rate, timeout_seconds):
+            self.serial_port = serial_port
+            self.baud_rate = baud_rate
+            self.initial_timeout_seconds = timeout_seconds
+            self.timeout_seconds = timeout_seconds
+            self.connection = FakeConnection()
+            created.append(self)
+
+        def open(self):
+            return self.connection
+
+        def send_command(self, command):
+            return ["FIRMWARE_NAME:test", "ok"]
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(web_app_module, "MarlinSerialTransport", FakeTransport)
+    session = web_app_module.SerialBoardSession()
+
+    result = session.connect("COM8", 115200)
+
+    assert result["ok"] is True
+    assert created[0].serial_port == "COM8"
+    assert created[0].initial_timeout_seconds == web_app_module.SERIAL_CONNECT_TIMEOUT_SECONDS
+    assert created[0].timeout_seconds == web_app_module.SERIAL_COMMAND_TIMEOUT_SECONDS
+    assert created[0].connection.timeout == web_app_module.SERIAL_COMMAND_TIMEOUT_SECONDS
 
 
 def test_hardware_home_controls_send_axis_specific_and_grouped_sequences():
