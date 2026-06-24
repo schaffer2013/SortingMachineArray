@@ -1591,6 +1591,8 @@ window.SorterPages = {
     const modelMessage = document.querySelector("#training-model-message");
     const countsRoot = document.querySelector("#training-counts");
     const activateModel = document.querySelector("#training-model-activate");
+    const deleteModel = document.querySelector("#training-model-delete");
+    const boxFromCurrent = document.querySelector("#training-box-from-current");
     const generatePlan = document.querySelector("#training-plan-generate");
     const captureSelected = document.querySelector("#training-capture-selected");
     const captureAll = document.querySelector("#training-capture-all");
@@ -1602,6 +1604,7 @@ window.SorterPages = {
     const tuneCanvas = document.querySelector("#training-tune-canvas");
     const tuneMessage = document.querySelector("#training-tune-message");
     const cornerOverlay = document.querySelector("#training-corner-overlay");
+    const detectionMethodSelect = document.querySelector("#training-detection-method");
     const zoomInput = document.querySelector("#training-zoom");
     const cornerStepInput = document.querySelector("#training-corner-step");
     const saveLabel = document.querySelector("#training-save-label");
@@ -1625,6 +1628,8 @@ window.SorterPages = {
     const activeModelId = () => modelSelect.value || summary.active_model_id;
     const fieldNumber = id => Number(document.querySelector(id).value);
     const selectedSplit = () => document.querySelector("#training-split").value;
+    const selectedDetectionMethod = () => detectionMethodSelect?.value || "original";
+    const setFieldNumber = (id, value) => { document.querySelector(id).value = Number(value).toFixed(1); };
     const cornerObjectFromArray = points => {
       if (!Array.isArray(points) || points.length < 4) return null;
       return Object.fromEntries(corners.map((corner, index) => [corner, {x: Number(points[index][0]), y: Number(points[index][1])}]));
@@ -1709,6 +1714,16 @@ window.SorterPages = {
       truthCorners[selectedCorner].y = clampValue(truthCorners[selectedCorner].y + deltaY, 0, Math.max(0, frameImage.height - 1));
       renderTuning();
     };
+    const clearTuningView = message => {
+      currentSample = null;
+      frameImage = null;
+      expectedCorners = null;
+      truthCorners = null;
+      cornerPointer = null;
+      tunePointer = null;
+      renderTuning();
+      if (message) tuneMessage.textContent = message;
+    };
 
     async function refreshSummary() {
       summary = await json("/api/card-back-training");
@@ -1723,6 +1738,15 @@ window.SorterPages = {
         : `<option value="">No models yet</option>`;
       modelSelect.innerHTML = options;
       baseModelSelect.innerHTML = `<option value="">None</option>${options}`;
+      if (detectionMethodSelect) {
+        const selectedMethod = detectionMethodSelect.value || "original";
+        detectionMethodSelect.innerHTML = [
+          `<option value="original">Original</option>`,
+          `<option value="opencv">OpenCV</option>`,
+          ...models.map(model => `<option value="model:${escapeHtml(model.model_id)}">Model: ${escapeHtml(model.name)}</option>`),
+        ].join("");
+        detectionMethodSelect.value = Array.from(detectionMethodSelect.options).some(option => option.value === selectedMethod) ? selectedMethod : "original";
+      }
       if (active) modelSelect.value = active.model_id;
       modelPill.textContent = active ? active.name : "No model";
       modelPill.className = active ? "pill good-pill" : "pill warn-pill";
@@ -1738,18 +1762,25 @@ window.SorterPages = {
       const samples = model?.recent_samples || [];
       if (!samples.length) return;
       const sampleRows = samples.map(sample => `
-        <button type="button" class="training-sample-row secondary" data-sample-id="${escapeHtml(sample.sample_id)}">
-          <span>${escapeHtml(sample.split)}</span>
-          <strong>${escapeHtml(sample.sample_id)}</strong>
-          <span>${sample.has_truth ? "tuned" : "needs tune"}</span>
-        </button>
+        <div class="training-sample-row secondary">
+          <button type="button" class="training-sample-load" data-sample-id="${escapeHtml(sample.sample_id)}">
+            <span>${escapeHtml(sample.split)}</span>
+            <strong>${escapeHtml(sample.sample_id)}</strong>
+            <span>${sample.has_truth ? "tuned" : "needs tune"}</span>
+          </button>
+          <button type="button" class="training-sample-delete secondary" data-sample-id="${escapeHtml(sample.sample_id)}">Delete</button>
+        </div>
       `).join("");
       countsRoot.insertAdjacentHTML("afterend", `<div class="training-sample-list">${sampleRows}</div>`);
-      document.querySelectorAll(".training-sample-row").forEach(button => {
+      document.querySelectorAll(".training-sample-load").forEach(button => {
         button.onclick = () => loadExistingSample(model, button.dataset.sampleId);
+      });
+      document.querySelectorAll(".training-sample-delete").forEach(button => {
+        button.onclick = () => deleteTrainingSample(model, button.dataset.sampleId);
       });
     }
     async function loadExistingSample(model, sampleId) {
+      clearTuningView(`Loading ${sampleId}...`);
       const [sampleResponse, image] = await Promise.all([
         json(`/api/card-back-training/models/${model.model_id}/samples/${sampleId}`),
         loadImage(`/api/card-back-training/models/${model.model_id}/samples/${sampleId}/image.jpg`),
@@ -1766,6 +1797,14 @@ window.SorterPages = {
       tuneMessage.textContent = expectedCorners
         ? `Loaded ${sampleId}. Drag a corner on the source image or move it with the panel controls.`
         : `Loaded ${sampleId}. No detection corners were saved for this sample.`;
+    }
+    async function deleteTrainingSample(model, sampleId) {
+      if (!window.confirm(`Delete sample ${sampleId}?`)) return;
+      const result = await json(`/api/card-back-training/models/${model.model_id}/samples/${sampleId}`, {method:"DELETE"});
+      summary = result.summary;
+      if (currentSample?.sample_id === sampleId) clearTuningView(`Deleted ${sampleId}`);
+      renderModels();
+      modelMessage.textContent = `Deleted sample ${sampleId}`;
     }
     modelForm.onsubmit = async event => {
       event.preventDefault();
@@ -1799,6 +1838,19 @@ window.SorterPages = {
         modelMessage.textContent = error.message;
       }
     };
+    deleteModel.onclick = async () => {
+      const modelId = activeModelId();
+      if (!modelId || !window.confirm(`Delete model ${modelId} and all of its samples?`)) return;
+      try {
+        const result = await json(`/api/card-back-training/models/${modelId}`, {method:"DELETE"});
+        summary = result.summary;
+        clearTuningView(`Deleted model ${modelId}`);
+        renderModels();
+        modelMessage.textContent = `Deleted model ${modelId}`;
+      } catch (error) {
+        modelMessage.textContent = error.message;
+      }
+    };
 
     function planPayload() {
       return {
@@ -1816,6 +1868,28 @@ window.SorterPages = {
         light_max: fieldNumber("#training-light-max"),
       };
     }
+    boxFromCurrent.onclick = async () => {
+      try {
+        const status = await json("/api/status");
+        const pose = status.pose || {};
+        const centerX = Number(pose.x_mm);
+        const centerY = Number(pose.y_mm);
+        const centerZ = Number(pose.z_mm);
+        if (![centerX, centerY, centerZ].every(Number.isFinite)) throw new Error("Current XYZ pose is unavailable");
+        const radiusX = Math.max(0, fieldNumber("#training-box-radius-x"));
+        const radiusY = Math.max(0, fieldNumber("#training-box-radius-y"));
+        const radiusZ = Math.max(0, fieldNumber("#training-box-radius-z"));
+        setFieldNumber("#training-min-x", centerX - radiusX);
+        setFieldNumber("#training-max-x", centerX + radiusX);
+        setFieldNumber("#training-min-y", centerY - radiusY);
+        setFieldNumber("#training-max-y", centerY + radiusY);
+        setFieldNumber("#training-min-z", centerZ - radiusZ);
+        setFieldNumber("#training-max-z", centerZ + radiusZ);
+        planMessage.textContent = `Box centered at X ${centerX.toFixed(1)} / Y ${centerY.toFixed(1)} / Z ${centerZ.toFixed(1)}`;
+      } catch (error) {
+        planMessage.textContent = error.message;
+      }
+    };
     generatePlan.onclick = async () => {
       try {
         const result = await json("/api/card-back-training/plan", {
@@ -1886,6 +1960,7 @@ window.SorterPages = {
     }
 
     async function capturePlanEntry(entry) {
+      clearTuningView(`Capturing sample ${entry.index}...`);
       const result = await json("/api/card-back-training/capture", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
@@ -1897,6 +1972,7 @@ window.SorterPages = {
           settle_ms: fieldNumber("#training-settle-ms"),
           execute_motion: document.querySelector("#training-execute-motion").checked,
           run_detection: true,
+          detection_method: selectedDetectionMethod(),
         }),
       });
       summary = result.summary;
@@ -1946,9 +2022,16 @@ window.SorterPages = {
 
     detectButton.onclick = async () => {
       detectButton.disabled = true;
-      tuneMessage.textContent = "Detecting live card back...";
+      clearTuningView("Detecting live card back...");
       try {
-        const [detection, image] = await Promise.all([json("/api/card-back/detect", {method:"POST"}), loadImage("/api/camera/frame.jpg")]);
+        const [detection, image] = await Promise.all([
+          json("/api/card-back/detect", {
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({detection_method: selectedDetectionMethod()}),
+          }),
+          loadImage("/api/camera/frame.jpg"),
+        ]);
         frameImage = image;
         expectedCorners = cornerObjectFromArray(detection.corners_px) || defaultCardCorners(image);
         truthCorners = cloneCorners(expectedCorners);

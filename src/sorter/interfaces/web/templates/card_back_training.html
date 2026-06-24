@@ -16,6 +16,7 @@
         <select id="training-model-select"></select>
       </label>
       <button id="training-model-activate" type="button" class="secondary">Activate</button>
+      <button id="training-model-delete" type="button" class="secondary">Delete model</button>
     </div>
     <div id="training-counts" class="metric-list training-counts"></div>
     <form id="training-model-form" class="training-model-form">
@@ -57,6 +58,12 @@
         </select>
       </label>
     </div>
+    <div class="training-current-box">
+      <label>+/- X mm<input id="training-box-radius-x" type="number" min="0" step="0.1" value="20"></label>
+      <label>+/- Y mm<input id="training-box-radius-y" type="number" min="0" step="0.1" value="20"></label>
+      <label>+/- Z mm<input id="training-box-radius-z" type="number" min="0" step="0.1" value="5"></label>
+      <button id="training-box-from-current" type="button" class="secondary">Box around current</button>
+    </div>
     <label class="inline-toggle"><input id="training-execute-motion" type="checkbox"> Move camera and apply generated lighting while capturing</label>
     <canvas id="training-box-canvas" class="training-box-canvas" width="720" height="360"></canvas>
     <div class="button-row">
@@ -85,7 +92,10 @@
         <p class="eyebrow">Corner truth</p>
         <h2>Manual tuning</h2>
       </div>
-      <button id="training-detect" type="button" class="secondary">Detect live</button>
+      <div class="stacked-copy">
+        <label>Detect method<select id="training-detection-method"></select></label>
+        <button id="training-detect" type="button" class="secondary">Detect live</button>
+      </div>
     </div>
     <div class="training-tune-layout">
       <div class="training-frame-stage">

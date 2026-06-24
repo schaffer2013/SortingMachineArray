@@ -169,6 +169,22 @@ class CardBackTrainingStore:
             raise ValueError(f"Unknown training model: {model_id}")
         return self._model_summary(selected)
 
+    def delete_model(self, model_id: str) -> dict[str, Any]:
+        manifest = self._load_manifest(model_id)
+        was_active = bool(manifest.get("active"))
+        shutil.rmtree(self._model_dir(model_id))
+        remaining = []
+        for manifest_path in sorted(self.models_root.glob("*/manifest.json")):
+            remaining_manifest = self._load_manifest(manifest_path.parent.name)
+            remaining.append(remaining_manifest)
+        if was_active and remaining:
+            remaining[0]["active"] = True
+        for index, remaining_manifest in enumerate(remaining):
+            if was_active and index > 0:
+                remaining_manifest["active"] = False
+            self._save_manifest(remaining_manifest)
+        return {"deleted_model_id": model_id, "summary": self.summary()}
+
     def capture_sample(
         self,
         model_id: str,
@@ -239,6 +255,20 @@ class CardBackTrainingStore:
         self._save_manifest(manifest)
         return {**sample, "model": self._model_summary(manifest), "label": label}
 
+    def delete_sample(self, model_id: str, sample_id: str) -> dict[str, Any]:
+        manifest = self._load_manifest(model_id)
+        sample = _find_sample(manifest, sample_id)
+        model_dir = self._model_dir(model_id)
+        for relative_path in (sample.get("image_path"), sample.get("label_path")):
+            if relative_path:
+                path = model_dir / relative_path
+                if path.exists():
+                    path.unlink()
+        manifest["samples"] = [item for item in manifest.get("samples", []) if item.get("sample_id") != sample_id]
+        manifest["updated_at_utc"] = _now()
+        self._save_manifest(manifest)
+        return {"deleted_sample_id": sample_id, "model": self._model_summary(manifest)}
+
     def sample_image_path(self, model_id: str, sample_id: str) -> Path:
         manifest = self._load_manifest(model_id)
         sample = _find_sample(manifest, sample_id)
@@ -253,6 +283,25 @@ class CardBackTrainingStore:
         label_path = self._model_dir(model_id) / sample["label_path"]
         label = json.loads(label_path.read_text(encoding="utf-8"))
         return {**sample, "model": self._model_summary(manifest), "label": label}
+
+    def latest_corner_template(self, model_id: str) -> dict[str, Any]:
+        manifest = self._load_manifest(model_id)
+        for sample in reversed(manifest.get("samples", [])):
+            label_path = self._model_dir(model_id) / sample["label_path"]
+            label = json.loads(label_path.read_text(encoding="utf-8"))
+            image_size = label.get("image_size")
+            if not (isinstance(image_size, list) and len(image_size) == 2 and image_size[0] and image_size[1]):
+                continue
+            corners = label.get("truth_corners_px") or label.get("detection", {}).get("corners_px")
+            normalized = _normalize_corners(corners)
+            if not normalized:
+                continue
+            return {
+                "sample_id": sample["sample_id"],
+                "image_size": [float(image_size[0]), float(image_size[1])],
+                "corners_px": normalized,
+            }
+        raise ValueError(f"Training model has no tuned corner template: {model_id}")
 
     def register_training_run(self, model_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         manifest = self._load_manifest(model_id)

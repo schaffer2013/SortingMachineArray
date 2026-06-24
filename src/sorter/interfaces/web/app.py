@@ -810,6 +810,10 @@ class WebRuntime:
         model = self.card_back_training.set_active_model(str(payload.get("model_id", "")))
         return {"ok": True, "model": model, "summary": self.card_back_training_summary()}
 
+    def delete_card_back_training_model(self, model_id: str) -> dict[str, Any]:
+        result = self.card_back_training.delete_model(model_id)
+        return {"ok": True, **result}
+
     def generate_card_back_capture_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
         raw_box = payload.get("box") if isinstance(payload.get("box"), dict) else payload
         capture_box = CaptureBox.from_payload(raw_box)
@@ -850,6 +854,7 @@ class WebRuntime:
                 },
             )
             self.control("wait_idle", {})
+            time.sleep(1.0)
         if lighting.get("pixels"):
             self._set_light_pixels(lighting["pixels"], profile_name="training-capture")
         elif all(key in lighting for key in ("red", "green", "blue")):
@@ -859,12 +864,7 @@ class WebRuntime:
         image = self.latest_camera_image()
         detection = payload.get("detection") if isinstance(payload.get("detection"), dict) else None
         if detection is None and payload.get("run_detection", True):
-            detection = detect_card_back(image).to_json()
-            if detection.get("found") and detection.get("corners_px"):
-                refined_corners, refinement = self._refine_card_back_corners(image, detection["corners_px"])
-                detection["initial_corners_px"] = detection["corners_px"]
-                detection["corners_px"] = [list(point) for point in refined_corners]
-                detection["corner_refinement"] = refinement
+            detection = self._detect_card_back_with_method(image, str(payload.get("detection_method") or "original"))
         sample = self.card_back_training.capture_sample(
             model_id,
             image,
@@ -884,6 +884,10 @@ class WebRuntime:
     def update_card_back_training_sample(self, model_id: str, sample_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         sample = self.card_back_training.update_sample_label(model_id, sample_id, payload)
         return {"ok": True, "sample": sample, "summary": self.card_back_training_summary()}
+
+    def delete_card_back_training_sample(self, model_id: str, sample_id: str) -> dict[str, Any]:
+        result = self.card_back_training.delete_sample(model_id, sample_id)
+        return {"ok": True, **result, "summary": self.card_back_training_summary()}
 
     def register_card_back_training_run(self, model_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         result = self.card_back_training.register_training_run(model_id, payload)
@@ -1969,20 +1973,9 @@ class WebRuntime:
         image.save(temp_path, format="JPEG", quality=92)
         return self._recognize_image(temp_path, request_payload, camera_id="web_camera", source_mode="camera_web")
 
-    def detect_card_back_from_camera(self) -> dict[str, Any]:
+    def detect_card_back_from_camera(self, request_payload: dict[str, Any] | None = None) -> dict[str, Any]:
         image = self.latest_camera_image()
-        payload = detect_card_back(image).to_json()
-        if payload.get("found") and payload.get("corners_px"):
-            initial_corners = payload["corners_px"]
-            refined_corners, refinement = self._refine_card_back_corners(image, initial_corners)
-            payload["initial_corners_px"] = initial_corners
-            payload["corners_px"] = [list(point) for point in refined_corners]
-            payload["corner_refinement"] = refinement
-            warped = warp_card_back_image(image, refined_corners)
-            buffer = BytesIO()
-            warped.save(buffer, format="JPEG", quality=88)
-            payload["warped_image_data_url"] = "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
-            payload["warped_image_size"] = [warped.width, warped.height]
+        payload = self._detect_card_back_with_method(image, str((request_payload or {}).get("detection_method") or "original"))
         payload["captured_at_utc"] = datetime.now(UTC).isoformat()
         self.last_card_back_detection = {key: value for key, value in payload.items() if key != "warped_image_data_url"}
         self.record_debug_event(
@@ -1992,9 +1985,60 @@ class WebRuntime:
                 "confidence": payload.get("confidence"),
                 "center_px": payload.get("center_px"),
                 "rotation_degrees": payload.get("rotation_degrees"),
+                "detection_method": payload.get("detection_method"),
             },
         )
         return payload
+
+    def _detect_card_back_with_method(self, image: Image.Image, method: str) -> dict[str, Any]:
+        normalized_method = method or "original"
+        if normalized_method.startswith("model:"):
+            payload = self._detect_card_back_with_training_model(image, normalized_method.split(":", 1)[1])
+        else:
+            payload = detect_card_back(image).to_json()
+            payload["detection_method"] = "opencv" if normalized_method == "opencv" else "original"
+            if normalized_method != "opencv" and payload.get("found") and payload.get("corners_px"):
+                initial_corners = payload["corners_px"]
+                refined_corners, refinement = self._refine_card_back_corners(image, initial_corners)
+                payload["initial_corners_px"] = initial_corners
+                payload["corners_px"] = [list(point) for point in refined_corners]
+                payload["corner_refinement"] = refinement
+        if payload.get("found") and payload.get("corners_px"):
+            warped = warp_card_back_image(image, payload["corners_px"])
+            buffer = BytesIO()
+            warped.save(buffer, format="JPEG", quality=88)
+            payload["warped_image_data_url"] = "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+            payload["warped_image_size"] = [warped.width, warped.height]
+        return payload
+
+    def _detect_card_back_with_training_model(self, image: Image.Image, model_id: str) -> dict[str, Any]:
+        template = self.card_back_training.latest_corner_template(model_id)
+        source_width, source_height = template["image_size"]
+        scale_x = image.width / max(1.0, float(source_width))
+        scale_y = image.height / max(1.0, float(source_height))
+        corners = [
+            [round(float(point[0]) * scale_x, 2), round(float(point[1]) * scale_y, 2)]
+            for point in template["corners_px"]
+        ]
+        xs = [point[0] for point in corners]
+        ys = [point[1] for point in corners]
+        area = max(0.0, (max(xs) - min(xs)) * (max(ys) - min(ys)))
+        return {
+            "found": True,
+            "confidence": 0.55,
+            "image_width": image.width,
+            "image_height": image.height,
+            "center_px": [round((min(xs) + max(xs)) / 2, 2), round((min(ys) + max(ys)) / 2, 2)],
+            "component_bbox_px": [round(min(xs), 2), round(min(ys), 2), round(max(xs), 2), round(max(ys), 2)],
+            "estimated_card_bbox_px": [round(min(xs), 2), round(min(ys), 2), round(max(xs), 2), round(max(ys), 2)],
+            "corners_px": corners,
+            "rotation_degrees": None,
+            "skew_degrees": None,
+            "area_fraction": round(area / max(1, image.width * image.height), 5),
+            "message": f"Seeded corners from training model {model_id}",
+            "detection_method": f"model:{model_id}",
+            "model_template_sample_id": template["sample_id"],
+        }
 
     def _refine_card_back_corners(
         self,
@@ -2694,7 +2738,7 @@ def create_web_app(
     @app.post("/api/card-back/detect")
     def api_card_back_detect():
         try:
-            return jsonify(runtime.detect_card_back_from_camera())
+            return jsonify(runtime.detect_card_back_from_camera(request.get_json(silent=True) or {}))
         except Exception as exc:
             return jsonify({"found": False, "confidence": 0.0, "message": str(exc), "status": runtime.status()}), 400
 
@@ -2716,6 +2760,13 @@ def create_web_app(
         except Exception as exc:
             return jsonify({"ok": False, "message": str(exc)}), 400
 
+    @app.delete("/api/card-back-training/models/<model_id>")
+    def api_delete_card_back_training_model(model_id: str):
+        try:
+            return jsonify(runtime.delete_card_back_training_model(model_id))
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
+
     @app.post("/api/card-back-training/plan")
     def api_card_back_training_plan():
         try:
@@ -2734,6 +2785,13 @@ def create_web_app(
     def api_card_back_training_update_sample(model_id: str, sample_id: str):
         try:
             return jsonify(runtime.update_card_back_training_sample(model_id, sample_id, request.get_json(silent=True) or {}))
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
+
+    @app.delete("/api/card-back-training/models/<model_id>/samples/<sample_id>")
+    def api_card_back_training_delete_sample(model_id: str, sample_id: str):
+        try:
+            return jsonify(runtime.delete_card_back_training_sample(model_id, sample_id))
         except Exception as exc:
             return jsonify({"ok": False, "message": str(exc)}), 400
 
