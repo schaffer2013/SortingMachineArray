@@ -295,12 +295,19 @@ th { color:var(--muted); font-size:.82rem; text-transform:uppercase; letter-spac
 .training-tune-layout { display:grid; grid-template-columns:minmax(0, 1fr) minmax(260px, 340px); gap:16px; align-items:start; }
 .training-frame-stage { position:relative; min-width:0; border-radius:16px; overflow:hidden; background:var(--code-bg); }
 .training-camera-feed { min-height:460px; object-fit:contain; }
-.training-corner-overlay { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+.training-corner-overlay { position:absolute; inset:0; width:100%; height:100%; pointer-events:auto; touch-action:none; }
 .training-corner-overlay polygon { fill:rgba(56,189,248,.08); stroke:var(--accent); stroke-width:3; vector-effect:non-scaling-stroke; }
 .training-corner-overlay polygon.truth { fill:rgba(245,158,11,.08); stroke:var(--warn); }
+.training-corner-overlay .corner-handle { fill:var(--panel); stroke:var(--warn); stroke-width:3; vector-effect:non-scaling-stroke; cursor:grab; }
+.training-corner-overlay .corner-handle.selected { fill:var(--warn); stroke:var(--text); }
+.training-corner-overlay .corner-handle:active { cursor:grabbing; }
 .training-tune-side { display:grid; gap:12px; }
 .training-corner-buttons { display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; }
 .training-corner-buttons button { padding:9px 10px; }
+.training-nudge-panel { display:grid; grid-template-columns:minmax(90px, .75fr) minmax(0, 1.25fr); gap:10px; align-items:end; }
+.training-nudge-panel label { margin:0; }
+.training-nudge-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:6px; }
+.training-nudge-grid button { min-height:36px; padding:7px 8px; border-radius:10px; }
 .training-zoom-stage {
   position:relative; border:1px solid var(--line); border-radius:12px; overflow:hidden; background:var(--code-bg);
 }
@@ -317,6 +324,7 @@ th { color:var(--muted); font-size:.82rem; text-transform:uppercase; letter-spac
   .hero-grid, .dashboard-grid, .two-column, .camera-control-grid, .training-grid, .training-workflow-grid { grid-template-columns: 1fr; }
   .camera-feed-layout { grid-template-columns: 1fr; }
   .training-tune-layout { grid-template-columns: 1fr; }
+  .training-nudge-panel { grid-template-columns: 1fr; }
   .training-workflow-steps { grid-template-columns: 1fr; }
   .movement-grid { grid-template-columns: 1fr; }
   .large-camera-feed { min-height:auto; }

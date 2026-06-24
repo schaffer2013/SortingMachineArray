@@ -99,6 +99,17 @@
           <button type="button" data-training-corner="se" class="secondary">SE</button>
           <button type="button" data-training-corner="sw" class="secondary">SW</button>
         </div>
+        <div class="training-nudge-panel" aria-label="Move selected corner">
+          <label>Move px<input id="training-corner-step" type="number" min="0.1" max="100" step="0.1" value="1"></label>
+          <div class="training-nudge-grid">
+            <span></span>
+            <button type="button" class="secondary" data-training-nudge="0,-1">Up</button>
+            <span></span>
+            <button type="button" class="secondary" data-training-nudge="-1,0">Left</button>
+            <button type="button" class="secondary" data-training-nudge="0,1">Down</button>
+            <button type="button" class="secondary" data-training-nudge="1,0">Right</button>
+          </div>
+        </div>
         <label>Zoom<input id="training-zoom" type="range" min="1" max="12" step="0.5" value="4"></label>
         <div class="training-zoom-stage">
           <canvas id="training-tune-canvas" width="420" height="420" tabindex="0" aria-label="Card alignment inspection canvas"></canvas>
@@ -108,7 +119,7 @@
           <button id="training-label-eval" type="button" class="secondary">Mark eval</button>
           <button id="training-save-label" type="button">Save tuning</button>
         </div>
-        <p id="training-tune-message" class="muted">Capture or detect a card back. Click or drag the inspection view to pan anywhere on the card, select corners, then use arrow keys for 1 px moves. Hold Shift for 10 px.</p>
+        <p id="training-tune-message" class="muted">Capture or detect a card back. Pan the inspection view, drag corners on the image, or move the selected corner with the panel buttons.</p>
       </aside>
     </div>
   </article>

@@ -1603,6 +1603,7 @@ window.SorterPages = {
     const tuneMessage = document.querySelector("#training-tune-message");
     const cornerOverlay = document.querySelector("#training-corner-overlay");
     const zoomInput = document.querySelector("#training-zoom");
+    const cornerStepInput = document.querySelector("#training-corner-step");
     const saveLabel = document.querySelector("#training-save-label");
     const labelTrain = document.querySelector("#training-label-train");
     const labelEval = document.querySelector("#training-label-eval");
@@ -1619,6 +1620,7 @@ window.SorterPages = {
     let truthImage = null;
     let tuneViewport = {x: 315, y: 440};
     let tunePointer = null;
+    let cornerPointer = null;
 
     const activeModelId = () => modelSelect.value || summary.active_model_id;
     const fieldNumber = id => Number(document.querySelector(id).value);
@@ -1632,6 +1634,7 @@ window.SorterPages = {
     const cardAspect = 63 / 88;
     const outputSize = () => ({width: truthImage?.naturalWidth || 630, height: truthImage?.naturalHeight || 880});
     const clampValue = (value, min, max) => Math.max(min, Math.min(max, value));
+    const cornerStep = () => clampValue(Number(cornerStepInput?.value) || 1, 0.1, 100);
     const defaultCardCorners = image => {
       const height = image.height * 0.82;
       const width = Math.min(image.width * 0.82, height * cardAspect);
@@ -1690,6 +1693,22 @@ window.SorterPages = {
         y: (matrix.d * x + matrix.e * y + matrix.f) / denominator,
       };
     };
+    const selectCorner = corner => {
+      selectedCorner = corner;
+      document.querySelectorAll("[data-training-corner]").forEach(item => item.classList.toggle("secondary", item.dataset.trainingCorner !== selectedCorner));
+      renderTuning();
+      tuneCanvas.focus();
+    };
+    const setSelectedCornerOnly = corner => {
+      selectedCorner = corner;
+      document.querySelectorAll("[data-training-corner]").forEach(item => item.classList.toggle("secondary", item.dataset.trainingCorner !== selectedCorner));
+    };
+    const moveSelectedCorner = (deltaX, deltaY) => {
+      if (!truthCorners?.[selectedCorner] || !frameImage) return;
+      truthCorners[selectedCorner].x = clampValue(truthCorners[selectedCorner].x + deltaX, 0, Math.max(0, frameImage.width - 1));
+      truthCorners[selectedCorner].y = clampValue(truthCorners[selectedCorner].y + deltaY, 0, Math.max(0, frameImage.height - 1));
+      renderTuning();
+    };
 
     async function refreshSummary() {
       summary = await json("/api/card-back-training");
@@ -1745,7 +1764,7 @@ window.SorterPages = {
         : cloneCorners(expectedCorners);
       renderTuning();
       tuneMessage.textContent = expectedCorners
-        ? `Loaded ${sampleId}. Choose a corner and tune with arrow keys.`
+        ? `Loaded ${sampleId}. Drag a corner on the source image or move it with the panel controls.`
         : `Loaded ${sampleId}. No detection corners were saved for this sample.`;
     }
     modelForm.onsubmit = async event => {
@@ -1936,7 +1955,7 @@ window.SorterPages = {
         currentSample = null;
         lastResult.textContent = pretty(detection);
         tuneMessage.textContent = detection.found
-          ? "Detected corners. Pan the reference view and tune the warped image with the arrow keys."
+          ? "Detected corners. Pan the reference view, drag source-image corners, or use the panel controls."
           : "No card detected; seeded a centered manual box you can tune.";
         renderTuning();
       } catch (error) {
@@ -1947,26 +1966,15 @@ window.SorterPages = {
     };
     document.querySelectorAll("[data-training-corner]").forEach(button => {
       button.onclick = () => {
-        selectedCorner = button.dataset.trainingCorner;
-        document.querySelectorAll("[data-training-corner]").forEach(item => item.classList.toggle("secondary", item.dataset.trainingCorner !== selectedCorner));
-        renderTuning();
-        tuneCanvas.focus();
+        selectCorner(button.dataset.trainingCorner);
       };
     });
-    tuneCanvas.addEventListener("keydown", event => {
-      if (!truthCorners?.[selectedCorner]) return;
-      const step = event.shiftKey ? 10 : 1;
-      const delta = {
-        ArrowLeft: [-step, 0],
-        ArrowRight: [step, 0],
-        ArrowUp: [0, -step],
-        ArrowDown: [0, step],
-      }[event.key];
-      if (!delta) return;
-      event.preventDefault();
-      truthCorners[selectedCorner].x += delta[0];
-      truthCorners[selectedCorner].y += delta[1];
-      renderTuning();
+    document.querySelectorAll("[data-training-nudge]").forEach(button => {
+      button.onclick = () => {
+        const [x, y] = button.dataset.trainingNudge.split(",").map(Number);
+        const step = cornerStep();
+        moveSelectedCorner(x * step, y * step);
+      };
     });
     zoomInput.oninput = () => {
       clampViewport();
@@ -1999,6 +2007,43 @@ window.SorterPages = {
         view,
       };
     };
+    const overlayPointFromEvent = event => {
+      if (!cornerOverlay?.createSVGPoint || !cornerOverlay.getScreenCTM()) return null;
+      const point = cornerOverlay.createSVGPoint();
+      point.x = event.clientX;
+      point.y = event.clientY;
+      return point.matrixTransform(cornerOverlay.getScreenCTM().inverse());
+    };
+    cornerOverlay?.addEventListener("pointerdown", event => {
+      const handle = event.target.closest?.("[data-training-corner-handle]");
+      if (!handle || !truthCorners?.[handle.dataset.trainingCornerHandle]) return;
+      event.preventDefault();
+      const corner = handle.dataset.trainingCornerHandle;
+      setSelectedCornerOnly(corner);
+      renderCornerOverlay();
+      cornerPointer = {id: event.pointerId, corner};
+      cornerOverlay.setPointerCapture(event.pointerId);
+    });
+    cornerOverlay?.addEventListener("pointermove", event => {
+      if (!cornerPointer || cornerPointer.id !== event.pointerId || !frameImage) return;
+      event.preventDefault();
+      const point = overlayPointFromEvent(event);
+      if (!point) return;
+      truthCorners[cornerPointer.corner].x = clampValue(point.x, 0, Math.max(0, frameImage.width - 1));
+      truthCorners[cornerPointer.corner].y = clampValue(point.y, 0, Math.max(0, frameImage.height - 1));
+      renderCornerOverlay();
+    });
+    cornerOverlay?.addEventListener("pointerup", event => {
+      if (!cornerPointer || cornerPointer.id !== event.pointerId) return;
+      event.preventDefault();
+      cornerPointer = null;
+      renderTuning();
+    });
+    cornerOverlay?.addEventListener("pointercancel", event => {
+      if (cornerPointer?.id !== event.pointerId) return;
+      cornerPointer = null;
+      renderTuning();
+    });
     tuneCanvas.addEventListener("pointerdown", event => {
       tuneCanvas.focus();
       const point = outputPointFromEvent(event);
@@ -2118,9 +2163,14 @@ window.SorterPages = {
       cornerOverlay.setAttribute("viewBox", `0 0 ${frameImage.width} ${frameImage.height}`);
       const polygon = cornersToArray(expectedCorners).map(([x, y]) => `${x},${y}`).join(" ");
       const truth = truthCorners ? cornersToArray(truthCorners).map(([x, y]) => `${x},${y}`).join(" ") : "";
+      const handles = truthCorners ? corners.map(corner => {
+        const point = truthCorners[corner];
+        return `<circle class="corner-handle${corner === selectedCorner ? " selected" : ""}" data-training-corner-handle="${corner}" cx="${Number(point.x)}" cy="${Number(point.y)}" r="12"><title>${corner.toUpperCase()}</title></circle>`;
+      }).join("") : "";
       cornerOverlay.innerHTML = `
         <polygon class="expected" points="${escapeHtml(polygon)}"></polygon>
         ${truth ? `<polygon class="truth" points="${escapeHtml(truth)}"></polygon>` : ""}
+        ${handles}
       `;
     }
     async function saveCurrentLabel(split = null) {
