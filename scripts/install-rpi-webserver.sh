@@ -16,14 +16,8 @@ cd "${REPO_DIR}"
 git fetch origin main
 git checkout main
 git pull --ff-only origin main
-git submodule update --init --recursive
-python3 -m venv --system-site-packages .venv
-. .venv/bin/activate
-python -m pip install --upgrade pip setuptools wheel
-python -m pip install -e '.[hardware]'
-python -m pip install -e './third_party/fuzzy-enigma-card-recognition[moss]'
-python -m pip install 'paddleocr>=3.7'
-chmod +x scripts/start-rpi-webserver.sh
+chmod +x scripts/start-rpi-webserver.sh scripts/deploy-rpi-webserver.sh
+scripts/deploy-rpi-webserver.sh --no-pull
 
 cat > /tmp/${SERVICE_NAME}.service <<SERVICE
 [Unit]
