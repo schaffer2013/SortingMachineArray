@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 import math
 from typing import Any
 
-from PIL import Image, ImageChops, ImageFilter
+from PIL import Image
 
 
 CARD_ASPECT_WIDTH_OVER_HEIGHT = 63.0 / 88.0
@@ -192,30 +192,42 @@ def refine_card_back_corners_to_truth(
     if len(corners) != 4:
         raise ValueError("Card corner refinement requires exactly four card corners")
 
+    import numpy as np
+
     ordered = _ordered_corners(tuple((float(point[0]), float(point[1])) for point in corners))
     truth = truth_image.convert("RGB").resize(score_size, Image.Resampling.LANCZOS)
-    initial_warp = warp_card_back_image(image, ordered, output_size=score_size)
-    initial_score = _truth_similarity_score(initial_warp, truth)
-    seed_corners, feature_metrics = _feature_seeded_corners(
-        initial_warp,
-        truth,
+    source_rgb = np.array(image.convert("RGB"))
+    truth_rgb = np.array(truth)
+    initial_warp_rgb = _warp_card_back_rgb_array(source_rgb, ordered, output_size=score_size)
+    truth_circles = _detect_center_circles(truth_rgb)
+    initial_score, initial_circle_metrics = _circle_truth_score(initial_warp_rgb, truth_rgb, truth_circles)
+    seed_corners, seed_metrics = _circle_seeded_corners(
+        initial_warp_rgb,
         ordered,
+        truth_circles,
         score_size=score_size,
         max_corner_adjust_px=max_corner_adjust_px,
     )
-    seed_score = _truth_similarity_score(warp_card_back_image(image, seed_corners, output_size=score_size), truth)
+    seed_score, _ = _circle_truth_score(
+        _warp_card_back_rgb_array(source_rgb, seed_corners, output_size=score_size),
+        truth_rgb,
+        truth_circles,
+    )
     if seed_score < initial_score:
         seed_corners = ordered
-        seed_score = initial_score
+        seed_metrics = {"applied": False, "reason": "circle_seed_did_not_improve"}
     best_corners, best_score = _coordinate_descent_corners(
-        image,
+        source_rgb,
         seed_corners,
-        truth,
+        truth_rgb,
+        truth_circles,
         score_size=score_size,
-        initial_score=seed_score,
+        initial_score=initial_score,
         max_corner_adjust_px=max_corner_adjust_px,
         original_corners=ordered,
     )
+    best_warp_rgb = _warp_card_back_rgb_array(source_rgb, best_corners, output_size=score_size)
+    _, final_circle_metrics = _circle_truth_score(best_warp_rgb, truth_rgb, truth_circles)
     ordered_best = _ordered_corners(best_corners)
     return (
         tuple((round(float(x), 2), round(float(y), 2)) for x, y in ordered_best),
@@ -225,18 +237,22 @@ def refine_card_back_corners_to_truth(
             "refined_score": round(best_score, 5),
             "score_delta": round(best_score - initial_score, 5),
             "max_corner_adjust_px": round(_max_corner_delta(ordered, ordered_best), 2),
-            "method": "bounded_corner_search",
+            "corner_regularization_penalty": round(_corner_regularization_penalty(ordered, ordered_best, max_corner_adjust_px), 5),
+            "method": "bounded_center_circle_search",
             "output_size": [output_size[0], output_size[1]],
             "score_size": [score_size[0], score_size[1]],
-            "feature_seed": feature_metrics,
+            "circle_seed": seed_metrics,
+            "initial_circle_fit": initial_circle_metrics,
+            "final_circle_fit": final_circle_metrics,
         },
     )
 
 
 def _coordinate_descent_corners(
-    image: Image.Image,
+    source_rgb: Any,
     corners: tuple[tuple[float, float], ...],
-    truth: Image.Image,
+    truth_rgb: Any,
+    truth_circles: tuple[tuple[float, float, float], ...],
     *,
     score_size: tuple[int, int],
     initial_score: float,
@@ -268,10 +284,12 @@ def _coordinate_descent_corners(
                     candidate_tuple = tuple((float(x), float(y)) for x, y in candidate)
                     if _max_corner_delta(original, candidate_tuple) > max_corner_adjust_px:
                         continue
-                    score = _truth_similarity_score(
-                        warp_card_back_image(image, candidate_tuple, output_size=score_size),
-                        truth,
+                    raw_score, _ = _circle_truth_score(
+                        _warp_card_back_rgb_array(source_rgb, candidate_tuple, output_size=score_size),
+                        truth_rgb,
+                        truth_circles,
                     )
+                    score = raw_score - _corner_regularization_penalty(original, candidate_tuple, max_corner_adjust_px)
                     if score > best_score + 0.0005:
                         best = candidate_tuple
                         best_score = score
@@ -281,43 +299,29 @@ def _coordinate_descent_corners(
     return best, best_score
 
 
-def _feature_seeded_corners(
-    initial_warp: Image.Image,
-    truth: Image.Image,
+def _circle_seeded_corners(
+    initial_warp_rgb: Any,
     corners: tuple[tuple[float, float], ...],
+    truth_circles: tuple[tuple[float, float, float], ...],
     *,
     score_size: tuple[int, int],
     max_corner_adjust_px: float,
 ) -> tuple[tuple[tuple[float, float], ...], dict[str, Any]]:
-    try:
-        import cv2
-        import numpy as np
-    except Exception as exc:  # pragma: no cover - import availability is environment dependent
-        return corners, {"applied": False, "reason": f"OpenCV unavailable: {exc}"}
+    import cv2
+    import numpy as np
 
-    candidate_gray = cv2.cvtColor(np.array(initial_warp.convert("RGB")), cv2.COLOR_RGB2GRAY)
-    truth_gray = cv2.cvtColor(np.array(truth.convert("RGB")), cv2.COLOR_RGB2GRAY)
-    detector = cv2.ORB_create(nfeatures=700)
-    candidate_keypoints, candidate_descriptors = detector.detectAndCompute(candidate_gray, None)
-    truth_keypoints, truth_descriptors = detector.detectAndCompute(truth_gray, None)
-    if candidate_descriptors is None or truth_descriptors is None:
-        return corners, {"applied": False, "reason": "not_enough_features", "matches": 0}
-
-    matcher = cv2.BFMatcher(cv2.NORM_HAMMING)
-    raw_matches = matcher.knnMatch(candidate_descriptors, truth_descriptors, k=2)
-    matches = [
-        pair[0]
-        for pair in raw_matches
-        if len(pair) == 2 and pair[0].distance < pair[1].distance * 0.76
-    ]
-    if len(matches) < 8:
-        return corners, {"applied": False, "reason": "not_enough_matches", "matches": len(matches)}
-
-    source_points = np.float32([candidate_keypoints[match.queryIdx].pt for match in matches]).reshape(-1, 1, 2)
-    truth_points = np.float32([truth_keypoints[match.trainIdx].pt for match in matches]).reshape(-1, 1, 2)
-    alignment, inlier_mask = cv2.findHomography(source_points, truth_points, cv2.RANSAC, 4.0)
-    if alignment is None or inlier_mask is None:
-        return corners, {"applied": False, "reason": "homography_failed", "matches": len(matches)}
+    candidate_circles = _detect_center_circles(initial_warp_rgb)
+    candidate_points, truth_points, mean_error = _best_circle_center_match(candidate_circles, truth_circles)
+    if candidate_points is None or truth_points is None:
+        return corners, {"applied": False, "reason": "not_enough_circle_matches"}
+    affine, inlier_mask = cv2.estimateAffinePartial2D(
+        np.array(candidate_points, dtype="float32").reshape(-1, 1, 2),
+        np.array(truth_points, dtype="float32").reshape(-1, 1, 2),
+        method=cv2.LMEDS,
+    )
+    if affine is None:
+        return corners, {"applied": False, "reason": "circle_affine_failed", "mean_center_error_px": round(mean_error, 2)}
+    alignment = np.vstack([affine, [0.0, 0.0, 1.0]])
 
     width, height = score_size
     source = np.array(_ordered_corners(corners), dtype="float32")
@@ -332,39 +336,159 @@ def _feature_seeded_corners(
     )
     initial_matrix = cv2.getPerspectiveTransform(source, destination)
     refined_matrix = alignment @ initial_matrix
-    inverse = np.linalg.inv(refined_matrix)
-    refined = cv2.perspectiveTransform(destination.reshape(-1, 1, 2), inverse).reshape(4, 2)
-    refined_corners = tuple((float(x), float(y)) for x, y in refined)
-    if _max_corner_delta(corners, refined_corners) > max_corner_adjust_px:
+    refined = cv2.perspectiveTransform(destination.reshape(-1, 1, 2), np.linalg.inv(refined_matrix)).reshape(4, 2)
+    refined_corners = _ordered_corners(tuple((float(x), float(y)) for x, y in refined))
+    max_delta = _max_corner_delta(corners, refined_corners)
+    if max_delta > max_corner_adjust_px:
         return corners, {
             "applied": False,
-            "reason": "feature_adjustment_exceeded_limit",
-            "matches": len(matches),
-            "inliers": int(inlier_mask.sum()),
+            "reason": "circle_adjustment_exceeded_limit",
+            "mean_center_error_px": round(mean_error, 2),
+            "max_corner_adjust_px": round(max_delta, 2),
         }
-    return _ordered_corners(refined_corners), {
+    return refined_corners, {
         "applied": True,
-        "matches": len(matches),
-        "inliers": int(inlier_mask.sum()),
-        "inlier_ratio": round(float(inlier_mask.sum()) / float(len(matches)), 4),
+        "mean_center_error_px": round(mean_error, 2),
+        "max_corner_adjust_px": round(max_delta, 2),
+        "inliers": None if inlier_mask is None else int(inlier_mask.sum()),
     }
 
 
-def _truth_similarity_score(candidate: Image.Image, truth: Image.Image) -> float:
-    candidate = candidate.convert("RGB").resize(truth.size, Image.Resampling.LANCZOS)
-    candidate_edges = candidate.convert("L").filter(ImageFilter.FIND_EDGES)
-    truth_edges = truth.convert("L").filter(ImageFilter.FIND_EDGES)
-    edge_error = _mean_image_error(ImageChops.difference(candidate_edges, truth_edges))
-    color_error = _mean_image_error(ImageChops.difference(candidate, truth))
-    return max(0.0, 1.0 - (edge_error * 0.65 + color_error * 0.35))
+def _warp_card_back_rgb_array(
+    source_rgb: Any,
+    corners: tuple[tuple[float, float], ...],
+    *,
+    output_size: tuple[int, int],
+) -> Any:
+    import cv2
+    import numpy as np
+
+    ordered = _ordered_corners(corners)
+    width, height = output_size
+    source = np.array(ordered, dtype="float32")
+    destination = np.array(
+        [
+            [0.0, 0.0],
+            [float(width - 1), 0.0],
+            [float(width - 1), float(height - 1)],
+            [0.0, float(height - 1)],
+        ],
+        dtype="float32",
+    )
+    matrix = cv2.getPerspectiveTransform(source, destination)
+    return cv2.warpPerspective(source_rgb, matrix, (width, height))
 
 
-def _mean_image_error(diff: Image.Image) -> float:
-    histogram = diff.histogram()
-    channels = max(1, len(histogram) // 256)
-    pixels = max(1, diff.width * diff.height * channels)
-    mean_error = sum((index % 256) * count for index, count in enumerate(histogram)) / float(pixels * 255)
-    return mean_error
+def _circle_truth_score(
+    candidate_rgb: Any,
+    truth_rgb: Any,
+    truth_circles: tuple[tuple[float, float, float], ...],
+) -> tuple[float, dict[str, Any]]:
+    candidate_circles = _detect_center_circles(candidate_rgb)
+    circle_score, mean_error = _circle_center_score(candidate_circles, truth_circles)
+    texture_score = _texture_similarity_score(candidate_rgb, truth_rgb)
+    score = circle_score * 0.88 + texture_score * 0.12
+    return score, {
+        "truth_circle_count": len(truth_circles),
+        "detected_circle_count": len(candidate_circles),
+        "mean_center_error_px": None if mean_error is None else round(mean_error, 2),
+        "circle_score": round(circle_score, 5),
+        "texture_score": round(texture_score, 5),
+        "truth_centers_px": [[round(x, 2), round(y, 2)] for x, y, _ in truth_circles],
+        "detected_centers_px": [[round(x, 2), round(y, 2)] for x, y, _ in candidate_circles],
+    }
+
+
+def _detect_center_circles(rgb: Any) -> tuple[tuple[float, float, float], ...]:
+    import cv2
+    import numpy as np
+
+    height, width = rgb.shape[:2]
+    gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    blurred = cv2.GaussianBlur(gray, (7, 7), 1.5)
+    circles = cv2.HoughCircles(
+        blurred,
+        cv2.HOUGH_GRADIENT,
+        dp=1.2,
+        minDist=max(18, int(width * 0.08)),
+        param1=60,
+        param2=14,
+        minRadius=max(3, int(width * 0.012)),
+        maxRadius=max(8, int(width * 0.04)),
+    )
+    if circles is None:
+        return ()
+
+    candidates: list[tuple[float, float, float]] = []
+    min_x = width * 0.25
+    max_x = width * 0.75
+    min_y = height * 0.42
+    max_y = height * 0.74
+    for x, y, radius in circles[0]:
+        if min_x <= x <= max_x and min_y <= y <= max_y:
+            candidates.append((float(x), float(y), float(radius)))
+    if len(candidates) <= 5:
+        return tuple(sorted(candidates, key=lambda circle: (circle[1], circle[0])))
+
+    expected_center = np.array([width * 0.5, height * 0.57])
+    candidates.sort(key=lambda circle: abs(circle[2] - width * 0.028) + np.linalg.norm(np.array(circle[:2]) - expected_center) * 0.01)
+    selected = candidates[:5]
+    return tuple(sorted(selected, key=lambda circle: (circle[1], circle[0])))
+
+
+def _circle_center_score(
+    candidate_circles: tuple[tuple[float, float, float], ...],
+    truth_circles: tuple[tuple[float, float, float], ...],
+) -> tuple[float, float | None]:
+    _, _, best_error = _best_circle_center_match(candidate_circles, truth_circles)
+    if best_error is None:
+        return 0.0, None
+    return max(0.0, 1.0 - best_error / 35.0), best_error
+
+
+def _best_circle_center_match(
+    candidate_circles: tuple[tuple[float, float, float], ...],
+    truth_circles: tuple[tuple[float, float, float], ...],
+) -> tuple[list[tuple[float, float]] | None, list[tuple[float, float]] | None, float | None]:
+    import itertools
+
+    if len(candidate_circles) < 5 or len(truth_circles) < 5:
+        return None, None, None
+    candidate_centers = [(x, y) for x, y, _ in candidate_circles[:5]]
+    truth_centers = [(x, y) for x, y, _ in truth_circles[:5]]
+    best_error: float | None = None
+    best_permutation: tuple[tuple[float, float], ...] | None = None
+    for permutation in itertools.permutations(candidate_centers, len(truth_centers)):
+        error = sum(_distance(candidate, truth) for candidate, truth in zip(permutation, truth_centers)) / len(truth_centers)
+        if best_error is None or error < best_error:
+            best_error = error
+            best_permutation = permutation
+    assert best_error is not None
+    assert best_permutation is not None
+    return list(best_permutation), truth_centers, best_error
+
+
+def _corner_regularization_penalty(
+    original: tuple[tuple[float, float], ...],
+    candidate: tuple[tuple[float, float], ...],
+    max_corner_adjust_px: float,
+) -> float:
+    if max_corner_adjust_px <= 0:
+        return 0.0
+    return min(0.12, 0.08 * (_max_corner_delta(original, candidate) / max_corner_adjust_px))
+
+
+def _texture_similarity_score(candidate_rgb: Any, truth_rgb: Any) -> float:
+    import cv2
+    import numpy as np
+
+    candidate_gray = cv2.cvtColor(candidate_rgb, cv2.COLOR_RGB2GRAY)
+    truth_gray = cv2.cvtColor(truth_rgb, cv2.COLOR_RGB2GRAY)
+    candidate_edges = cv2.Canny(candidate_gray, 60, 140)
+    truth_edges = cv2.Canny(truth_gray, 60, 140)
+    edge_error = float(np.mean(cv2.absdiff(candidate_edges, truth_edges))) / 255.0
+    color_error = float(np.mean(cv2.absdiff(candidate_rgb, truth_rgb))) / 255.0
+    return max(0.0, 1.0 - (edge_error * 0.55 + color_error * 0.45))
 
 
 def _max_corner_delta(
