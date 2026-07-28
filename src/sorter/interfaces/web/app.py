@@ -2424,18 +2424,41 @@ class WebRuntime:
         return not all((cache_dir / name).exists() or (recognition_dir / name).exists() for name in required)
 
     def _collection_capability(self) -> dict[str, str]:
-        collection_service = getattr(self.orchestrator, "collection_service", None)
-        adapter_name = type(collection_service).__name__ if collection_service is not None else "None"
-        if adapter_name == "NullCollectionServiceAdapter":
+        status = self.collection_service_status()
+        if not status["configured"]:
             return {
                 "name": "Collection service",
                 "status": "blocked",
-                "detail": "Sorter is still using the no-op collection adapter; run the collection service separately and wire the HTTP adapter before machine submissions.",
+                "detail": "Set SORTER_COLLECTION_SERVICE_URL and SORTER_COLLECTION_ID to connect the vendored collection service.",
+            }
+        if not status["available"]:
+            return {
+                "name": "Collection service",
+                "status": "blocked",
+                "detail": f"Configured at {status['base_url']}, but health checks fail: {status.get('message') or 'unavailable'}",
             }
         return {
             "name": "Collection service",
-            "status": "partial",
-            "detail": f"Configured adapter: {adapter_name}. Verify collection API health separately.",
+            "status": "ready",
+            "detail": f"Collection service is healthy at {status['base_url']}.",
+        }
+
+    def collection_service_status(self) -> dict[str, Any]:
+        collection_service = getattr(self.orchestrator, "collection_service", None)
+        status_reader = getattr(collection_service, "system_status", None)
+        if callable(status_reader):
+            return status_reader()
+        return {
+            "configured": False,
+            "available": False,
+            "status": "unconfigured",
+            "base_url": None,
+            "collection_id": None,
+            "ui_url": None,
+            "review_url": None,
+            "collections": [],
+            "summary": None,
+            "message": "Collection service URL is not configured.",
         }
 
     def _move_c(self, c_mm: float) -> None:
@@ -2491,6 +2514,20 @@ class WebRuntime:
             "can_update": can_update,
             "message": reason,
             "restart_required": False,
+            "submodules": [
+                _submodule_status(
+                    self.repo_root,
+                    "fuzzy-enigma",
+                    "third_party/fuzzy-enigma-card-recognition",
+                    "Card recognition",
+                ),
+                _submodule_status(
+                    self.repo_root,
+                    "magic-the-collecting",
+                    "third_party/magic-the-collecting",
+                    "Collection and review service",
+                ),
+            ],
         }
 
     def update_from_remote(self) -> dict[str, Any]:
@@ -2757,6 +2794,10 @@ def create_web_app(
     @app.get("/api/system")
     def api_system():
         return jsonify(runtime.system_info(refresh_remote=request.args.get("refresh") == "true"))
+
+    @app.get("/api/collection-service")
+    def api_collection_service():
+        return jsonify(runtime.collection_service_status())
 
     @app.post("/api/system/update")
     def api_system_update():
@@ -3136,14 +3177,14 @@ def _live_xyz_feedrate_mm_per_min(
 
 
 def _package_version() -> str:
+    pyproject_path = _repo_root() / "pyproject.toml"
     try:
-        return version("card-sorter-testbed")
-    except PackageNotFoundError:
-        pyproject_path = _repo_root() / "pyproject.toml"
+        with pyproject_path.open("rb") as handle:
+            return str(tomllib.load(handle)["project"]["version"])
+    except Exception:
         try:
-            with pyproject_path.open("rb") as handle:
-                return str(tomllib.load(handle)["project"]["version"])
-        except Exception:
+            return version("card-sorter-testbed")
+        except PackageNotFoundError:
             return "0.0.0"
 
 
@@ -3158,6 +3199,24 @@ def _count_commits(revision_range: str, cwd: Path) -> int:
         return int(count)
     except ValueError:
         return 0
+
+
+def _submodule_status(repo_root: Path, name: str, relative_path: str, role: str) -> dict[str, Any]:
+    module_path = repo_root / relative_path
+    tree_entry = _git(["ls-tree", "HEAD", "--", relative_path], cwd=repo_root)
+    parts = tree_entry.split()
+    expected_sha = parts[2] if len(parts) >= 3 and parts[0] == "160000" else None
+    initialized = module_path.is_dir() and (module_path / ".git").exists()
+    actual_sha = _git(["-C", str(module_path), "rev-parse", "HEAD"], cwd=repo_root) if initialized else ""
+    return {
+        "name": name,
+        "role": role,
+        "path": relative_path,
+        "initialized": initialized,
+        "expected_sha": expected_sha,
+        "current_sha": actual_sha or expected_sha,
+        "at_expected_revision": bool(expected_sha and (not actual_sha or actual_sha == expected_sha)),
+    }
 
 
 def _git(args: list[str], cwd: Path, default: str = "") -> str:

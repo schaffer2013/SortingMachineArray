@@ -33,6 +33,10 @@ class AppSettings:
     recognition_thresholds_path: Path | None = None
     recognition_min_confidence: float = 0.6
     fuzzy_enigma_sim_truth_fallback: bool = False
+    collection_service_url: str = ""
+    collection_id: str | None = None
+    collection_api_key: str | None = None
+    collection_timeout_seconds: float = 2.0
     startup_scan_max_retries: int = 1
     verification_max_retries: int = 2
 
@@ -89,6 +93,10 @@ class AppSettings:
             "SORTER_ALLOW_EXTERNAL_CARD_ENRICHMENT",
             "0",
         ) in {"1", "true", "True"}
+        collection_service_url = _setting("SORTER_COLLECTION_SERVICE_URL", "").strip().rstrip("/")
+        collection_id_raw = _setting("SORTER_COLLECTION_ID", "").strip()
+        collection_api_key_raw = _setting("SORTER_COLLECTION_API_KEY", "").strip()
+        collection_timeout_seconds = float(_setting("SORTER_COLLECTION_TIMEOUT_SECONDS", "2.0"))
         startup_scan_max_retries = int(
             _setting("SORTER_STARTUP_SCAN_MAX_RETRIES", str(recognition_policy.startup_scan_max_retries))
         )
@@ -118,6 +126,10 @@ class AppSettings:
             recognition_thresholds_path=recognition_thresholds_path,
             recognition_min_confidence=recognition_min_confidence,
             fuzzy_enigma_sim_truth_fallback=fuzzy_enigma_sim_truth_fallback,
+            collection_service_url=collection_service_url,
+            collection_id=collection_id_raw or None,
+            collection_api_key=collection_api_key_raw or None,
+            collection_timeout_seconds=max(0.1, collection_timeout_seconds),
             startup_scan_max_retries=max(0, startup_scan_max_retries),
             verification_max_retries=max(0, verification_max_retries),
         )

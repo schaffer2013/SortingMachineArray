@@ -2436,6 +2436,14 @@ window.SorterPages = {
     const raw = document.querySelector("#system-raw");
     const checkButton = document.querySelector("#check-update");
     const updateButton = document.querySelector("#apply-update");
+    const submodulePill = document.querySelector("#submodule-pill");
+    const submoduleList = document.querySelector("#submodule-list");
+    const collectionPill = document.querySelector("#collection-pill");
+    const collectionDetails = document.querySelector("#collection-details");
+    const collectionRefresh = document.querySelector("#collection-refresh");
+    const collectionOpen = document.querySelector("#collection-open");
+    const collectionReview = document.querySelector("#collection-review");
+    const collectionMessage = document.querySelector("#collection-message");
     const runtimeMode = document.querySelector("#runtime-mode");
     const runtimeApply = document.querySelector("#runtime-apply");
     const runtimeMessage = document.querySelector("#runtime-message");
@@ -2468,8 +2476,62 @@ window.SorterPages = {
         ["Local changes", data.dirty ? "Yes" : "No"],
       ].map(([k,v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
       message.textContent = data.message || (data.restart_required ? "Update applied. Restart required." : "");
+      const modules = data.submodules || [];
+      const modulesReady = modules.length > 0 && modules.every(item => item.initialized && item.at_expected_revision);
+      submodulePill.textContent = modulesReady ? "Ready" : "Attention";
+      submodulePill.className = modulesReady ? "pill good-pill" : "pill warn-pill";
+      submoduleList.innerHTML = modules.map(item => `
+        <div class="integration-row">
+          <div>
+            <strong>${item.name}</strong>
+            <span>${item.role}</span>
+            <code>${item.path}</code>
+          </div>
+          <div class="integration-meta">
+            <span class="pill ${item.initialized && item.at_expected_revision ? "good-pill" : "warn-pill"}">
+              ${item.initialized ? (item.at_expected_revision ? "Pinned" : "Revision differs") : "Not initialized"}
+            </span>
+            <code>${(item.current_sha || "--").slice(0, 10)}</code>
+          </div>
+        </div>
+      `).join("");
       raw.textContent = pretty(data);
     };
+    const setExternalLink = (element, url) => {
+      element.href = url || "#";
+      element.classList.toggle("disabled-link", !url);
+      element.setAttribute("aria-disabled", url ? "false" : "true");
+    };
+    const renderCollection = data => {
+      collectionPill.textContent = data.available ? "Healthy" : (data.configured ? "Unavailable" : "Not configured");
+      collectionPill.className = data.available ? "pill good-pill" : "pill warn-pill";
+      const summary = data.summary || {};
+      collectionDetails.innerHTML = [
+        ["Service", data.base_url || "Not configured"],
+        ["Collection", data.collection_id || "Not selected"],
+        ["Waiting recognition", summary.unprocessed_count ?? "--"],
+        ["Waiting review", summary.machine_recognized_count ?? "--"],
+        ["Verified cards", summary.trusted_collection_card_count ?? "--"],
+        ["Collections found", (data.collections || []).length],
+      ].map(([k,v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
+      setExternalLink(collectionOpen, data.ui_url);
+      setExternalLink(collectionReview, data.review_url);
+      collectionMessage.textContent = data.message || (
+        data.available
+          ? "Collection inventory and human review are available in the connected service."
+          : "Configure SORTER_COLLECTION_SERVICE_URL and SORTER_COLLECTION_ID, then restart the sorter."
+      );
+    };
+    async function refreshCollection() {
+      collectionMessage.textContent = "Checking collection service...";
+      try {
+        renderCollection(await json("/api/collection-service"));
+      } catch (error) {
+        collectionPill.textContent = "Unavailable";
+        collectionPill.className = "pill warn-pill";
+        collectionMessage.textContent = error.message;
+      }
+    }
     async function refreshRuntime() {
       const data = await json("/api/runtime");
       runtimeMode.value = data.runtime_mode;
@@ -2482,6 +2544,7 @@ window.SorterPages = {
       render(await json(`/api/system${refreshRemote ? "?refresh=true" : ""}`));
     }
     checkButton.onclick = () => refresh(true);
+    collectionRefresh.onclick = refreshCollection;
     updateButton.onclick = async () => {
       updateButton.disabled = true;
       message.textContent = "Updating from origin/main...";
@@ -2596,6 +2659,7 @@ window.SorterPages = {
       }
     };
     refresh(true);
+    refreshCollection();
     refreshRuntime();
     refreshSerial(false);
     setInterval(async () => {

@@ -28,12 +28,14 @@ Production-oriented test bed refactor for a card sorting machine using a hexagon
 ## Run in sim mode
 
 1. Create/activate a Python 3.11+ environment.
-2. Install dependencies:
+2. Initialize the pinned integrations:
+	 - `git submodule update --init --recursive`
+3. Install dependencies:
 	 - `pip install -e .[dev]`
 	 - if you want the real vendored recognizer, also install `pip install -e ./third_party/fuzzy-enigma-card-recognition[ocr,moss]`
-3. Optional env file:
+4. Optional env file:
 	 - Copy `.env.example` values into your environment.
-4. Run:
+5. Run:
 	 - `python -m sorter.interfaces.cli --mode sim`
 	 - or `python scripts/run_simulation.py`
 
@@ -101,10 +103,16 @@ This sorter repo is the machine-side controller. The collection service is the i
 ### Integration approach in this repo
 
 - Port contract: `src/sorter/ports/collection_service.py`
+- Pinned service source and authoritative API contract: `third_party/magic-the-collecting`
+- Pinned recognition source: `third_party/fuzzy-enigma-card-recognition`
 - Adapters:
 	- `NullCollectionServiceAdapter` (default no-op)
-	- `HttpCollectionServiceAdapter` (scaffold; endpoint wiring is intentionally pending)
-- Default sim wiring currently uses the null adapter so local workflows remain offline-safe.
+	- `HttpCollectionServiceAdapter` (health, collection list/summary, and multipart unverified-card intake)
+- Configuration:
+	- `SORTER_COLLECTION_SERVICE_URL=http://localhost:8080`
+	- `SORTER_COLLECTION_ID=<collection GUID>`
+	- `SORTER_COLLECTION_API_KEY=` (optional; reserved for deployments that add authentication)
+- With no service URL, both sim and hardware runtimes remain offline-safe through the null adapter.
 
 ### Recommended operator flow in the machine UI
 
@@ -114,11 +122,12 @@ This sorter repo is the machine-side controller. The collection service is the i
 4. For any `REVIEW_REQUIRED` condition, use the collection system review UI to confirm/correct card identity.
 5. Resume or rerun machine flow after the review decision is recorded in the collection system.
 
-### Current UI status (important)
+### Current UI integration
 
-- The sorter web UI currently exposes machine/runtime APIs (`/api/status`, `/api/snapshot`, `/api/run/start`, `/api/runs`, etc.).
-- It does **not** yet include first-class collection API controls (e.g. browse unverified queue, submit review decisions directly from this UI).
-- Until that is implemented, use the machine UI for operations + the collection service UI for review/registration tasks.
+- The sorter System page reports both pinned submodules and whether their working copies are initialized at the expected revisions.
+- It polls collection-service health and shows the selected collection's recognition queue, review queue, and trusted-card counts.
+- It links directly to the collection and review UI owned by `magic-the-collecting`.
+- Human verification remains in that service UI so inventory decisions retain one system of record.
 
 ## Recognition backend toggle
 

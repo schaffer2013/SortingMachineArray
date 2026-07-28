@@ -17,6 +17,10 @@ def test_app_settings_from_env_reads_recognizer_backend_controls(monkeypatch, tm
     monkeypatch.setenv("SORTER_VERIFICATION_MAX_RETRIES", "4")
     monkeypatch.setenv("SORTER_SIM_IMAGE_AUTO_FETCH", "1")
     monkeypatch.setenv("SORTER_ALLOW_EXTERNAL_CARD_ENRICHMENT", "1")
+    monkeypatch.setenv("SORTER_COLLECTION_SERVICE_URL", "http://localhost:8080/")
+    monkeypatch.setenv("SORTER_COLLECTION_ID", "collection-1")
+    monkeypatch.setenv("SORTER_COLLECTION_API_KEY", "secret")
+    monkeypatch.setenv("SORTER_COLLECTION_TIMEOUT_SECONDS", "1.5")
 
     settings = AppSettings.from_env(project_root=tmp_path)
 
@@ -31,6 +35,10 @@ def test_app_settings_from_env_reads_recognizer_backend_controls(monkeypatch, tm
     assert settings.verification_max_retries == 4
     assert settings.sim_image_auto_fetch is True
     assert settings.allow_external_card_enrichment is True
+    assert settings.collection_service_url == "http://localhost:8080"
+    assert settings.collection_id == "collection-1"
+    assert settings.collection_api_key == "secret"
+    assert settings.collection_timeout_seconds == 1.5
 
 
 def test_app_settings_defaults_card_engine_config_to_parent_owned_file(monkeypatch, tmp_path):

@@ -22,7 +22,7 @@ from sorter.adapters.persistence.sim_card_list_loader import expand_and_shuffle_
 from sorter.adapters.persistence.sim_fixture_builder import build_runtime_fixture
 from sorter.adapters.persistence.sim_image_sync import sync_simulated_images
 from sorter.adapters.persistence.sqlite_run_store import SQLiteRunStore
-from sorter.adapters.integrations.collection_service import NullCollectionServiceAdapter
+from sorter.adapters.integrations.collection_service import HttpCollectionServiceAdapter, NullCollectionServiceAdapter
 from sorter.application.orchestrator import Orchestrator
 from sorter.config.calibration import CalibrationProfile
 from sorter.domain.enums import PileRole
@@ -192,7 +192,7 @@ def build_sim_orchestrator(settings: AppSettings) -> Orchestrator:
         catalog=context.catalog,
         run_store=context.run_store,
         world=context.world,
-        collection_service=NullCollectionServiceAdapter(),
+        collection_service=_build_collection_service(settings),
         recognition_min_confidence=settings.recognition_min_confidence,
         startup_scan_max_retries=settings.startup_scan_max_retries,
         verification_max_retries=settings.verification_max_retries,
@@ -210,7 +210,7 @@ def build_hardware_orchestrator(settings: AppSettings, calibration: CalibrationP
         catalog=context.catalog,
         run_store=context.run_store,
         world=context.world,
-        collection_service=NullCollectionServiceAdapter(),
+        collection_service=_build_collection_service(settings),
         recognition_min_confidence=settings.recognition_min_confidence,
         startup_scan_max_retries=settings.startup_scan_max_retries,
         verification_max_retries=settings.verification_max_retries,
@@ -218,6 +218,17 @@ def build_hardware_orchestrator(settings: AppSettings, calibration: CalibrationP
     setattr(orchestrator, "hardware_runtime", True)
     setattr(orchestrator, "hardware_transport", context.transport)
     return orchestrator
+
+
+def _build_collection_service(settings: AppSettings):
+    if not settings.collection_service_url:
+        return NullCollectionServiceAdapter()
+    return HttpCollectionServiceAdapter(
+        base_url=settings.collection_service_url,
+        collection_id=settings.collection_id,
+        api_key=settings.collection_api_key,
+        timeout_seconds=settings.collection_timeout_seconds,
+    )
 
 
 def build_hardware_runtime_context(settings: AppSettings, calibration: CalibrationProfile) -> HardwareRuntimeContext:

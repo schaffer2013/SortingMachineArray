@@ -1,3 +1,6 @@
 [submodule "third_party/fuzzy-enigma-card-recognition"]
 	path = third_party/fuzzy-enigma-card-recognition
 	url = https://github.com/schaffer2013/fuzzy-enigma-card-recognition.git
+[submodule "third_party/magic-the-collecting"]
+	path = third_party/magic-the-collecting
+	url = https://github.com/schaffer2013/magic-the-collecting.git

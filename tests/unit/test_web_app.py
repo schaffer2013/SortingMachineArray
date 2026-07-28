@@ -4,6 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 import json
 import re
+import tomllib
 
 import pytest
 from PIL import Image, ImageDraw
@@ -951,6 +952,9 @@ def test_hardware_panels_are_grouped_by_domain():
     assert b'id="serial-command-form"' in system.data
     assert b'id="runtime-mode"' in system.data
     assert b'id="theme-mode"' in system.data
+    assert b'id="submodule-list"' in system.data
+    assert b'id="collection-details"' in system.data
+    assert b'id="collection-open"' in system.data
     assert b'id="endstop-state"' not in system.data
     assert b'id="bltouch-probe"' not in system.data
 
@@ -1528,11 +1532,27 @@ def test_paired_zc_interface_jog_keeps_end_effector_height_fixed():
 def test_system_api_reports_version_and_update_state():
     client = _client()
     payload = client.get("/api/system").get_json()
+    with Path("pyproject.toml").open("rb") as handle:
+        project_version = tomllib.load(handle)["project"]["version"]
 
     assert re.fullmatch(r"\d+\.\d+\.\d+-[0-9a-f]+", payload["version"])
+    assert payload["package_version"] == project_version
+    assert payload["version"].startswith(f"{project_version}-")
     assert payload["remote"] == "origin/main"
     assert "update_available" in payload
     assert "can_update" in payload
+    assert [item["name"] for item in payload["submodules"]] == [
+        "fuzzy-enigma",
+        "magic-the-collecting",
+    ]
+
+
+def test_collection_service_api_reports_unconfigured_adapter():
+    payload = _client().get("/api/collection-service").get_json()
+
+    assert payload["configured"] is False
+    assert payload["available"] is False
+    assert payload["status"] == "unconfigured"
 
 
 def test_system_update_refuses_when_not_safe(monkeypatch):
