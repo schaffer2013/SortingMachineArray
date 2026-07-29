@@ -117,6 +117,8 @@ class VisualIndexRefreshManager:
                 "progress_current": state.get("progress_current"),
                 "progress_total": state.get("progress_total"),
                 "progress_percent": state.get("progress_percent"),
+                "progress_eta_seconds": state.get("progress_eta_seconds"),
+                "progress_eta_text": state.get("progress_eta_text"),
                 "progress_message": state.get("progress_message"),
                 "needs_refresh": needs_refresh,
                 "running": running,
@@ -174,6 +176,8 @@ class VisualIndexRefreshManager:
                 "progress_current": 0,
                 "progress_total": None,
                 "progress_percent": 0.0,
+                "progress_eta_seconds": None,
+                "progress_eta_text": "ETA unavailable",
                 "progress_message": "Starting refresh...",
             }
         )
@@ -200,6 +204,8 @@ class VisualIndexRefreshManager:
                     if percent < 100.0 and percent - last_reported_percent["value"] < 1.0:
                         return
                     last_reported_percent["value"] = percent
+                started_at = _parse_iso_datetime(self._read_state().get("last_started_at_utc"))
+                eta_seconds = _estimate_eta_seconds(started_at=started_at, current=current, total=total)
                 self._write_state(
                     {
                         **self._read_state(),
@@ -210,6 +216,8 @@ class VisualIndexRefreshManager:
                         "progress_current": current,
                         "progress_total": total,
                         "progress_percent": round(percent, 2),
+                        "progress_eta_seconds": eta_seconds,
+                        "progress_eta_text": _format_eta_text(eta_seconds),
                         "progress_message": message,
                     }
                 )
@@ -243,6 +251,8 @@ class VisualIndexRefreshManager:
                     "progress_current": result.card_count,
                     "progress_total": result.card_count,
                     "progress_percent": 100.0,
+                    "progress_eta_seconds": 0.0,
+                    "progress_eta_text": "done",
                     "progress_message": f"Indexed {result.card_count:,}/{result.card_count:,} cards",
                     "index_path": str(result.index_path),
                     "metadata_path": str(result.metadata_path),
@@ -260,6 +270,8 @@ class VisualIndexRefreshManager:
                     "last_finished_at_utc": _utc_now_iso(),
                     "last_error": self._refresh_error,
                     "last_action": "error",
+                    "progress_eta_seconds": None,
+                    "progress_eta_text": "ETA unavailable",
                 }
             )
         finally:
@@ -289,7 +301,9 @@ class VisualIndexRefreshManager:
             return "Visual index refresh is deferred while the sorter is running."
         progress = self._progress_payload(state, refreshing=refreshing)
         if refreshing and progress["percent"] is not None:
-            return f"Visual index refresh is running ({progress['percent']:.1f}%)."
+            eta_text = progress["eta_text"]
+            suffix = f", {eta_text}" if eta_text and eta_text != "ETA unavailable" else ""
+            return f"Visual index refresh is running ({progress['percent']:.1f}%{suffix})."
         if reason == "missing":
             return "Visual index is missing and will refresh when the sorter is idle."
         if reason == "stale":
@@ -302,14 +316,20 @@ class VisualIndexRefreshManager:
         current = state.get("progress_current")
         total = state.get("progress_total")
         percent = state.get("progress_percent")
+        eta_seconds = state.get("progress_eta_seconds")
+        eta_text = state.get("progress_eta_text")
         if percent is None and isinstance(current, int) and isinstance(total, int) and total > 0:
             percent = round((current / total) * 100.0, 2)
         if percent is None:
             percent = 0.0 if refreshing else None
+        if eta_text is None:
+            eta_text = _format_eta_text(eta_seconds)
         return {
             "current": current,
             "total": total,
             "percent": percent,
+            "eta_seconds": eta_seconds,
+            "eta_text": eta_text,
             "message": state.get("progress_message"),
         }
 
@@ -416,6 +436,8 @@ def build_visual_index_from_catalog(
     metadata: list[dict[str, Any]] = []
     downloaded = 0
     reused = 0
+    if progress_callback is not None:
+        progress_callback(0, len(selected_cards), f"Preparing {len(selected_cards):,} cards")
 
     for index, card in enumerate(selected_cards, start=0):
         image_url = _extract_image_url(card)
@@ -478,6 +500,43 @@ def visual_index_refresh_needed(
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _estimate_eta_seconds(*, started_at: datetime | None, current: int, total: int) -> float | None:
+    if started_at is None or total <= 0 or current <= 0:
+        return 0.0 if total > 0 and current >= total else None
+    if current >= total:
+        return 0.0
+    elapsed = (datetime.now(UTC) - started_at).total_seconds()
+    if elapsed <= 0:
+        return None
+    rate = current / elapsed
+    if rate <= 0:
+        return None
+    return max(0.0, (total - current) / rate)
+
+
+def _format_eta_text(seconds: float | None) -> str:
+    if seconds is None:
+        return "ETA unavailable"
+    if seconds <= 0:
+        return "done"
+    minutes = int(round(seconds / 60.0))
+    if minutes < 1:
+        return "less than 1 minute left"
+    hours, remainder = divmod(minutes, 60)
+    if hours < 1:
+        return f"about {minutes} minute{'s' if minutes != 1 else ''} left"
+    return f"about {hours} hour{'s' if hours != 1 else ''} {remainder:02d} minutes left"
 
 
 def _state_age_days(state: dict[str, Any]) -> float | None:

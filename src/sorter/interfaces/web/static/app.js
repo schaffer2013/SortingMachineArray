@@ -2481,9 +2481,13 @@ window.SorterPages = {
       const visualNeedsRefresh = Boolean(visualIndex.needs_refresh);
       const progress = visualIndex.progress || {};
       const progressPercent = Number(progress.percent);
-      const progressText = Number.isFinite(progressPercent)
-        ? `${progressPercent.toFixed(1)}%${progress.current !== undefined && progress.total !== undefined ? ` (${Number(progress.current).toLocaleString()}/${Number(progress.total).toLocaleString()})` : ""}`
-        : "--";
+      const progressCurrent = Number(progress.current);
+      const progressTotal = Number(progress.total);
+      const progressHasTotal = Number.isFinite(progressTotal) && progressTotal > 0;
+      const progressEta = progress.eta_text || "";
+      const progressText = progressHasTotal && Number.isFinite(progressPercent)
+        ? `${progressPercent.toFixed(1)}% (${Number.isFinite(progressCurrent) ? progressCurrent.toLocaleString() : "0"}/${progressTotal.toLocaleString()})${progressEta && progressEta !== "ETA unavailable" ? ` — ${progressEta}` : ""}`
+        : (visualRefreshing ? (progress.message || "Preparing refresh...") : "--");
       if (visualIndexPill) {
         visualIndexPill.textContent = visualRefreshing ? "Refreshing" : visualReady && !visualNeedsRefresh ? "Ready" : visualNeedsRefresh ? "Stale" : "Checking";
         visualIndexPill.className = visualRefreshing || visualNeedsRefresh ? "pill warn-pill" : "pill good-pill";

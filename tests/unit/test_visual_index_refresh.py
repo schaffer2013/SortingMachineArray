@@ -61,6 +61,8 @@ def test_build_visual_index_from_catalog_uses_project_root_and_builds_index(tmp_
     metadata_path = tmp_path / "data/index/card_embeddings.jsonl"
     reference_dir = tmp_path / "data/index/reference_images"
 
+    progress_calls: list[tuple[int, int, str | None]] = []
+
     def fake_download(image_url: str, output_path: Path) -> None:
         _write_png(output_path, (255, 0, 0) if "alpha" in image_url else (0, 0, 255))
 
@@ -73,6 +75,7 @@ def test_build_visual_index_from_catalog_uses_project_root_and_builds_index(tmp_
         metadata_path=metadata_path,
         reference_dir=reference_dir,
         overwrite_downloads=True,
+        progress_callback=lambda current, total, message=None: progress_calls.append((current, total, message)),
     )
 
     assert result.card_count == 2
@@ -82,6 +85,9 @@ def test_build_visual_index_from_catalog_uses_project_root_and_builds_index(tmp_
     assert metadata_path.is_file()
     assert len(metadata_path.read_text(encoding="utf-8").splitlines()) == 2
     assert (project_root / "data/index/reference_images").is_dir()
+    assert progress_calls[0] == (0, 2, "Preparing 2 cards")
+    assert progress_calls[-1][0] == 2
+    assert progress_calls[-1][1] == 2
 
 
 def test_visual_index_manager_refreshes_in_background(tmp_path, monkeypatch):
@@ -100,6 +106,7 @@ def test_visual_index_manager_refreshes_in_background(tmp_path, monkeypatch):
         progress_callback = kwargs.get("progress_callback")
         if callable(progress_callback):
             progress_callback(1, 4, "Indexed 1/4 cards")
+            time.sleep(0.1)
         kwargs["index_path"].parent.mkdir(parents=True, exist_ok=True)
         kwargs["metadata_path"].parent.mkdir(parents=True, exist_ok=True)
         kwargs["index_path"].write_bytes(b"npz")
@@ -140,6 +147,7 @@ def test_visual_index_manager_refreshes_in_background(tmp_path, monkeypatch):
 
     assert status["ready"] is True
     assert status["progress_percent"] == 100.0
+    assert status["progress_eta_text"] == "done"
     assert status["indexed_card_count"] == 1
     assert status["source_card_count"] == 1
     assert status["updated_at_utc"] == "2026-07-29T00:00:00Z"
