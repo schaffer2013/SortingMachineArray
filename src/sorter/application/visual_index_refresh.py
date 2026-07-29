@@ -103,6 +103,9 @@ def _visual_index_progress_context(*, current: int, total: int, message: str | N
     elif normalized.startswith("finalizing "):
         phase = "Finalizing"
         stage = "Finalizing index"
+    elif normalized.startswith("cleaning up"):
+        phase = "Finalizing"
+        stage = "Cleaning up reference images"
     elif normalized.startswith("no new cards"):
         phase = "Idle"
         stage = "No new cards to sync"
@@ -392,6 +395,10 @@ def _run_checkpointed_visual_index_job(
         _clear_visual_index_checkpoint(checkpoint_path)
     if result is None:  # pragma: no cover - defensive guard for unexpected control flow
         raise RuntimeError("Visual index job completed without producing a result.")
+    if result.reference_dir.exists():
+        if progress_callback is not None:
+            progress_callback(result.card_count, result.card_count, "Cleaning up reference images")
+        _cleanup_reference_directory(result.reference_dir)
     return result
 
 
@@ -1052,6 +1059,10 @@ def refresh_visual_index_from_catalog(
         if progress_callback is not None:
             progress_callback(existing_count, existing_count, "No new cards to refresh")
         updated_at = _utc_now_iso()
+        if reference_root.exists():
+            if progress_callback is not None:
+                progress_callback(existing_count, existing_count, "Cleaning up reference images")
+            _cleanup_reference_directory(reference_root)
         return VisualIndexBuildResult(
             index_path=index_file,
             metadata_path=metadata_file,
@@ -1159,6 +1170,30 @@ def _normalize_refresh_days(value: Any) -> int:
     if refresh_days in VISUAL_INDEX_REFRESH_DAY_OPTIONS:
         return refresh_days
     return DEFAULT_VISUAL_INDEX_REFRESH_DAYS
+
+
+def _cleanup_reference_directory(reference_dir: Path) -> tuple[int, int]:
+    if not reference_dir.exists():
+        return 0, 0
+
+    removed_files = 0
+    removed_dirs = 0
+    for path in sorted(reference_dir.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        try:
+            if path.is_file() or path.is_symlink():
+                path.unlink(missing_ok=True)
+                removed_files += 1
+        except OSError:
+            continue
+
+    for path in sorted((item for item in reference_dir.rglob("*") if item.is_dir()), key=lambda item: len(item.parts), reverse=True):
+        try:
+            path.rmdir()
+            removed_dirs += 1
+        except OSError:
+            continue
+
+    return removed_files, removed_dirs
 
 
 def _extract_image_url(card: dict[str, Any]) -> str | None:

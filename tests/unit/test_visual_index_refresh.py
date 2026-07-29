@@ -62,6 +62,8 @@ def test_build_visual_index_from_catalog_uses_project_root_and_builds_index(tmp_
     index_path = tmp_path / "data/index/card_embeddings.npz"
     metadata_path = tmp_path / "data/index/card_embeddings.jsonl"
     reference_dir = tmp_path / "data/index/reference_images"
+    reference_dir.mkdir(parents=True, exist_ok=True)
+    _write_png(reference_dir / "stale.png", (12, 34, 56))
 
     progress_calls: list[tuple[int, int, str | None]] = []
 
@@ -87,11 +89,13 @@ def test_build_visual_index_from_catalog_uses_project_root_and_builds_index(tmp_
     assert metadata_path.is_file()
     assert not (project_root / "data/index/visual_index_checkpoint.sqlite3").exists()
     assert len(metadata_path.read_text(encoding="utf-8").splitlines()) == 2
-    assert (project_root / "data/index/reference_images").is_dir()
+    assert reference_dir.is_dir()
+    assert not any(reference_dir.iterdir())
     assert progress_calls[0] == (0, 2, "Parsing catalog and preparing 2 cards")
     assert any("Downloading card" in (message or "") for _, _, message in progress_calls)
     assert any("Embedding card" in (message or "") for _, _, message in progress_calls)
     assert any("Saving checkpoint for" in (message or "") for _, _, message in progress_calls)
+    assert any("Cleaning up reference images" in (message or "") for _, _, message in progress_calls)
     assert any("Finalizing cards index" in (message or "") for _, _, message in progress_calls)
     assert progress_calls[-1][0] == 2
     assert progress_calls[-1][1] == 2
@@ -227,8 +231,9 @@ def test_build_visual_index_from_catalog_recovers_corrupted_cached_reference_ima
     assert result.card_count == 1
     assert result.downloaded_count == 1
     assert download_calls == ["https://example.invalid/gamma.png"]
-    assert reference_path.is_file()
-    assert reference_path.read_bytes() != b"not an image"
+    assert not reference_path.exists()
+    assert reference_dir.is_dir()
+    assert not any(reference_dir.iterdir())
 
 
 def test_refresh_visual_index_from_catalog_requires_full_rebuild_for_removed_cards(tmp_path, monkeypatch):
@@ -422,6 +427,8 @@ def test_visual_index_manager_refreshes_in_background(tmp_path, monkeypatch):
     assert status["indexed_card_count"] == 1
     assert status["source_card_count"] == 1
     assert status["updated_at_utc"] == "2026-07-29T00:00:00Z"
+    assert reference_dir.is_dir()
+    assert not any(reference_dir.iterdir())
     assert manager.status(running=False, auto_start=False)["last_error"] is None
 
 
