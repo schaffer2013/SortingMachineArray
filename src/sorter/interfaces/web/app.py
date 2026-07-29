@@ -2742,6 +2742,9 @@ class WebRuntime:
             auto_start=refresh_if_idle,
         )
 
+    def visual_index_diagnostics(self, limit: int = 20) -> dict[str, Any]:
+        return self.visual_index.diagnostics(limit=limit)
+
     def refresh_visual_index(self) -> dict[str, Any]:
         return self.visual_index.refresh(force=False)
 
@@ -3007,6 +3010,16 @@ def create_web_app(
     @app.get("/api/system/visual-index")
     def api_system_visual_index():
         return jsonify(runtime.visual_index_status(refresh_if_idle=not app.testing))
+
+    @app.get("/api/system/visual-index/diagnostics")
+    def api_system_visual_index_diagnostics():
+        try:
+            limit = int(request.args.get("limit", "20"))
+        except ValueError:
+            return jsonify({"ok": False, "message": "limit must be an integer from 1 through 200"}), 400
+        if not 1 <= limit <= 200:
+            return jsonify({"ok": False, "message": "limit must be an integer from 1 through 200"}), 400
+        return jsonify(runtime.visual_index_diagnostics(limit=limit))
 
     @app.post("/api/system/visual-index/refresh")
     def api_system_visual_index_refresh():
