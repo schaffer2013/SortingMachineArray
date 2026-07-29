@@ -93,6 +93,7 @@ MOTION_CONTROL_ACTIONS = {
 
 RECOGNITION_BACKEND_OPTIONS = (
     "fuzzy_enigma",
+    "visual_retrieval",
     "moss_machine",
     "sim_truth",
 )
