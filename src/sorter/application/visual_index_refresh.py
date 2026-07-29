@@ -265,6 +265,8 @@ def _run_checkpointed_visual_index_job(
     try:
         _initialize_visual_index_checkpoint(conn)
         checkpoint_rows = {row["card_key"]: row for row in _checkpoint_rows(conn)}
+        for row in checkpoint_rows.values():
+            _delete_reference_artifact(project_root, row.get("metadata", {}))
         job_entries: list[tuple[int, str, dict[str, Any]]] = []
         for ordinal, card in enumerate(cards):
             card_key = _visual_index_card_key(card)
@@ -342,6 +344,7 @@ def _run_checkpointed_visual_index_job(
                 metadata=metadata,
                 embedding=vector,
             )
+            _delete_reference_artifact(project_root, metadata)
             resumable_rows[card_key] = {
                 "ordinal": ordinal,
                 "card_key": card_key,
@@ -1059,10 +1062,6 @@ def refresh_visual_index_from_catalog(
         if progress_callback is not None:
             progress_callback(existing_count, existing_count, "No new cards to refresh")
         updated_at = _utc_now_iso()
-        if reference_root.exists():
-            if progress_callback is not None:
-                progress_callback(existing_count, existing_count, "Cleaning up reference images")
-            _cleanup_reference_directory(reference_root)
         return VisualIndexBuildResult(
             index_path=index_file,
             metadata_path=metadata_file,
@@ -1170,6 +1169,26 @@ def _normalize_refresh_days(value: Any) -> int:
     if refresh_days in VISUAL_INDEX_REFRESH_DAY_OPTIONS:
         return refresh_days
     return DEFAULT_VISUAL_INDEX_REFRESH_DAYS
+
+
+def _delete_reference_artifact(project_root: Path, metadata: dict[str, Any]) -> None:
+    image_path = metadata.get("image_path")
+    if not isinstance(image_path, str) or not image_path.strip():
+        return
+    reference_path = Path(image_path)
+    if not reference_path.is_absolute():
+        reference_path = project_root / reference_path
+    try:
+        if reference_path.is_file() or reference_path.is_symlink():
+            reference_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+    sidecar_path = reference_path.with_suffix(".json")
+    try:
+        if sidecar_path.is_file() or sidecar_path.is_symlink():
+            sidecar_path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _cleanup_reference_directory(reference_dir: Path) -> tuple[int, int]:
