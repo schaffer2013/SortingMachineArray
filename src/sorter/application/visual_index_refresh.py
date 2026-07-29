@@ -626,7 +626,7 @@ class VisualIndexRefreshManager:
             rebuild_required = bool(state.get("requires_full_rebuild"))
             ready = self.index_path.is_file() and self.metadata_path.is_file() and not needs_refresh
 
-            if auto_start and needs_refresh and not running and not refreshing and not rebuild_required:
+            if auto_start and needs_refresh and not running and not refreshing and not rebuild_required and not state.get("last_error"):
                 self._start_background_refresh(force=False, reason=reason, full_rebuild=False)
                 refreshing = True
 

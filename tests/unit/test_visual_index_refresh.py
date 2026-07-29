@@ -506,6 +506,56 @@ def test_visual_index_manager_auto_start_supplies_full_rebuild_flag(tmp_path, mo
     assert seen_kwargs == [{"force": False, "reason": "missing", "full_rebuild": False}]
 
 
+def test_visual_index_manager_does_not_auto_restart_after_failure(tmp_path, monkeypatch):
+    project_root = tmp_path
+    config_path = tmp_path / "config/card_engine/engine.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    refresh_module.save_visual_index_policy(config_path, 7)
+    source_catalog = tmp_path / "data/catalog/default-cards.json"
+    source_catalog.parent.mkdir(parents=True, exist_ok=True)
+    source_catalog.write_text("[]", encoding="utf-8")
+    index_path = tmp_path / "data/index/card_embeddings.npz"
+    metadata_path = tmp_path / "data/index/card_embeddings.jsonl"
+    reference_dir = tmp_path / "data/index/reference_images"
+
+    seen_kwargs: list[dict[str, object]] = []
+
+    def fake_start_background_refresh(**kwargs):
+        seen_kwargs.append(dict(kwargs))
+
+    manager = refresh_module.VisualIndexRefreshManager(
+        project_root=project_root,
+        config_path=config_path,
+        source_catalog_path=source_catalog,
+        index_path=index_path,
+        metadata_path=metadata_path,
+        reference_dir=reference_dir,
+    )
+    monkeypatch.setattr(manager, "_start_background_refresh", fake_start_background_refresh)
+    manager._write_state(
+        {
+            "refreshing": False,
+            "last_action": "error",
+            "last_error": "boom",
+            "progress_current": 0,
+            "progress_total": None,
+            "progress_percent": 0.0,
+            "progress_eta_seconds": None,
+            "progress_eta_text": "ETA unavailable",
+            "progress_phase": "Error",
+            "progress_stage": "Sync failed",
+            "progress_message": "Visual index sync failed: boom",
+        }
+    )
+
+    status = manager.status(running=False, auto_start=True)
+
+    assert seen_kwargs == []
+    assert status["refreshing"] is False
+    assert status["last_error"] == "boom"
+    assert status["message"] == "Visual index sync failed: boom"
+
+
 def test_visual_index_manager_reports_every_progress_callback(tmp_path, monkeypatch):
     project_root = tmp_path
     config_path = tmp_path / "config/card_engine/engine.json"
