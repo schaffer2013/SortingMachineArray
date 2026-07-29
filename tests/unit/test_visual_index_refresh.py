@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import cv2
@@ -31,6 +32,20 @@ def test_visual_index_policy_round_trip(tmp_path):
     assert payload["recognition_backend"] == "visual_retrieval"
     assert payload["visual_index_refresh_days"] == 30
     assert refresh_module.load_visual_index_policy(config_path) == 30
+
+
+def test_eta_estimation_ignores_warmup_time_and_uses_recent_samples():
+    now = datetime.now(UTC)
+    samples = [
+        (now - timedelta(minutes=30), 10),
+        (now - timedelta(minutes=3), 100),
+        (now, 115),
+    ]
+
+    eta_seconds = refresh_module._estimate_eta_seconds_from_samples(samples=samples, total=300)
+
+    assert eta_seconds is not None
+    assert eta_seconds == pytest.approx(2220.0, rel=0.1)
 
 
 def test_build_visual_index_from_catalog_uses_project_root_and_builds_index(tmp_path, monkeypatch):

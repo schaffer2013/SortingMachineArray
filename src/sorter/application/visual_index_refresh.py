@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections import deque
 from datetime import UTC, datetime, timedelta
 import hashlib
 import json
@@ -405,6 +406,41 @@ def _run_checkpointed_visual_index_job(
     return result
 
 
+def _estimate_eta_seconds_from_samples(
+    *,
+    samples: list[tuple[datetime, int]],
+    total: int,
+    minimum_completed_cards: int = 5,
+    minimum_samples: int = 2,
+    max_lookback: timedelta = timedelta(minutes=10),
+) -> float | None:
+    if total <= 0:
+        return None
+    if len(samples) < minimum_samples:
+        return None
+    latest_time, latest_current = samples[-1]
+    if latest_current < minimum_completed_cards:
+        return None
+
+    window = [sample for sample in samples if latest_time - sample[0] <= max_lookback]
+    if len(window) < minimum_samples:
+        return None
+    earliest_time, earliest_current = window[0]
+    completed = latest_current - earliest_current
+    if completed <= 0:
+        return None
+    elapsed = (latest_time - earliest_time).total_seconds()
+    if elapsed <= 0:
+        return None
+
+    rate = completed / elapsed
+    if rate <= 0:
+        return None
+
+    remaining = max(0, total - latest_current)
+    return remaining / rate
+
+
 def _load_selected_catalog_cards(source_path: Path, *, limit: int | None = None) -> list[dict[str, Any]]:
     payload = json.loads(source_path.read_text(encoding="utf-8"))
     cards = payload if isinstance(payload, list) else payload.get("cards", [])
@@ -684,8 +720,12 @@ class VisualIndexRefreshManager:
     def _refresh_worker(self, *, force: bool, reason: str, full_rebuild: bool) -> None:
         try:
             progress_lock = threading.Lock()
+            progress_samples: deque[tuple[datetime, int]] = deque(maxlen=16)
+            last_reported_current = 0
+            last_eta_seconds: float | None = None
 
             def report_progress(current: int, total: int, message: str | None = None) -> None:
+                nonlocal last_reported_current, last_eta_seconds
                 if total > 0:
                     percent = max(0.0, min(100.0, (current / total) * 100.0))
                 else:
@@ -693,10 +733,13 @@ class VisualIndexRefreshManager:
                 if message is None:
                     message = f"Indexed {current:,}/{total:,} cards" if total > 0 else "Syncing visual index..."
                 progress_context = _visual_index_progress_context(current=current, total=total, message=message)
-                heartbeat_at = _utc_now_iso()
+                heartbeat_at = datetime.now(UTC)
                 with progress_lock:
-                    started_at = _parse_iso_datetime(self._read_state().get("last_started_at_utc"))
-                    eta_seconds = _estimate_eta_seconds(started_at=started_at, current=current, total=total)
+                    if current > last_reported_current:
+                        progress_samples.append((heartbeat_at, current))
+                        last_reported_current = current
+                        last_eta_seconds = _estimate_eta_seconds_from_samples(samples=list(progress_samples), total=total)
+                    eta_seconds = last_eta_seconds if current > 0 else None
                     self._write_state(
                         {
                             **self._read_state(),
@@ -712,7 +755,7 @@ class VisualIndexRefreshManager:
                             "progress_phase": progress_context["phase"],
                             "progress_stage": progress_context["stage"],
                             "progress_message": message,
-                            "last_heartbeat_at_utc": heartbeat_at,
+                            "last_heartbeat_at_utc": heartbeat_at.isoformat().replace("+00:00", "Z"),
                         }
                     )
 
@@ -1113,20 +1156,6 @@ def _parse_iso_datetime(value: Any) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
-
-
-def _estimate_eta_seconds(*, started_at: datetime | None, current: int, total: int) -> float | None:
-    if started_at is None or total <= 0 or current <= 0:
-        return 0.0 if total > 0 and current >= total else None
-    if current >= total:
-        return 0.0
-    elapsed = (datetime.now(UTC) - started_at).total_seconds()
-    if elapsed <= 0:
-        return None
-    rate = current / elapsed
-    if rate <= 0:
-        return None
-    return max(0.0, (total - current) / rate)
 
 
 def _format_eta_text(seconds: float | None) -> str:
