@@ -64,6 +64,53 @@ class FullVisualIndexRebuildRequired(RuntimeError):
         """Raised when the existing visual index cannot be synced incrementally."""
 
 
+def _visual_index_progress_context(*, current: int, total: int, message: str | None) -> dict[str, str]:
+    detail = (message or "").strip()
+    normalized = detail.lower()
+    if not detail:
+        detail = "Preparing visual index sync..."
+        normalized = detail.lower()
+
+    if normalized.startswith("starting sync"):
+        phase = "Warming up"
+        stage = "Starting sync"
+    elif normalized.startswith("parsing catalog"):
+        phase = "Warming up"
+        stage = "Parsing catalog"
+    elif normalized.startswith("resuming "):
+        phase = "Warming up"
+        stage = "Resuming checkpoint"
+    elif normalized.startswith("comparing source catalog"):
+        phase = "Warming up"
+        stage = "Comparing source catalog"
+    elif normalized.startswith("initializing") or normalized.startswith("loading "):
+        phase = "Warming up"
+        stage = "Initializing embedder"
+    elif normalized.startswith("downloading "):
+        phase = "Warming up" if current <= 0 else "Actively indexing"
+        stage = "Downloading first image" if current <= 0 else "Downloading images"
+    elif normalized.startswith("embedding "):
+        phase = "Warming up" if current <= 0 else "Actively indexing"
+        stage = "Embedding first card" if current <= 0 else "Embedding cards"
+    elif normalized.startswith("saving checkpoint"):
+        phase = "Warming up" if current <= 0 else "Actively indexing"
+        stage = "Saving checkpoint"
+    elif normalized.startswith("indexed "):
+        phase = "Actively indexing"
+        stage = "Actively indexing"
+    elif normalized.startswith("finalizing "):
+        phase = "Finalizing"
+        stage = "Finalizing index"
+    elif normalized.startswith("no new cards"):
+        phase = "Idle"
+        stage = "No new cards to sync"
+    else:
+        phase = "Actively indexing" if current > 0 or total > 0 else "Warming up"
+        stage = detail
+
+    return {"phase": phase, "stage": stage, "detail": detail}
+
+
 def _open_visual_index_checkpoint(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
@@ -513,6 +560,8 @@ class VisualIndexRefreshManager:
                 "progress_percent": state.get("progress_percent"),
                 "progress_eta_seconds": state.get("progress_eta_seconds"),
                 "progress_eta_text": state.get("progress_eta_text"),
+                "progress_phase": state.get("progress_phase"),
+                "progress_stage": state.get("progress_stage"),
                 "progress_message": state.get("progress_message"),
                 "last_heartbeat_at_utc": state.get("last_heartbeat_at_utc"),
                 "needs_refresh": needs_refresh,
@@ -593,17 +642,19 @@ class VisualIndexRefreshManager:
                 **self._read_state(),
                 "refreshing": True,
                 "last_started_at_utc": _utc_now_iso(),
-            "last_action": "refreshing" if force else reason,
-            "last_error": None,
-            "requires_full_rebuild": False,
-            "progress_current": 0,
-            "progress_total": None,
-            "progress_percent": 0.0,
-            "progress_eta_seconds": None,
-            "progress_eta_text": "ETA unavailable",
-            "progress_message": "Starting sync...",
-            "last_heartbeat_at_utc": _utc_now_iso(),
-        }
+                "last_action": "refreshing" if force else reason,
+                "last_error": None,
+                "requires_full_rebuild": False,
+                "progress_current": 0,
+                "progress_total": None,
+                "progress_percent": 0.0,
+                "progress_eta_seconds": None,
+                "progress_eta_text": "ETA unavailable",
+                "progress_phase": "Warming up",
+                "progress_stage": "Starting sync",
+                "progress_message": "Starting sync...",
+                "last_heartbeat_at_utc": _utc_now_iso(),
+            }
         )
         self._refresh_thread = threading.Thread(
             target=self._refresh_worker,
@@ -623,6 +674,7 @@ class VisualIndexRefreshManager:
                     percent = 0.0
                 if message is None:
                     message = f"Indexed {current:,}/{total:,} cards" if total > 0 else "Syncing visual index..."
+                progress_context = _visual_index_progress_context(current=current, total=total, message=message)
                 heartbeat_at = _utc_now_iso()
                 with progress_lock:
                     started_at = _parse_iso_datetime(self._read_state().get("last_started_at_utc"))
@@ -639,6 +691,8 @@ class VisualIndexRefreshManager:
                             "progress_percent": round(percent, 2),
                             "progress_eta_seconds": eta_seconds,
                             "progress_eta_text": _format_eta_text(eta_seconds),
+                            "progress_phase": progress_context["phase"],
+                            "progress_stage": progress_context["stage"],
                             "progress_message": message,
                             "last_heartbeat_at_utc": heartbeat_at,
                         }
@@ -690,6 +744,8 @@ class VisualIndexRefreshManager:
                     "progress_percent": 100.0,
                     "progress_eta_seconds": 0.0,
                     "progress_eta_text": "done",
+                    "progress_phase": "Complete",
+                    "progress_stage": "Index ready",
                     "progress_message": f"Indexed {result.card_count:,}/{result.card_count:,} cards",
                     "index_path": str(result.index_path),
                     "metadata_path": str(result.metadata_path),
@@ -710,6 +766,8 @@ class VisualIndexRefreshManager:
                     "last_action": "rebuild_required",
                     "progress_eta_seconds": None,
                     "progress_eta_text": "ETA unavailable",
+                    "progress_phase": "Needs rebuild",
+                    "progress_stage": "Source catalog changed",
                     "progress_message": str(exc),
                 }
             )
@@ -725,6 +783,8 @@ class VisualIndexRefreshManager:
                     "requires_full_rebuild": False,
                     "progress_eta_seconds": None,
                     "progress_eta_text": "ETA unavailable",
+                    "progress_phase": "Error",
+                    "progress_stage": "Sync failed",
                 }
             )
         finally:
@@ -795,6 +855,8 @@ class VisualIndexRefreshManager:
             "percent": percent,
             "eta_seconds": eta_seconds,
             "eta_text": eta_text,
+            "phase": state.get("progress_phase"),
+            "stage": state.get("progress_stage"),
             "message": state.get("progress_message"),
         }
 

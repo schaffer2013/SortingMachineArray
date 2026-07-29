@@ -1555,6 +1555,24 @@ def test_system_api_reports_version_and_update_state():
     ]
 
 
+def test_api_docs_and_openapi_pages_are_available():
+    client = _client()
+
+    spec_response = client.get("/api/openapi.json")
+    docs_response = client.get("/api/docs")
+
+    assert spec_response.status_code == 200
+    spec = spec_response.get_json()
+    assert spec["openapi"] == "3.0.3"
+    assert "/api/system" in spec["paths"]
+    assert "/api/system/visual-index/refresh" in spec["paths"]
+    assert "/api/docs" not in spec["paths"]
+
+    assert docs_response.status_code == 200
+    assert b"SwaggerUIBundle" in docs_response.data
+    assert b"/api/openapi.json" in docs_response.data
+
+
 def test_collection_service_api_reports_unconfigured_adapter():
     payload = _client().get("/api/collection-service").get_json()
 

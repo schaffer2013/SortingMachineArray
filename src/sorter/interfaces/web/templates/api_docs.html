@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}API Docs | Sorter Console{% endblock %}
+
+{% block content %}
+<section class="panel">
+  <div class="panel-header">
+    <div>
+      <p class="eyebrow">Swagger UI</p>
+      <h2>Sorter API documentation</h2>
+    </div>
+    <a class="button-link" href="{{ openapi_url }}">OpenAPI JSON</a>
+  </div>
+  <p class="muted">
+    Browse and try the sorter API endpoints directly from the page below.
+  </p>
+  <div id="swagger-ui" class="swagger-ui-host"></div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+<script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+<script>
+  window.addEventListener("load", () => {
+    window.ui = SwaggerUIBundle({
+      url: "{{ openapi_url }}",
+      dom_id: "#swagger-ui",
+      deepLinking: true,
+      displayOperationId: true,
+      docExpansion: "list",
+      defaultModelsExpandDepth: 1,
+      syntaxHighlight: { activated: true },
+    });
+  });
+</script>
+{% endblock %}

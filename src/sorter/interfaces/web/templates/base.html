@@ -28,6 +28,7 @@
           <a class="{{ 'active' if request.path == '/card-back-training' else '' }}" href="/card-back-training">Training</a>
           <a class="{{ 'active' if request.path == '/runs' else '' }}" href="/runs">Runs</a>
           <a class="{{ 'active' if request.path == '/system' else '' }}" href="/system">System</a>
+          <a class="{{ 'active' if request.path == '/api/docs' else '' }}" href="/api/docs">API docs</a>
           <a class="{{ 'active' if request.path == '/about' else '' }}" href="/about">Capabilities</a>
         </nav>
         <main>{% block content %}{% endblock %}</main>

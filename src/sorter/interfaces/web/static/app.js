@@ -2519,7 +2519,8 @@ window.SorterPages = {
       if (visualIndexDetails) {
         visualIndexDetails.innerHTML = [
           ["Status", visualIndex.message || "--"],
-          ["Phase", visualIndex.progress_message || progress.message || "--"],
+          ["Phase", visualIndex.progress_phase || progress.phase || "--"],
+          ["Step", visualIndex.progress_stage || progress.stage || visualIndex.progress_message || progress.message || "--"],
           ["Mode", visualRequiresFullRebuild ? "Full rebuild required" : (visualRefreshing ? "Syncing additions" : "Incremental sync")],
           ["Policy", visualIndex.configured_refresh_days ? `${visualIndex.configured_refresh_days} days` : "--"],
           ["Age", formatDays(visualIndex.age_days)],

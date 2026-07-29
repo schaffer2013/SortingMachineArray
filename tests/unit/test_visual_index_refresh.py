@@ -398,7 +398,9 @@ def test_visual_index_manager_reports_every_progress_callback(tmp_path, monkeypa
     def fake_build(**kwargs):
         progress_callback = kwargs.get("progress_callback")
         if callable(progress_callback):
-            progress_callback(0, 2, "Indexed 0/2 cards")
+            progress_callback(0, 2, "Parsing catalog and preparing 2 cards")
+            progress_callback(0, 2, "Downloading card 1/2: Alpha")
+            progress_callback(0, 2, "Embedding card 1/2: Alpha")
             progress_callback(1, 2, "Indexed 1/2 cards")
         kwargs["index_path"].parent.mkdir(parents=True, exist_ok=True)
         kwargs["metadata_path"].parent.mkdir(parents=True, exist_ok=True)
@@ -442,4 +444,12 @@ def test_visual_index_manager_reports_every_progress_callback(tmp_path, monkeypa
             break
         time.sleep(0.05)
 
-    assert [call["progress_current"] for call in progress_calls] == [0, 0, 1, 1]
+    assert [call["progress_phase"] for call in progress_calls[:3]] == [
+        "Warming up",
+        "Warming up",
+        "Warming up",
+    ]
+    assert any(call["progress_phase"] == "Actively indexing" for call in progress_calls)
+    assert any(call["progress_stage"] == "Actively indexing" for call in progress_calls)
+    assert progress_calls[-1]["progress_current"] == 1
+    assert progress_calls[-1]["progress_phase"] == "Complete"

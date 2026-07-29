@@ -20,7 +20,7 @@ import time
 import tomllib
 from typing import Any, Callable
 
-from flask import Flask, Response, g, jsonify, render_template, request, send_file
+from flask import Flask, Response, g, jsonify, render_template, request, send_file, url_for
 from PIL import Image, ImageDraw, ImageStat
 
 from sorter.application.card_back_detection import (
@@ -98,6 +98,8 @@ RECOGNITION_BACKEND_OPTIONS = (
     "moss_machine",
     "sim_truth",
 )
+
+OPENAPI_VERSION = "3.0.3"
 
 
 class SerialBoardSession:
@@ -567,6 +569,145 @@ def _port_auto_score(port: dict[str, str]) -> tuple[int, str]:
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _package_version_string() -> str:
+    try:
+        return version("card-sorter-testbed")
+    except PackageNotFoundError:
+        project_root = Path(__file__).resolve().parents[4]
+        pyproject_path = project_root / "pyproject.toml"
+        try:
+            with pyproject_path.open("rb") as handle:
+                return str(tomllib.load(handle).get("project", {}).get("version", "0.0.0"))
+        except Exception:
+            return "0.0.0"
+
+
+def _humanize_openapi_operation(endpoint: str) -> str:
+    value = endpoint.removeprefix("api_").replace("_", " ")
+    value = re.sub(r"\b([a-z])", lambda match: match.group(1).upper(), value)
+    value = value.replace("Id", "ID").replace("Api ", "")
+    return value.strip() or endpoint
+
+
+def _openapi_tag_for_path(path: str) -> str:
+    parts = [part for part in path.split("/") if part]
+    if len(parts) < 2:
+        return "api"
+    if parts[1] in {"system", "serial", "card-back", "card-back-training", "neopixel", "light-profiles", "collection-service", "runtime", "runs", "capabilities", "status", "snapshot", "calibration", "saved-positions", "control", "recognition"}:
+        return parts[1]
+    return parts[1]
+
+
+def _openapi_schema_for_route(endpoint: str, method: str, path: str) -> dict[str, Any] | None:
+    method = method.upper()
+    if method in {"GET", "DELETE"}:
+        return None
+    if endpoint == "api_system_visual_index_policy":
+        return {
+            "type": "object",
+            "properties": {
+                "refresh_days": {"type": "integer", "enum": list(VISUAL_INDEX_REFRESH_DAY_OPTIONS)},
+            },
+            "required": ["refresh_days"],
+            "additionalProperties": False,
+        }
+    if endpoint == "api_system_visual_index_rebuild":
+        return {
+            "type": "object",
+            "properties": {"confirm": {"type": "string", "example": "FULL REBUILD"}},
+            "required": ["confirm"],
+            "additionalProperties": False,
+        }
+    if endpoint == "api_runtime_update":
+        return {
+            "type": "object",
+            "properties": {"mode": {"type": "string", "example": "simulation"}},
+            "required": ["mode"],
+            "additionalProperties": False,
+        }
+    if endpoint == "api_serial_connect":
+        return {
+            "type": "object",
+            "properties": {
+                "port": {"type": "string"},
+                "baud_rate": {"type": "integer", "default": 115200},
+            },
+            "required": [],
+            "additionalProperties": False,
+        }
+    if endpoint == "api_system_update":
+        return {"type": "object", "properties": {}, "additionalProperties": True}
+    if endpoint == "api_recognition_run":
+        return {
+            "type": "object",
+            "properties": {
+                "source": {"type": "string", "enum": ["upload", "camera"]},
+                "mode": {"type": "string"},
+                "backend": {"type": "string"},
+                "prefer_visual_small_pool": {"type": "boolean"},
+                "use_tracked_pool": {"type": "boolean"},
+                "track_result": {"type": "boolean"},
+            },
+            "additionalProperties": True,
+        }
+    return {"type": "object", "additionalProperties": True}
+
+
+def _build_openapi_spec(app: Flask) -> dict[str, Any]:
+    paths: dict[str, Any] = {}
+    for rule in sorted(app.url_map.iter_rules(), key=lambda item: item.rule):
+        if not rule.rule.startswith("/api/"):
+            continue
+        if rule.endpoint in {"api_docs", "api_openapi"}:
+            continue
+        operations: dict[str, Any] = {}
+        for method in sorted(rule.methods - {"HEAD", "OPTIONS"}):
+            endpoint = rule.endpoint
+            operation: dict[str, Any] = {
+                "operationId": f"{endpoint}_{method.lower()}",
+                "summary": _humanize_openapi_operation(endpoint),
+                "description": f"Invoke {rule.rule} from the sorter web API.",
+                "tags": [_openapi_tag_for_path(rule.rule)],
+                "responses": {
+                    "200": {"description": "Success"},
+                    "400": {"description": "Bad request"},
+                    "409": {"description": "Conflict"},
+                    "500": {"description": "Server error"},
+                },
+            }
+            parameters = []
+            for argument in sorted(rule.arguments):
+                parameters.append(
+                    {
+                        "name": argument,
+                        "in": "path",
+                        "required": True,
+                        "schema": {"type": "string"},
+                    }
+                )
+            if parameters:
+                operation["parameters"] = parameters
+            request_schema = _openapi_schema_for_route(endpoint, method, rule.rule)
+            if request_schema is not None:
+                operation["requestBody"] = {
+                    "required": method in {"POST", "PUT", "PATCH"},
+                    "content": {"application/json": {"schema": request_schema}},
+                }
+            operations[method.lower()] = operation
+        if operations:
+            paths[rule.rule] = operations
+    return {
+        "openapi": OPENAPI_VERSION,
+        "info": {
+            "title": "SortingMachineArray API",
+            "version": _package_version_string(),
+            "description": "Interactive documentation for the sorter web API.",
+        },
+        "servers": [{"url": "/"}],
+        "paths": paths,
+    }
 
 
 def _elapsed_ms(started_at: float) -> int:
@@ -2686,6 +2827,14 @@ def create_web_app(
     @app.get("/system")
     def system():
         return render_template("system.html")
+
+    @app.get("/api/docs")
+    def api_docs():
+        return render_template("api_docs.html", openapi_url=url_for("api_openapi"))
+
+    @app.get("/api/openapi.json")
+    def api_openapi():
+        return jsonify(_build_openapi_spec(app))
 
     @app.get("/api/status")
     def api_status():
