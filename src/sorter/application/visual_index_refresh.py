@@ -536,7 +536,7 @@ class VisualIndexRefreshManager:
             ready = self.index_path.is_file() and self.metadata_path.is_file() and not needs_refresh
 
             if auto_start and needs_refresh and not running and not refreshing and not rebuild_required:
-                self._start_background_refresh(force=False, reason=reason)
+                self._start_background_refresh(force=False, reason=reason, full_rebuild=False)
                 refreshing = True
 
             return {
@@ -633,7 +633,7 @@ class VisualIndexRefreshManager:
         save_visual_index_policy(self.config_path, refresh_days)
         return self.status(running=False, auto_start=False)
 
-    def _start_background_refresh(self, *, force: bool, reason: str, full_rebuild: bool) -> None:
+    def _start_background_refresh(self, *, force: bool, reason: str, full_rebuild: bool = False) -> None:
         if self._refresh_thread is not None and self._refresh_thread.is_alive():
             return
         self._refresh_error = None

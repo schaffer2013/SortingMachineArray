@@ -1,6 +1,9 @@
 const json = async (url, options = {}) => {
   const response = await fetch(url, options);
-  const body = await response.json();
+  const contentType = response.headers.get("content-type") || "";
+  const body = contentType.includes("application/json")
+    ? await response.json()
+    : {message: await response.text()};
   if (!response.ok) throw new Error(body.message || "Request failed");
   return body;
 };
