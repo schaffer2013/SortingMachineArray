@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from collections import deque
 from datetime import UTC, datetime, timedelta
+import importlib
 import hashlib
 import json
 import os
@@ -29,6 +30,17 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for the vendored subm
         src_str = str(_VENDORED_SRC)
         if src_str not in sys.path:
             sys.path.insert(0, src_str)
+        importlib.invalidate_caches()
+        vendored_package_root = (_VENDORED_SRC / "card_engine").resolve()
+        loaded_card_engine = sys.modules.get("card_engine")
+        loaded_paths = {
+            Path(path).resolve()
+            for path in getattr(loaded_card_engine, "__path__", [])
+            if isinstance(path, str) and path
+        } if loaded_card_engine is not None else set()
+        if loaded_card_engine is not None and vendored_package_root not in loaded_paths:
+            for module_name in [name for name in sys.modules if name == "card_engine" or name.startswith("card_engine.")]:
+                sys.modules.pop(module_name, None)
     from card_engine.retrieval.embeddings import create_embedder  # type: ignore
     from card_engine.retrieval.index import VisualIndex  # type: ignore
 
@@ -44,8 +56,9 @@ DEFAULT_VISUAL_INDEX_STATE_PATH = Path("data/index/visual_index_state.json")
 DEFAULT_VISUAL_INDEX_CHECKPOINT_PATH = Path("data/index/visual_index_checkpoint.sqlite3")
 DEFAULT_VISUAL_INDEX_REFERENCE_DIR = Path("data/index/reference_images")
 VISUAL_INDEX_PROGRESS_HEARTBEAT_STALE_SECONDS = 120.0
+VISUAL_INDEX_PROGRESS_HEARTBEAT_INTERVAL_SECONDS = 15.0
 REQUEST_HEADERS = {
-    "User-Agent": "card-sorter-testbed/0.8.10 (+visual index refresh)",
+    "User-Agent": "card-sorter-testbed/0.8.27 (+visual index refresh)",
     "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
 }
 
@@ -718,11 +731,18 @@ class VisualIndexRefreshManager:
         self._refresh_thread.start()
 
     def _refresh_worker(self, *, force: bool, reason: str, full_rebuild: bool) -> None:
+        result: VisualIndexBuildResult | None = None
         try:
             progress_lock = threading.Lock()
             progress_samples: deque[tuple[datetime, int]] = deque(maxlen=16)
             last_reported_current = 0
             last_eta_seconds: float | None = None
+            last_progress_snapshot: dict[str, int | str] = {
+                "current": 0,
+                "total": 0,
+                "message": "Starting sync...",
+            }
+            heartbeat_stop = threading.Event()
 
             def report_progress(current: int, total: int, message: str | None = None) -> None:
                 nonlocal last_reported_current, last_eta_seconds
@@ -735,6 +755,9 @@ class VisualIndexRefreshManager:
                 progress_context = _visual_index_progress_context(current=current, total=total, message=message)
                 heartbeat_at = datetime.now(UTC)
                 with progress_lock:
+                    last_progress_snapshot["current"] = current
+                    last_progress_snapshot["total"] = total
+                    last_progress_snapshot["message"] = message
                     if current > last_reported_current:
                         progress_samples.append((heartbeat_at, current))
                         last_reported_current = current
@@ -759,32 +782,50 @@ class VisualIndexRefreshManager:
                         }
                     )
 
-            if full_rebuild:
-                result = build_visual_index_from_catalog(
-                    project_root=self.project_root,
-                    source_catalog_path=self.source_catalog_path,
-                    index_path=self.index_path,
-                    metadata_path=self.metadata_path,
-                    reference_dir=self.reference_dir,
-                    refresh_days=self.refresh_days(),
-                    model=self.model,
-                    model_path=self.model_path,
-                    overwrite_downloads=self.overwrite_downloads or force,
-                    progress_callback=report_progress,
-                )
-            else:
-                result = refresh_visual_index_from_catalog(
-                    project_root=self.project_root,
-                    source_catalog_path=self.source_catalog_path,
-                    index_path=self.index_path,
-                    metadata_path=self.metadata_path,
-                    reference_dir=self.reference_dir,
-                    refresh_days=self.refresh_days(),
-                    model=self.model,
-                    model_path=self.model_path,
-                    overwrite_downloads=self.overwrite_downloads or force,
-                    progress_callback=report_progress,
-                )
+            def heartbeat_loop() -> None:
+                while not heartbeat_stop.wait(VISUAL_INDEX_PROGRESS_HEARTBEAT_INTERVAL_SECONDS):
+                    with progress_lock:
+                        current = int(last_progress_snapshot["current"])
+                        total = int(last_progress_snapshot["total"])
+                        message = str(last_progress_snapshot["message"])
+                    report_progress(current, total, message)
+
+            heartbeat_thread = threading.Thread(target=heartbeat_loop, daemon=True)
+            heartbeat_thread.start()
+            try:
+                if full_rebuild:
+                    result = build_visual_index_from_catalog(
+                        project_root=self.project_root,
+                        source_catalog_path=self.source_catalog_path,
+                        index_path=self.index_path,
+                        metadata_path=self.metadata_path,
+                        reference_dir=self.reference_dir,
+                        refresh_days=self.refresh_days(),
+                        model=self.model,
+                        model_path=self.model_path,
+                        overwrite_downloads=self.overwrite_downloads or force,
+                        progress_callback=report_progress,
+                    )
+                else:
+                    result = refresh_visual_index_from_catalog(
+                        project_root=self.project_root,
+                        source_catalog_path=self.source_catalog_path,
+                        index_path=self.index_path,
+                        metadata_path=self.metadata_path,
+                        reference_dir=self.reference_dir,
+                        refresh_days=self.refresh_days(),
+                        model=self.model,
+                        model_path=self.model_path,
+                        overwrite_downloads=self.overwrite_downloads or force,
+                        progress_callback=report_progress,
+                    )
+            finally:
+                heartbeat_stop.set()
+                heartbeat_thread.join(timeout=5.0)
+
+            if result is None:  # pragma: no cover - defensive guard for unexpected control flow
+                raise RuntimeError("Visual index refresh completed without producing a result.")
+
             self._write_state(
                 {
                     "updated_at_utc": result.updated_at_utc,

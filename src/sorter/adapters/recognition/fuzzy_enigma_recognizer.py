@@ -46,6 +46,16 @@ def _load_card_engine_modules(project_root: Path) -> CardEngineModules:
     if src_str not in sys.path:
         sys.path.insert(0, src_str)
     importlib.invalidate_caches()
+    vendored_package_root = (submodule_src / "card_engine").resolve()
+    loaded_card_engine = sys.modules.get("card_engine")
+    loaded_paths = {
+        Path(path).resolve()
+        for path in getattr(loaded_card_engine, "__path__", [])
+        if isinstance(path, str) and path
+    } if loaded_card_engine is not None else set()
+    if loaded_card_engine is not None and vendored_package_root not in loaded_paths:
+        for module_name in [name for name in sys.modules if name == "card_engine" or name.startswith("card_engine.")]:
+            sys.modules.pop(module_name, None)
 
     try:
         return CardEngineModules(
