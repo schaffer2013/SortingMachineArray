@@ -55,6 +55,7 @@ DEFAULT_VISUAL_INDEX_PATH = Path("data/index/card_embeddings.npz")
 DEFAULT_VISUAL_METADATA_PATH = Path("data/index/card_embeddings.jsonl")
 DEFAULT_VISUAL_INDEX_STATE_PATH = Path("data/index/visual_index_state.json")
 DEFAULT_VISUAL_INDEX_CHECKPOINT_PATH = Path("data/index/visual_index_checkpoint.sqlite3")
+DEFAULT_VISUAL_INDEX_DIAGNOSTIC_LOG_PATH = Path("data/index/visual_index_sync.jsonl")
 DEFAULT_VISUAL_INDEX_REFERENCE_DIR = Path("data/index/reference_images")
 VISUAL_INDEX_PROGRESS_HEARTBEAT_STALE_SECONDS = 120.0
 VISUAL_INDEX_PROGRESS_HEARTBEAT_INTERVAL_SECONDS = 15.0
@@ -62,6 +63,61 @@ REQUEST_HEADERS = {
     "User-Agent": "card-sorter-testbed/0.8.31 (+visual index refresh)",
     "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
 }
+_DIAGNOSTIC_LOG_LOCK = threading.Lock()
+
+
+def _append_visual_index_diagnostic(path: Path, event: str, **details: Any) -> None:
+    payload = {
+        "at_utc": _utc_now_iso(),
+        "event": event,
+        **details,
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(payload, sort_keys=True, default=str)
+        with _DIAGNOSTIC_LOG_LOCK, path.open("a", encoding="utf-8") as stream:
+            stream.write(line + "\n")
+    except OSError:
+        # Diagnostics must never interrupt an index build.
+        return
+
+
+def _read_visual_index_diagnostics(path: Path, *, limit: int = 20) -> list[dict[str, Any]]:
+    if not path.is_file():
+        return []
+    safe_limit = max(1, min(int(limit), 200))
+    try:
+        with path.open("rb") as stream:
+            stream.seek(0, 2)
+            remaining = stream.tell()
+            chunks: list[bytes] = []
+            newline_count = 0
+            while remaining > 0 and newline_count <= safe_limit:
+                size = min(65536, remaining)
+                remaining -= size
+                stream.seek(remaining)
+                chunk = stream.read(size)
+                chunks.append(chunk)
+                newline_count += chunk.count(b"\n")
+        lines = b"".join(reversed(chunks)).decode("utf-8", "replace").splitlines()
+    except OSError:
+        return []
+    events: list[dict[str, Any]] = []
+    for line in lines[-safe_limit:]:
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            events.append(payload)
+    return events
+
+
+def _visual_index_diagnostic_log_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
 
 
 @dataclass(frozen=True)
@@ -75,6 +131,8 @@ class VisualIndexBuildResult:
     reused_count: int
     updated_at_utc: str
     refresh_days: int
+    source_card_count: int | None = None
+    skipped_count: int = 0
 
 
 class FullVisualIndexRebuildRequired(RuntimeError):
@@ -161,6 +219,17 @@ def _initialize_visual_index_checkpoint(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS checkpoint_failures (
+            ordinal INTEGER PRIMARY KEY,
+            card_key TEXT NOT NULL UNIQUE,
+            card_name TEXT,
+            error TEXT NOT NULL,
+            updated_at_utc TEXT NOT NULL
+        )
+        """
+    )
     conn.commit()
 
 
@@ -172,6 +241,22 @@ def _checkpoint_card_count(conn: sqlite3.Connection) -> int:
 def _checkpoint_card_keys(conn: sqlite3.Connection) -> set[str]:
     rows = conn.execute("SELECT card_key FROM checkpoint_cards").fetchall()
     return {str(row[0]) for row in rows if row and row[0] is not None}
+
+
+def _checkpoint_failure_rows(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT ordinal, card_key, card_name, error, updated_at_utc FROM checkpoint_failures"
+    ).fetchall()
+    return {
+        str(card_key): {
+            "ordinal": int(ordinal),
+            "card_key": str(card_key),
+            "card_name": card_name,
+            "error": str(error),
+            "updated_at_utc": str(updated_at_utc),
+        }
+        for ordinal, card_key, card_name, error, updated_at_utc in rows
+    }
 
 
 def _checkpoint_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -211,6 +296,24 @@ def _upsert_checkpoint_card(
             np.asarray(embedding, dtype=np.float32).reshape(-1).tobytes(),
             _utc_now_iso(),
         ),
+    )
+    conn.commit()
+
+
+def _upsert_checkpoint_failure(
+    conn: sqlite3.Connection,
+    *,
+    ordinal: int,
+    card_key: str,
+    card_name: str,
+    error: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO checkpoint_failures (ordinal, card_key, card_name, error, updated_at_utc)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (int(ordinal), str(card_key), str(card_name), str(error), _utc_now_iso()),
     )
     conn.commit()
 
@@ -257,12 +360,21 @@ def _run_checkpointed_visual_index_job(
     progress_label: str,
     progress_callback: ProgressCallback | None,
 ) -> VisualIndexBuildResult:
+    diagnostic_log_path = project_root / DEFAULT_VISUAL_INDEX_DIAGNOSTIC_LOG_PATH
+    _append_visual_index_diagnostic(
+        diagnostic_log_path,
+        "job_started",
+        mode="rebuild" if existing_index is None else "sync",
+        source_catalog_path=str(source_catalog_path),
+        candidate_card_count=len(cards),
+        checkpoint_path=str(checkpoint_path),
+    )
     if existing_index is None and not cards:
         raise ValueError("No cards with image URLs were found in the source catalog.")
     if existing_index is not None and not cards:
         updated_at = _utc_now_iso()
         _clear_visual_index_checkpoint(checkpoint_path)
-        return VisualIndexBuildResult(
+        result = VisualIndexBuildResult(
             index_path=index_path,
             metadata_path=metadata_path,
             reference_dir=reference_dir,
@@ -272,7 +384,20 @@ def _run_checkpointed_visual_index_job(
             reused_count=0,
             updated_at_utc=updated_at,
             refresh_days=_normalize_refresh_days(refresh_days),
+            source_card_count=len(existing_index.metadata),
         )
+        _append_visual_index_diagnostic(
+            diagnostic_log_path,
+            "job_completed",
+            indexed_card_count=result.card_count,
+            downloaded_count=0,
+            reused_count=0,
+        )
+        try:
+            diagnostic_log_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return result
 
     result: VisualIndexBuildResult | None = None
     cleanup_checkpoint = False
@@ -280,6 +405,7 @@ def _run_checkpointed_visual_index_job(
     try:
         _initialize_visual_index_checkpoint(conn)
         checkpoint_rows = {row["card_key"]: row for row in _checkpoint_rows(conn)}
+        checkpoint_failures = _checkpoint_failure_rows(conn)
         for row in checkpoint_rows.values():
             _delete_reference_artifact(project_root, row.get("metadata", {}))
         job_entries: list[tuple[int, str, dict[str, Any]]] = []
@@ -290,7 +416,14 @@ def _run_checkpointed_visual_index_job(
             job_entries.append((ordinal, card_key, card))
         job_keys = {card_key for _, card_key, _ in job_entries}
         resumable_rows = {key: row for key, row in checkpoint_rows.items() if key in job_keys}
-        processed_count = len(resumable_rows)
+        resumable_failures = {key: row for key, row in checkpoint_failures.items() if key in job_keys}
+        processed_count = len(resumable_rows) + len(resumable_failures)
+        _append_visual_index_diagnostic(
+            diagnostic_log_path,
+            "checkpoint_loaded",
+            completed_card_count=processed_count,
+            candidate_card_count=len(job_entries),
+        )
         if progress_callback is not None:
             if processed_count > 0:
                 progress_callback(
@@ -309,15 +442,52 @@ def _run_checkpointed_visual_index_job(
             if card_key in resumable_rows:
                 reused += 1
                 continue
+            if card_key in resumable_failures:
+                continue
             card_name = str(card.get("name") or card_key or f"card {ordinal + 1}")
+            card_started_at = time.monotonic()
+            card_context = {
+                "ordinal": ordinal + 1,
+                "candidate_card_count": len(job_entries),
+                "completed_card_count": processed_count,
+                "card_key": card_key,
+                "card_name": card_name,
+            }
+            _append_visual_index_diagnostic(diagnostic_log_path, "card_started", **card_context)
             try:
-                image_selection = _load_reference_image_for_card(card)
+                image_selection = _load_reference_image_for_card(
+                    card,
+                    diagnostic_log_path=diagnostic_log_path,
+                    diagnostic_context=card_context,
+                )
             except ValueError as exc:
+                _upsert_checkpoint_failure(
+                    conn,
+                    ordinal=ordinal,
+                    card_key=card_key,
+                    card_name=card_name,
+                    error=str(exc),
+                )
+                resumable_failures[card_key] = {
+                    "ordinal": ordinal,
+                    "card_key": card_key,
+                    "card_name": card_name,
+                    "error": str(exc),
+                }
+                processed_count += 1
+                _append_visual_index_diagnostic(
+                    diagnostic_log_path,
+                    "card_skipped",
+                    **card_context,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                    elapsed_ms=round((time.monotonic() - card_started_at) * 1000, 1),
+                )
                 if progress_callback is not None:
                     progress_callback(
                         processed_count,
                         len(job_entries),
-                        f"Skipping {card_name}: {exc}",
+                        f"Skipped {card_name} after image failure ({processed_count:,}/{len(job_entries):,} processed): {exc}",
                     )
                 continue
             if image_selection is None:
@@ -337,6 +507,13 @@ def _run_checkpointed_visual_index_job(
                     len(job_entries),
                     f"Embedding {progress_label[:-1] if progress_label.endswith('s') else progress_label} {ordinal + 1:,}/{len(job_entries):,}: {card_name}",
                 )
+            embedding_started_at = time.monotonic()
+            _append_visual_index_diagnostic(
+                diagnostic_log_path,
+                "embedding_started",
+                **card_context,
+                image_url=image_url,
+            )
             vector = embedder.embed(image)
             if progress_callback is not None:
                 progress_callback(
@@ -369,6 +546,14 @@ def _run_checkpointed_visual_index_job(
                 "embedding": np.asarray(vector, dtype=np.float32).reshape(-1),
             }
             processed_count += 1
+            _append_visual_index_diagnostic(
+                diagnostic_log_path,
+                "card_checkpointed",
+                **{**card_context, "completed_card_count": processed_count},
+                image_url=image_url,
+                embedding_ms=round((time.monotonic() - embedding_started_at) * 1000, 1),
+                elapsed_ms=round((time.monotonic() - card_started_at) * 1000, 1),
+            )
             if progress_callback is not None:
                 progress_callback(
                     processed_count,
@@ -376,14 +561,20 @@ def _run_checkpointed_visual_index_job(
                     f"Indexed {processed_count:,}/{len(job_entries):,} {progress_label}",
                 )
 
-        final_rows = [resumable_rows[card_key] for _, card_key, _ in sorted(job_entries, key=lambda item: item[0])]
+        final_rows = [
+            resumable_rows[card_key]
+            for _, card_key, _ in sorted(job_entries, key=lambda item: item[0])
+            if card_key in resumable_rows
+        ]
         if progress_callback is not None:
             progress_callback(
-                len(final_rows),
+                processed_count,
                 len(job_entries),
                 f"Finalizing {progress_label} index",
             )
         if existing_index is None:
+            if not final_rows:
+                raise ValueError("No visual index cards could be embedded successfully.")
             embeddings = np.vstack([row["embedding"] for row in final_rows])
             metadata = [row["metadata"] for row in final_rows]
         else:
@@ -407,8 +598,18 @@ def _run_checkpointed_visual_index_job(
             reused_count=reused,
             updated_at_utc=updated_at,
             refresh_days=_normalize_refresh_days(refresh_days),
+            source_card_count=(len(existing_index.metadata) if existing_index is not None else 0) + len(job_entries),
+            skipped_count=len(resumable_failures),
         )
         cleanup_checkpoint = True
+    except Exception as exc:
+        _append_visual_index_diagnostic(
+            diagnostic_log_path,
+            "job_failed",
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
+        raise
     finally:
         conn.close()
     if cleanup_checkpoint:
@@ -417,8 +618,24 @@ def _run_checkpointed_visual_index_job(
         raise RuntimeError("Visual index job completed without producing a result.")
     if result.reference_dir.exists():
         if progress_callback is not None:
-            progress_callback(result.card_count, result.card_count, "Cleaning up reference images")
+            progress_callback(
+                result.source_card_count or result.card_count,
+                result.source_card_count or result.card_count,
+                "Cleaning up reference images",
+            )
         _cleanup_reference_directory(result.reference_dir)
+    _append_visual_index_diagnostic(
+        diagnostic_log_path,
+        "job_completed",
+        indexed_card_count=result.card_count,
+        downloaded_count=result.downloaded_count,
+        reused_count=result.reused_count,
+        skipped_count=result.skipped_count,
+    )
+    try:
+        diagnostic_log_path.unlink(missing_ok=True)
+    except OSError:
+        pass
     return result
 
 
@@ -585,6 +802,7 @@ class VisualIndexRefreshManager:
     index_path: Path | None = None
     metadata_path: Path | None = None
     state_path: Path | None = None
+    diagnostic_log_path: Path | None = None
     reference_dir: Path | None = None
     model: str = "opencv_v1"
     model_path: str | None = None
@@ -597,6 +815,11 @@ class VisualIndexRefreshManager:
         self.index_path = Path(self.index_path) if self.index_path is not None else self.project_root / DEFAULT_VISUAL_INDEX_PATH
         self.metadata_path = Path(self.metadata_path) if self.metadata_path is not None else self.project_root / DEFAULT_VISUAL_METADATA_PATH
         self.state_path = Path(self.state_path) if self.state_path is not None else self.project_root / DEFAULT_VISUAL_INDEX_STATE_PATH
+        self.diagnostic_log_path = (
+            Path(self.diagnostic_log_path)
+            if self.diagnostic_log_path is not None
+            else self.project_root / DEFAULT_VISUAL_INDEX_DIAGNOSTIC_LOG_PATH
+        )
         self.reference_dir = Path(self.reference_dir) if self.reference_dir is not None else self.project_root / DEFAULT_VISUAL_INDEX_REFERENCE_DIR
         self._lock = threading.RLock()
         self._refresh_thread: threading.Thread | None = None
@@ -648,6 +871,10 @@ class VisualIndexRefreshManager:
                 "index_path": str(self.index_path),
                 "metadata_path": str(self.metadata_path),
                 "state_path": str(self.state_path),
+                "diagnostic_log_path": str(self.diagnostic_log_path),
+                "diagnostic_log_exists": self.diagnostic_log_path.is_file(),
+                "diagnostic_log_size": _visual_index_diagnostic_log_size(self.diagnostic_log_path),
+                "diagnostic_last_event": (self.diagnostics(limit=1)["events"] or [None])[-1],
                 "reference_dir": str(self.reference_dir),
                 "updated_at_utc": state.get("updated_at_utc"),
                 "last_started_at_utc": state.get("last_started_at_utc"),
@@ -655,6 +882,7 @@ class VisualIndexRefreshManager:
                 "age_days": age_days,
                 "source_card_count": state.get("source_card_count"),
                 "indexed_card_count": state.get("indexed_card_count"),
+                "skipped_card_count": state.get("skipped_count"),
                 "progress_current": state.get("progress_current"),
                 "progress_total": state.get("progress_total"),
                 "progress_percent": state.get("progress_percent"),
@@ -687,6 +915,15 @@ class VisualIndexRefreshManager:
                 "source_catalog_mtime_ns": state.get("source_catalog_mtime_ns"),
                 "source_catalog_size": state.get("source_catalog_size"),
             }
+
+    def diagnostics(self, *, limit: int = 20) -> dict[str, Any]:
+        events = _read_visual_index_diagnostics(self.diagnostic_log_path, limit=limit)
+        return {
+            "path": str(self.diagnostic_log_path),
+            "exists": self.diagnostic_log_path.is_file(),
+            "size": _visual_index_diagnostic_log_size(self.diagnostic_log_path),
+            "events": events,
+        }
 
     def refresh(self, *, force: bool = False) -> dict[str, Any]:
         with self._lock:
@@ -737,6 +974,13 @@ class VisualIndexRefreshManager:
         if self._refresh_thread is not None and self._refresh_thread.is_alive():
             return
         self._refresh_error = None
+        _append_visual_index_diagnostic(
+            self.diagnostic_log_path,
+            "worker_starting",
+            reason=reason,
+            full_rebuild=full_rebuild,
+            force=force,
+        )
         self._write_state(
             {
                 **self._read_state(),
@@ -827,6 +1071,13 @@ class VisualIndexRefreshManager:
                         total = int(last_progress_snapshot["total"])
                         message = str(last_progress_snapshot["message"])
                     report_progress(current, total, message)
+                    _append_visual_index_diagnostic(
+                        self.diagnostic_log_path,
+                        "worker_heartbeat",
+                        current=current,
+                        total=total,
+                        message=message,
+                    )
 
             heartbeat_thread = threading.Thread(target=heartbeat_loop, daemon=True)
             heartbeat_thread.start()
@@ -878,23 +1129,41 @@ class VisualIndexRefreshManager:
                     "source_catalog_mtime_ns": result.source_catalog_path.stat().st_mtime_ns,
                     "source_catalog_size": result.source_catalog_path.stat().st_size,
                     "indexed_card_count": result.card_count,
-                    "source_card_count": result.card_count,
-                    "progress_current": result.card_count,
-                    "progress_total": result.card_count,
+                    "source_card_count": result.source_card_count or result.card_count,
+                    "progress_current": result.source_card_count or result.card_count,
+                    "progress_total": result.source_card_count or result.card_count,
                     "progress_percent": 100.0,
                     "progress_eta_seconds": 0.0,
                     "progress_eta_text": "done",
                     "progress_phase": "Complete",
                     "progress_stage": "Index ready",
-                    "progress_message": f"Indexed {result.card_count:,}/{result.card_count:,} cards",
+                    "progress_message": (
+                        f"Processed {result.source_card_count or result.card_count:,} cards; "
+                        f"indexed {result.card_count:,}, skipped {result.skipped_count:,}"
+                    ),
                     "index_path": str(result.index_path),
                     "metadata_path": str(result.metadata_path),
                     "reference_dir": str(result.reference_dir),
                     "downloaded_count": result.downloaded_count,
                     "reused_count": result.reused_count,
+                    "skipped_count": result.skipped_count,
                 }
             )
+            _append_visual_index_diagnostic(
+                self.diagnostic_log_path,
+                "worker_completed",
+                indexed_card_count=result.card_count,
+            )
+            try:
+                self.diagnostic_log_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         except FullVisualIndexRebuildRequired as exc:
+            _append_visual_index_diagnostic(
+                self.diagnostic_log_path,
+                "worker_requires_rebuild",
+                error=str(exc),
+            )
             self._refresh_error = None
             self._write_state(
                 {
@@ -912,6 +1181,12 @@ class VisualIndexRefreshManager:
                 }
             )
         except Exception as exc:  # pragma: no cover - surfaced through status and API
+            _append_visual_index_diagnostic(
+                self.diagnostic_log_path,
+                "worker_failed",
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
             self._refresh_error = str(exc)
             self._write_state(
                 {
@@ -1376,7 +1651,14 @@ def _download_image_bytes(image_url: str) -> bytes:
         try:
             with urlopen(request, timeout=30) as response:
                 return response.read()
-        except (HTTPError, URLError, OSError) as exc:
+        except HTTPError as exc:
+            last_error = exc
+            retryable = exc.code in {408, 429} or exc.code >= 500
+            if retryable and attempt < 2:
+                time.sleep(0.5 * (attempt + 1))
+                continue
+            raise
+        except (URLError, OSError) as exc:
             last_error = exc
             if attempt < 2:
                 time.sleep(0.5 * (attempt + 1))
@@ -1387,21 +1669,62 @@ def _download_image_bytes(image_url: str) -> bytes:
     raise RuntimeError(f"Unable to download reference image: {image_url}")
 
 
-def _load_reference_image_for_card(card: dict[str, Any]) -> tuple[np.ndarray, str] | None:
+def _load_reference_image_for_card(
+    card: dict[str, Any],
+    *,
+    diagnostic_log_path: Path | None = None,
+    diagnostic_context: dict[str, Any] | None = None,
+) -> tuple[np.ndarray, str] | None:
     image_urls = _extract_image_urls(card)
     if not image_urls:
         return None
 
     last_error: Exception | None = None
-    for image_url in image_urls:
+    context = diagnostic_context or {}
+    for url_index, image_url in enumerate(image_urls, start=1):
+        attempt_started_at = time.monotonic()
+        if diagnostic_log_path is not None:
+            _append_visual_index_diagnostic(
+                diagnostic_log_path,
+                "image_download_started",
+                **context,
+                image_url=image_url,
+                image_url_index=url_index,
+                image_url_count=len(image_urls),
+            )
         try:
             data = _download_image_bytes(image_url)
             image = _load_image_from_bytes(data, source=image_url)
             if image is None:  # pragma: no cover - defensive guard for unexpected control flow
                 raise ValueError(f"Unable to decode downloaded reference image: {image_url}")
+            if diagnostic_log_path is not None:
+                _append_visual_index_diagnostic(
+                    diagnostic_log_path,
+                    "image_download_succeeded",
+                    **context,
+                    image_url=image_url,
+                    image_url_index=url_index,
+                    image_url_count=len(image_urls),
+                    byte_count=len(data),
+                    elapsed_ms=round((time.monotonic() - attempt_started_at) * 1000, 1),
+                )
             return image, image_url
         except Exception as exc:  # pragma: no cover - surfaced through progress and fallback behavior
             last_error = exc
+            if diagnostic_log_path is not None:
+                _append_visual_index_diagnostic(
+                    diagnostic_log_path,
+                    "image_download_failed",
+                    **context,
+                    image_url=image_url,
+                    image_url_index=url_index,
+                    image_url_count=len(image_urls),
+                    http_status=getattr(exc, "code", None),
+                    http_reason=getattr(exc, "reason", None),
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                    elapsed_ms=round((time.monotonic() - attempt_started_at) * 1000, 1),
+                )
             continue
 
     card_name = str(card.get("name") or "card")

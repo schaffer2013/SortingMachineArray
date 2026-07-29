@@ -1566,6 +1566,7 @@ def test_api_docs_and_openapi_pages_are_available():
     assert spec["openapi"] == "3.0.3"
     assert "/api/system" in spec["paths"]
     assert "/api/system/visual-index/refresh" in spec["paths"]
+    assert "/api/system/visual-index/diagnostics" in spec["paths"]
     assert "/api/docs" not in spec["paths"]
 
     assert docs_response.status_code == 200
@@ -1775,6 +1776,26 @@ def test_system_visual_index_refresh_endpoint_returns_refresh_status():
     assert payload["configured_refresh_days"] == 7
     assert payload["refreshing"] is True
     assert payload["message"] == "started"
+
+
+def test_system_visual_index_diagnostics_endpoint_returns_recent_events():
+    client = _client()
+    runtime = client.application.config["runtime"]
+    runtime.visual_index_diagnostics = lambda limit=20: {
+        "path": "/tmp/visual_index_sync.jsonl",
+        "exists": True,
+        "size": 123,
+        "events": [{"event": "image_download_failed", "http_status": 404, "limit": limit}],
+    }
+
+    response = client.get("/api/system/visual-index/diagnostics?limit=7")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["events"] == [{"event": "image_download_failed", "http_status": 404, "limit": 7}]
+
+    invalid = client.get("/api/system/visual-index/diagnostics?limit=0")
+    assert invalid.status_code == 400
 
 
 def test_system_visual_index_rebuild_endpoint_requires_confirmation():

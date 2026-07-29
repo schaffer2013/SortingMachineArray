@@ -131,6 +131,7 @@ def test_build_visual_index_from_catalog_uses_project_root_and_builds_index(tmp_
     assert index_path.is_file()
     assert metadata_path.is_file()
     assert not (project_root / "data/index/visual_index_checkpoint.sqlite3").exists()
+    assert not (project_root / "data/index/visual_index_sync.jsonl").exists()
     assert len(metadata_path.read_text(encoding="utf-8").splitlines()) == 2
     assert reference_dir.is_dir()
     assert not any(reference_dir.iterdir())
@@ -298,7 +299,7 @@ def test_download_image_bytes_retries_transient_http_error(monkeypatch):
     def fake_urlopen(request, timeout=30):
         attempts.append(request.full_url)
         if len(attempts) < 2:
-            raise HTTPError(request.full_url, 404, "Not Found", hdrs=None, fp=None)
+            raise HTTPError(request.full_url, 503, "Service Unavailable", hdrs=None, fp=None)
         return FakeResponse(_png_bytes((9, 9, 9)))
 
     monkeypatch.setattr(refresh_module, "urlopen", fake_urlopen)
@@ -309,7 +310,23 @@ def test_download_image_bytes_retries_transient_http_error(monkeypatch):
     assert payload == _png_bytes((9, 9, 9))
 
 
-def test_load_reference_image_for_card_uses_fallback_url(monkeypatch):
+def test_download_image_bytes_does_not_retry_permanent_404(monkeypatch):
+    attempts: list[str] = []
+
+    def fake_urlopen(request, timeout=30):
+        attempts.append(request.full_url)
+        raise HTTPError(request.full_url, 404, "Not Found", hdrs=None, fp=None)
+
+    monkeypatch.setattr(refresh_module, "urlopen", fake_urlopen)
+
+    with pytest.raises(HTTPError) as error:
+        refresh_module._download_image_bytes("https://example.invalid/missing.png")
+
+    assert error.value.code == 404
+    assert attempts == ["https://example.invalid/missing.png"]
+
+
+def test_load_reference_image_for_card_uses_fallback_url(tmp_path, monkeypatch):
     card = {
         "name": "Crowded Crypt",
         "image_uris": {
@@ -325,10 +342,63 @@ def test_load_reference_image_for_card_uses_fallback_url(monkeypatch):
 
     monkeypatch.setattr(refresh_module, "_download_image_bytes", fake_download)
 
-    image, image_url = refresh_module._load_reference_image_for_card(card)
+    diagnostic_log_path = tmp_path / "visual_index_sync.jsonl"
+    image, image_url = refresh_module._load_reference_image_for_card(
+        card,
+        diagnostic_log_path=diagnostic_log_path,
+        diagnostic_context={"ordinal": 12, "card_name": "Crowded Crypt"},
+    )
 
     assert image_url == "https://example.invalid/crowded-crypt-large.jpg"
     assert image is not None
+    events = refresh_module._read_visual_index_diagnostics(diagnostic_log_path, limit=20)
+    failed = next(event for event in events if event["event"] == "image_download_failed")
+    assert failed["http_status"] == 404
+    assert failed["http_reason"] == "Not Found"
+    assert failed["image_url"] == "https://example.invalid/crowded-crypt.png"
+    assert events[-1]["event"] == "image_download_succeeded"
+
+
+def test_build_visual_index_checkpoints_and_skips_permanent_image_failure(tmp_path, monkeypatch):
+    source_catalog = tmp_path / "data/catalog/default-cards.json"
+    source_catalog.parent.mkdir(parents=True, exist_ok=True)
+    source_catalog.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "Missing",
+                    "id": "missing-card",
+                    "image_uris": {"png": "https://example.invalid/missing.png"},
+                },
+                {
+                    "name": "Available",
+                    "id": "available-card",
+                    "image_uris": {"png": "https://example.invalid/available.png"},
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_download(image_url: str) -> bytes:
+        if image_url.endswith("missing.png"):
+            raise HTTPError(image_url, 404, "Not Found", hdrs=None, fp=None)
+        return _png_bytes()
+
+    monkeypatch.setattr(refresh_module, "_download_image_bytes", fake_download)
+    result = refresh_module.build_visual_index_from_catalog(
+        project_root=tmp_path,
+        source_catalog_path=source_catalog,
+        index_path=tmp_path / "data/index/card_embeddings.npz",
+        metadata_path=tmp_path / "data/index/card_embeddings.jsonl",
+        reference_dir=tmp_path / "data/index/reference_images",
+    )
+
+    assert result.card_count == 1
+    assert result.source_card_count == 2
+    assert result.skipped_count == 1
+    assert not (tmp_path / "data/index/visual_index_checkpoint.sqlite3").exists()
+    assert not (tmp_path / "data/index/visual_index_sync.jsonl").exists()
 
 
 def test_refresh_visual_index_from_catalog_requires_full_rebuild_for_removed_cards(tmp_path, monkeypatch):
@@ -440,9 +510,14 @@ def test_build_visual_index_from_catalog_leaves_checkpoint_when_interrupted(tmp_
         )
 
     checkpoint_path = project_root / "data/index/visual_index_checkpoint.sqlite3"
+    diagnostic_log_path = project_root / "data/index/visual_index_sync.jsonl"
     assert checkpoint_path.is_file()
+    assert diagnostic_log_path.is_file()
     with sqlite3.connect(checkpoint_path) as conn:
         assert refresh_module._checkpoint_card_count(conn) == 1
+    diagnostic_events = refresh_module._read_visual_index_diagnostics(diagnostic_log_path, limit=20)
+    assert diagnostic_events[-1]["event"] == "job_failed"
+    assert diagnostic_events[-1]["error"] == "sync interrupted"
     assert not index_path.exists()
     assert not metadata_path.exists()
 
@@ -525,6 +600,7 @@ def test_visual_index_manager_refreshes_in_background(tmp_path, monkeypatch):
     assert reference_dir.is_dir()
     assert not any(reference_dir.iterdir())
     assert manager.status(running=False, auto_start=False)["last_error"] is None
+    assert not manager.diagnostic_log_path.exists()
 
 
 def test_visual_index_manager_auto_start_supplies_full_rebuild_flag(tmp_path, monkeypatch):
@@ -778,7 +854,7 @@ def test_visual_index_manager_keeps_heartbeat_fresh_while_refresh_is_blocked(tmp
 
     final_state = manager.status(running=False, auto_start=False)
     assert final_state["refreshing"] is False
-    assert final_state["progress_message"] == "Indexed 1/1 cards"
+    assert final_state["progress_message"] == "Processed 1 cards; indexed 1, skipped 0"
 
 
 def test_visual_index_manager_clears_stale_refresh_after_restart(tmp_path):
