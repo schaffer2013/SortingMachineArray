@@ -58,7 +58,7 @@ DEFAULT_VISUAL_INDEX_REFERENCE_DIR = Path("data/index/reference_images")
 VISUAL_INDEX_PROGRESS_HEARTBEAT_STALE_SECONDS = 120.0
 VISUAL_INDEX_PROGRESS_HEARTBEAT_INTERVAL_SECONDS = 15.0
 REQUEST_HEADERS = {
-    "User-Agent": "card-sorter-testbed/0.8.28 (+visual index refresh)",
+    "User-Agent": "card-sorter-testbed/0.8.29 (+visual index refresh)",
     "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
 }
 
@@ -603,7 +603,6 @@ class VisualIndexRefreshManager:
             heartbeat_age = _seconds_since(heartbeat)
             refresh_stalled = (
                 bool(state.get("refreshing"))
-                and not refresh_thread_alive
                 and heartbeat_age is not None
                 and heartbeat_age >= VISUAL_INDEX_PROGRESS_HEARTBEAT_STALE_SECONDS
             )
