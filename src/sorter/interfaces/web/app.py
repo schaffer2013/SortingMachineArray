@@ -783,17 +783,17 @@ class WebRuntime:
                 "runtime_mode": self.runtime_mode,
                 "runtime_target": runtime_target,
                 "runtime_message": (
-                    "SIMULATION runtime selected"
+                    "Simulation"
                     if self.runtime_mode == "simulation"
                     else (
-                        "Hardware runtime using direct Pi adapters"
+                        "Hardware: direct Pi"
                         if self.hardware_runtime
-                        else f"Live board connected on {serial_status['port']}"
+                        else f"Hardware: live {serial_status['port']}"
                         if live_connected
                         else (
-                        f"Serial session is {serial_status.get('connection_state')} on {serial_status.get('port')}; not verified live"
+                        f"Hardware: {serial_status.get('connection_state')} {serial_status.get('port')}"
                         if session_open
-                        else "Hardware runtime selected; connect a serial board on System"
+                        else "Hardware: connect serial board"
                         )
                     )
                 ),
