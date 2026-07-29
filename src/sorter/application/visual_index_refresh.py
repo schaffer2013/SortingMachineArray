@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import hashlib
 import json
+import sqlite3
 import threading
 from pathlib import Path
 from typing import Any, Callable
@@ -37,6 +38,7 @@ DEFAULT_VISUAL_INDEX_SOURCE_PATH = Path("data/catalog/default-cards.json")
 DEFAULT_VISUAL_INDEX_PATH = Path("data/index/card_embeddings.npz")
 DEFAULT_VISUAL_METADATA_PATH = Path("data/index/card_embeddings.jsonl")
 DEFAULT_VISUAL_INDEX_STATE_PATH = Path("data/index/visual_index_state.json")
+DEFAULT_VISUAL_INDEX_CHECKPOINT_PATH = Path("data/index/visual_index_checkpoint.sqlite3")
 DEFAULT_VISUAL_INDEX_REFERENCE_DIR = Path("data/index/reference_images")
 REQUEST_HEADERS = {
     "User-Agent": "card-sorter-testbed/0.8.10 (+visual index refresh)",
@@ -59,6 +61,260 @@ class VisualIndexBuildResult:
 
 class FullVisualIndexRebuildRequired(RuntimeError):
         """Raised when the existing visual index cannot be synced incrementally."""
+
+
+def _open_visual_index_checkpoint(path: Path) -> sqlite3.Connection:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA temp_store=MEMORY")
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+def _initialize_visual_index_checkpoint(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS checkpoint_cards (
+            ordinal INTEGER PRIMARY KEY,
+            card_key TEXT NOT NULL UNIQUE,
+            metadata_json TEXT NOT NULL,
+            embedding_blob BLOB NOT NULL,
+            updated_at_utc TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS checkpoint_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+
+
+def _checkpoint_card_count(conn: sqlite3.Connection) -> int:
+    row = conn.execute("SELECT COUNT(*) FROM checkpoint_cards").fetchone()
+    return int(row[0]) if row is not None else 0
+
+
+def _checkpoint_card_keys(conn: sqlite3.Connection) -> set[str]:
+    rows = conn.execute("SELECT card_key FROM checkpoint_cards").fetchall()
+    return {str(row[0]) for row in rows if row and row[0] is not None}
+
+
+def _checkpoint_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        "SELECT ordinal, card_key, metadata_json, embedding_blob FROM checkpoint_cards ORDER BY ordinal ASC"
+    ).fetchall()
+    result: list[dict[str, Any]] = []
+    for ordinal, card_key, metadata_json, embedding_blob in rows:
+        result.append(
+            {
+                "ordinal": int(ordinal),
+                "card_key": str(card_key),
+                "metadata": json.loads(metadata_json),
+                "embedding": np.frombuffer(embedding_blob, dtype=np.float32).copy(),
+            }
+        )
+    return result
+
+
+def _upsert_checkpoint_card(
+    conn: sqlite3.Connection,
+    *,
+    ordinal: int,
+    card_key: str,
+    metadata: dict[str, Any],
+    embedding: np.ndarray,
+) -> None:
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO checkpoint_cards (ordinal, card_key, metadata_json, embedding_blob, updated_at_utc)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            int(ordinal),
+            str(card_key),
+            json.dumps(metadata, sort_keys=True),
+            np.asarray(embedding, dtype=np.float32).reshape(-1).tobytes(),
+            _utc_now_iso(),
+        ),
+    )
+    conn.commit()
+
+
+def _clear_visual_index_checkpoint(path: Path) -> None:
+    for suffix in ("", "-wal", "-shm"):
+        candidate = Path(f"{path}{suffix}")
+        if candidate.exists():
+            candidate.unlink()
+
+
+def _save_visual_index_atomically(index: VisualIndex, index_path: Path, metadata_path: Path) -> None:
+    index_path = Path(index_path)
+    metadata_path = Path(metadata_path)
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_index = index_path.with_name(f"{index_path.stem}.tmp{index_path.suffix}")
+    temp_metadata = metadata_path.with_name(f"{metadata_path.stem}.tmp{metadata_path.suffix}")
+    for candidate in (temp_index, temp_metadata):
+        if candidate.exists():
+            candidate.unlink()
+    np.savez_compressed(temp_index, embeddings=index.embeddings)
+    with temp_metadata.open("w", encoding="utf-8") as stream:
+        for item in index.metadata:
+            stream.write(json.dumps(item, sort_keys=True) + "\n")
+    temp_index.replace(index_path)
+    temp_metadata.replace(metadata_path)
+
+
+def _run_checkpointed_visual_index_job(
+    *,
+    project_root: Path,
+    source_catalog_path: Path,
+    cards: list[dict[str, Any]],
+    index_path: Path,
+    metadata_path: Path,
+    reference_dir: Path,
+    checkpoint_path: Path,
+    existing_index: VisualIndex | None,
+    refresh_days: int,
+    model: str,
+    model_path: str | None,
+    overwrite_downloads: bool,
+    progress_label: str,
+    progress_callback: ProgressCallback | None,
+) -> VisualIndexBuildResult:
+    if existing_index is None and not cards:
+        raise ValueError("No cards with image URLs were found in the source catalog.")
+    if existing_index is not None and not cards:
+        updated_at = _utc_now_iso()
+        _clear_visual_index_checkpoint(checkpoint_path)
+        return VisualIndexBuildResult(
+            index_path=index_path,
+            metadata_path=metadata_path,
+            reference_dir=reference_dir,
+            source_catalog_path=source_catalog_path,
+            card_count=len(existing_index.metadata),
+            downloaded_count=0,
+            reused_count=0,
+            updated_at_utc=updated_at,
+            refresh_days=_normalize_refresh_days(refresh_days),
+        )
+
+    result: VisualIndexBuildResult | None = None
+    cleanup_checkpoint = False
+    conn = _open_visual_index_checkpoint(checkpoint_path)
+    try:
+        _initialize_visual_index_checkpoint(conn)
+        checkpoint_rows = {row["card_key"]: row for row in _checkpoint_rows(conn)}
+        job_entries: list[tuple[int, str, dict[str, Any]]] = []
+        for ordinal, card in enumerate(cards):
+            card_key = _visual_index_card_key(card)
+            if card_key is None:
+                raise FullVisualIndexRebuildRequired("Source catalog contains cards that cannot be keyed for checkpointing.")
+            job_entries.append((ordinal, card_key, card))
+        job_keys = {card_key for _, card_key, _ in job_entries}
+        resumable_rows = {key: row for key, row in checkpoint_rows.items() if key in job_keys}
+        processed_count = len(resumable_rows)
+        if progress_callback is not None:
+            if processed_count > 0:
+                progress_callback(
+                    processed_count,
+                    len(job_entries),
+                    f"Resuming {processed_count:,}/{len(job_entries):,} {progress_label}",
+                )
+            else:
+                progress_callback(0, len(job_entries), f"Preparing {len(job_entries):,} {progress_label}")
+
+        embedder = create_embedder(model, model_path)
+        downloaded = 0
+        reused = 0
+
+        for ordinal, card_key, card in job_entries:
+            if card_key in resumable_rows:
+                continue
+            image_url = _extract_image_url(card)
+            if not image_url:
+                continue
+            reference_path = reference_dir / _reference_file_name(card, image_url)
+            reference_path.parent.mkdir(parents=True, exist_ok=True)
+            if overwrite_downloads or not reference_path.exists():
+                _download(image_url, reference_path)
+                downloaded += 1
+            else:
+                reused += 1
+            image = _load_image(reference_path)
+            vector = embedder.embed(image)
+            metadata = {
+                "name": card.get("name"),
+                "scryfall_id": card.get("id") or card.get("scryfall_id"),
+                "oracle_id": card.get("oracle_id"),
+                "set_code": card.get("set") or card.get("set_code"),
+                "collector_number": card.get("collector_number"),
+                "image_url": image_url,
+                "image_path": reference_path.relative_to(project_root).as_posix(),
+                "crop_type": "full_card",
+            }
+            _upsert_checkpoint_card(
+                conn,
+                ordinal=ordinal,
+                card_key=card_key,
+                metadata=metadata,
+                embedding=vector,
+            )
+            resumable_rows[card_key] = {
+                "ordinal": ordinal,
+                "card_key": card_key,
+                "metadata": metadata,
+                "embedding": np.asarray(vector, dtype=np.float32).reshape(-1),
+            }
+            processed_count += 1
+            if progress_callback is not None:
+                progress_callback(
+                    processed_count,
+                    len(job_entries),
+                    f"Indexed {processed_count:,}/{len(job_entries):,} {progress_label}",
+                )
+
+        final_rows = [resumable_rows[card_key] for _, card_key, _ in sorted(job_entries, key=lambda item: item[0])]
+        if existing_index is None:
+            embeddings = np.vstack([row["embedding"] for row in final_rows])
+            metadata = [row["metadata"] for row in final_rows]
+        else:
+            if final_rows:
+                new_embeddings = np.vstack([row["embedding"] for row in final_rows])
+                embeddings = np.vstack([existing_index.embeddings, new_embeddings])
+                metadata = [dict(item) for item in existing_index.metadata] + [row["metadata"] for row in final_rows]
+            else:
+                embeddings = existing_index.embeddings
+                metadata = [dict(item) for item in existing_index.metadata]
+        index = VisualIndex(embeddings, metadata)
+        _save_visual_index_atomically(index, index_path, metadata_path)
+        updated_at = _utc_now_iso()
+        result = VisualIndexBuildResult(
+            index_path=index_path,
+            metadata_path=metadata_path,
+            reference_dir=reference_dir,
+            source_catalog_path=source_catalog_path,
+            card_count=len(metadata),
+            downloaded_count=downloaded,
+            reused_count=reused,
+            updated_at_utc=updated_at,
+            refresh_days=_normalize_refresh_days(refresh_days),
+        )
+        cleanup_checkpoint = True
+    finally:
+        conn.close()
+    if cleanup_checkpoint:
+        _clear_visual_index_checkpoint(checkpoint_path)
+    if result is None:  # pragma: no cover - defensive guard for unexpected control flow
+        raise RuntimeError("Visual index job completed without producing a result.")
+    return result
 
 
 def _load_selected_catalog_cards(source_path: Path, *, limit: int | None = None) -> list[dict[str, Any]]:
@@ -578,21 +834,25 @@ def build_visual_index_from_catalog(
     index_file = Path(index_path)
     metadata_file = Path(metadata_path)
     reference_root = Path(reference_dir)
+    checkpoint_file = project_root_path / DEFAULT_VISUAL_INDEX_CHECKPOINT_PATH
     index_file.parent.mkdir(parents=True, exist_ok=True)
     metadata_file.parent.mkdir(parents=True, exist_ok=True)
     reference_root.mkdir(parents=True, exist_ok=True)
     selected_cards = _load_selected_catalog_cards(source_path, limit=limit)
-    return _build_visual_index_from_cards(
-        selected_cards=selected_cards,
+    return _run_checkpointed_visual_index_job(
         project_root=project_root_path,
         source_catalog_path=source_path,
+        cards=selected_cards,
         index_path=index_file,
         metadata_path=metadata_file,
         reference_dir=reference_root,
+        checkpoint_path=checkpoint_file,
+        existing_index=None,
         refresh_days=refresh_days,
         model=model,
         model_path=model_path,
         overwrite_downloads=overwrite_downloads,
+        progress_label="cards",
         progress_callback=progress_callback,
     )
 
@@ -616,6 +876,7 @@ def refresh_visual_index_from_catalog(
     index_file = Path(index_path)
     metadata_file = Path(metadata_path)
     reference_root = Path(reference_dir)
+    checkpoint_file = project_root_path / DEFAULT_VISUAL_INDEX_CHECKPOINT_PATH
     index_file.parent.mkdir(parents=True, exist_ok=True)
     metadata_file.parent.mkdir(parents=True, exist_ok=True)
     reference_root.mkdir(parents=True, exist_ok=True)
@@ -678,6 +939,7 @@ def refresh_visual_index_from_catalog(
     new_cards = [card for card in selected_cards if _visual_index_card_key(card) not in existing_cards]
     existing_count = len(existing_index.metadata)
     if not new_cards:
+        _clear_visual_index_checkpoint(checkpoint_file)
         if progress_callback is not None:
             progress_callback(existing_count, existing_count, "No new cards to refresh")
         updated_at = _utc_now_iso()
@@ -693,59 +955,21 @@ def refresh_visual_index_from_catalog(
             refresh_days=_normalize_refresh_days(refresh_days),
         )
 
-    embedder = create_embedder(model, model_path)
-    new_vectors: list[np.ndarray] = []
-    new_metadata: list[dict[str, Any]] = []
-    downloaded = 0
-    reused = 0
-    if progress_callback is not None:
-        progress_callback(0, len(new_cards), f"Preparing {len(new_cards):,} new cards")
-
-    for index, card in enumerate(new_cards, start=0):
-        image_url = _extract_image_url(card)
-        if not image_url:
-            continue
-        reference_path = reference_root / _reference_file_name(card, image_url)
-        if overwrite_downloads or not reference_path.exists():
-            _download(image_url, reference_path)
-            downloaded += 1
-        else:
-            reused += 1
-        image = _load_image(reference_path)
-        new_vectors.append(embedder.embed(image))
-        new_metadata.append(
-            {
-                "name": card.get("name"),
-                "scryfall_id": card.get("id") or card.get("scryfall_id"),
-                "oracle_id": card.get("oracle_id"),
-                "set_code": card.get("set") or card.get("set_code"),
-                "collector_number": card.get("collector_number"),
-                "image_url": image_url,
-                "image_path": reference_path.relative_to(project_root_path).as_posix(),
-                "crop_type": "full_card",
-            }
-        )
-        if progress_callback is not None:
-            progress_callback(index + 1, len(new_cards), f"Indexed {index + 1:,}/{len(new_cards):,} new cards")
-
-    if not new_vectors:
-        raise ValueError("Visual index sync did not produce any new embeddings.")
-
-    combined_embeddings = np.vstack([existing_index.embeddings, np.asarray(new_vectors, dtype=np.float32)])
-    combined_metadata = [dict(item) for item in existing_index.metadata] + new_metadata
-    index = VisualIndex(combined_embeddings, combined_metadata)
-    index.save(index_file, metadata_file)
-    updated_at = _utc_now_iso()
-    return VisualIndexBuildResult(
+    return _run_checkpointed_visual_index_job(
+        project_root=project_root_path,
+        source_catalog_path=source_path,
+        cards=new_cards,
         index_path=index_file,
         metadata_path=metadata_file,
         reference_dir=reference_root,
-        source_catalog_path=source_path,
-        card_count=len(combined_metadata),
-        downloaded_count=downloaded,
-        reused_count=reused,
-        updated_at_utc=updated_at,
-        refresh_days=_normalize_refresh_days(refresh_days),
+        checkpoint_path=checkpoint_file,
+        existing_index=existing_index,
+        refresh_days=refresh_days,
+        model=model,
+        model_path=model_path,
+        overwrite_downloads=overwrite_downloads,
+        progress_label="new cards",
+        progress_callback=progress_callback,
     )
 
 
