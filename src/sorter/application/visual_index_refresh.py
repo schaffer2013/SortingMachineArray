@@ -7,10 +7,8 @@ import importlib
 import math
 import hashlib
 import json
-import os
 import sqlite3
 import threading
-import tempfile
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -59,7 +57,7 @@ DEFAULT_VISUAL_INDEX_REFERENCE_DIR = Path("data/index/reference_images")
 VISUAL_INDEX_PROGRESS_HEARTBEAT_STALE_SECONDS = 120.0
 VISUAL_INDEX_PROGRESS_HEARTBEAT_INTERVAL_SECONDS = 15.0
 REQUEST_HEADERS = {
-    "User-Agent": "card-sorter-testbed/0.8.30 (+visual index refresh)",
+    "User-Agent": "card-sorter-testbed/0.8.31 (+visual index refresh)",
     "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
 }
 
@@ -307,6 +305,7 @@ def _run_checkpointed_visual_index_job(
 
         for ordinal, card_key, card in job_entries:
             if card_key in resumable_rows:
+                reused += 1
                 continue
             card_name = str(card.get("name") or card_key or f"card {ordinal + 1}")
             image_url = _extract_image_url(card)
@@ -319,16 +318,8 @@ def _run_checkpointed_visual_index_job(
                     f"Downloading {progress_label[:-1] if progress_label.endswith('s') else progress_label} {ordinal + 1:,}/{len(job_entries):,}: {card_name}",
                 )
             reference_path = reference_dir / _reference_file_name(card, image_url)
-            reference_path.parent.mkdir(parents=True, exist_ok=True)
-            image, downloaded_now = _load_reference_image_with_retry(
-                reference_path,
-                image_url=image_url,
-                overwrite_downloads=overwrite_downloads,
-            )
-            if downloaded_now:
-                downloaded += 1
-            else:
-                reused += 1
+            image = _load_reference_image_from_url(image_url)
+            downloaded += 1
             if progress_callback is not None:
                 progress_callback(
                     processed_count,
@@ -537,15 +528,8 @@ def _build_visual_index_from_cards(
         if not image_url:
             continue
         reference_path = reference_dir / _reference_file_name(card, image_url)
-        image, downloaded_now = _load_reference_image_with_retry(
-            reference_path,
-            image_url=image_url,
-            overwrite_downloads=overwrite_downloads,
-        )
-        if downloaded_now:
-            downloaded += 1
-        else:
-            reused += 1
+        image = _load_reference_image_from_url(image_url)
+        downloaded += 1
         vector = embedder.embed(image)
         if vectors is None:
             vectors = np.empty((len(selected_cards), vector.shape[0]), dtype=np.float32)
@@ -1367,42 +1351,23 @@ def _slug(value: str) -> str:
     return "".join(character.lower() if character.isalnum() else "-" for character in value).strip("-") or "card"
 
 
-def _download(image_url: str, output_path: Path) -> None:
+def _download_image_bytes(image_url: str) -> bytes:
     request = Request(image_url, headers=REQUEST_HEADERS)
     with urlopen(request, timeout=30) as response:
-        data = response.read()
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(dir=output_path.parent, delete=False) as temp_file:
-        temp_path = Path(temp_file.name)
-        temp_file.write(data)
-        temp_file.flush()
-    try:
-        os.replace(temp_path, output_path)
-    finally:
-        if temp_path.exists():
-            temp_path.unlink(missing_ok=True)
+        return response.read()
 
 
-def _load_reference_image_with_retry(
-    reference_path: Path,
-    *,
-    image_url: str,
-    overwrite_downloads: bool,
-) -> tuple[np.ndarray, bool]:
-    if overwrite_downloads or not reference_path.exists():
-        _download(image_url, reference_path)
-        return _load_image(reference_path), True
-
-    try:
-        return _load_image(reference_path), False
-    except ValueError:
-        reference_path.unlink(missing_ok=True)
-        _download(image_url, reference_path)
-        return _load_image(reference_path), True
+def _load_reference_image_from_url(image_url: str) -> np.ndarray:
+    data = _download_image_bytes(image_url)
+    image = _load_image_from_bytes(data, source=image_url)
+    if image is None:  # pragma: no cover - defensive guard for unexpected control flow
+        raise ValueError(f"Unable to decode downloaded reference image: {image_url}")
+    return image
 
 
-def _load_image(path: Path) -> np.ndarray:
-    image = cv2.imread(str(path))
+def _load_image_from_bytes(data: bytes, *, source: str) -> np.ndarray | None:
+    buffer = np.frombuffer(data, dtype=np.uint8)
+    image = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
     if image is None:
-        raise ValueError(f"Unable to read downloaded reference image: {path}")
+        raise ValueError(f"Unable to read downloaded reference image: {source}")
     return image

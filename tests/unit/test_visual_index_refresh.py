@@ -21,6 +21,15 @@ def _write_png(path: Path, color: tuple[int, int, int] = (0, 255, 0)) -> None:
         raise RuntimeError(f"Unable to write test image to {path}")
 
 
+def _png_bytes(color: tuple[int, int, int] = (0, 255, 0)) -> bytes:
+    image = np.zeros((24, 24, 3), dtype=np.uint8)
+    image[:] = color
+    ok, encoded = cv2.imencode(".png", image)
+    if not ok:  # pragma: no cover - cv2.imencode returns a bool
+        raise RuntimeError("Unable to encode test image as PNG")
+    return encoded.tobytes()
+
+
 def test_visual_index_policy_round_trip(tmp_path):
     config_path = tmp_path / "engine.json"
     config_path.write_text(json.dumps({"recognition_backend": "visual_retrieval"}, indent=2), encoding="utf-8")
@@ -100,10 +109,10 @@ def test_build_visual_index_from_catalog_uses_project_root_and_builds_index(tmp_
 
     progress_calls: list[tuple[int, int, str | None]] = []
 
-    def fake_download(image_url: str, output_path: Path) -> None:
-        _write_png(output_path, (255, 0, 0) if "alpha" in image_url else (0, 0, 255))
+    def fake_download(image_url: str) -> bytes:
+        return _png_bytes((255, 0, 0) if "alpha" in image_url else (0, 0, 255))
 
-    monkeypatch.setattr(refresh_module, "_download", fake_download)
+    monkeypatch.setattr(refresh_module, "_download_image_bytes", fake_download)
 
     result = refresh_module.build_visual_index_from_catalog(
         project_root=project_root,
@@ -188,10 +197,10 @@ def test_refresh_visual_index_from_catalog_appends_new_cards(tmp_path, monkeypat
 
     monkeypatch.setattr(refresh_module, "create_embedder", lambda model, model_path: FakeEmbedder())
 
-    def fake_download(image_url: str, output_path: Path) -> None:
-        _write_png(output_path, (255, 0, 0) if "alpha" in image_url else (0, 0, 255))
+    def fake_download(image_url: str) -> bytes:
+        return _png_bytes((255, 0, 0) if "alpha" in image_url else (0, 0, 255))
 
-    monkeypatch.setattr(refresh_module, "_download", fake_download)
+    monkeypatch.setattr(refresh_module, "_download_image_bytes", fake_download)
 
     result = refresh_module.refresh_visual_index_from_catalog(
         project_root=project_root,
@@ -246,11 +255,11 @@ def test_build_visual_index_from_catalog_recovers_corrupted_cached_reference_ima
 
     download_calls: list[str] = []
 
-    def fake_download(image_url: str, output_path: Path) -> None:
+    def fake_download(image_url: str) -> bytes:
         download_calls.append(image_url)
-        _write_png(output_path, (128, 64, 32))
+        return _png_bytes((128, 64, 32))
 
-    monkeypatch.setattr(refresh_module, "_download", fake_download)
+    monkeypatch.setattr(refresh_module, "_download_image_bytes", fake_download)
 
     result = refresh_module.build_visual_index_from_catalog(
         project_root=project_root,
@@ -362,10 +371,10 @@ def test_build_visual_index_from_catalog_leaves_checkpoint_when_interrupted(tmp_
 
     monkeypatch.setattr(refresh_module, "create_embedder", lambda model, model_path: FlakyEmbedder())
 
-    def fake_download(image_url: str, output_path: Path) -> None:
-        _write_png(output_path, (255, 0, 0) if "alpha" in image_url else (0, 0, 255))
+    def fake_download(image_url: str) -> bytes:
+        return _png_bytes((255, 0, 0) if "alpha" in image_url else (0, 0, 255))
 
-    monkeypatch.setattr(refresh_module, "_download", fake_download)
+    monkeypatch.setattr(refresh_module, "_download_image_bytes", fake_download)
 
     with pytest.raises(RuntimeError, match="sync interrupted"):
         refresh_module.build_visual_index_from_catalog(
