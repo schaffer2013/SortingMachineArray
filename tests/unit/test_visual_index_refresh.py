@@ -6,6 +6,7 @@ import time
 import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.error import HTTPError
 
 import cv2
 import numpy as np
@@ -276,6 +277,36 @@ def test_build_visual_index_from_catalog_recovers_corrupted_cached_reference_ima
     assert not reference_path.exists()
     assert reference_dir.is_dir()
     assert not any(reference_dir.iterdir())
+
+
+def test_download_image_bytes_retries_transient_http_error(monkeypatch):
+    attempts: list[str] = []
+
+    class FakeResponse:
+        def __init__(self, payload: bytes):
+            self._payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return self._payload
+
+    def fake_urlopen(request, timeout=30):
+        attempts.append(request.full_url)
+        if len(attempts) < 2:
+            raise HTTPError(request.full_url, 404, "Not Found", hdrs=None, fp=None)
+        return FakeResponse(_png_bytes((9, 9, 9)))
+
+    monkeypatch.setattr(refresh_module, "urlopen", fake_urlopen)
+
+    payload = refresh_module._download_image_bytes("https://example.invalid/retry.png")
+
+    assert attempts == ["https://example.invalid/retry.png", "https://example.invalid/retry.png"]
+    assert payload == _png_bytes((9, 9, 9))
 
 
 def test_refresh_visual_index_from_catalog_requires_full_rebuild_for_removed_cards(tmp_path, monkeypatch):

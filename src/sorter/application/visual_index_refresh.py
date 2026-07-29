@@ -7,10 +7,12 @@ import importlib
 import math
 import hashlib
 import json
+import time
 import sqlite3
 import threading
 from pathlib import Path
 from typing import Any, Callable
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -1353,8 +1355,20 @@ def _slug(value: str) -> str:
 
 def _download_image_bytes(image_url: str) -> bytes:
     request = Request(image_url, headers=REQUEST_HEADERS)
-    with urlopen(request, timeout=30) as response:
-        return response.read()
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            with urlopen(request, timeout=30) as response:
+                return response.read()
+        except (HTTPError, URLError, OSError) as exc:
+            last_error = exc
+            if attempt < 2:
+                time.sleep(0.5 * (attempt + 1))
+                continue
+            raise
+    if last_error is not None:  # pragma: no cover - defensive guard for unexpected control flow
+        raise last_error
+    raise RuntimeError(f"Unable to download reference image: {image_url}")
 
 
 def _load_reference_image_from_url(image_url: str) -> np.ndarray:
