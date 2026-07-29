@@ -7,7 +7,17 @@ const json = async (url, options = {}) => {
   if (!response.ok) throw new Error(body.message || "Request failed");
   return body;
 };
+const normalizeDisplayString = (key, value) => {
+  if (typeof value !== "string") return value;
+  const lowerKey = String(key || "").toLowerCase();
+  if (lowerKey === "path" || lowerKey.endsWith("_path") || lowerKey.endsWith("_dir") || lowerKey.endsWith("_file")) {
+    return value.replaceAll("\\", "/");
+  }
+  return value;
+};
 const pretty = value => JSON.stringify(value, null, 2);
+const prettyDisplay = value => JSON.stringify(value, (key, currentValue) => normalizeDisplayString(key, currentValue), 2);
+const displayPath = value => normalizeDisplayString("path", value);
 const logDebugEvent = (event, details = {}) => {
   const payload = JSON.stringify({event, details});
   try {
@@ -2574,7 +2584,7 @@ window.SorterPages = {
           <div>
             <strong>${item.name}</strong>
             <span>${item.role}</span>
-            <code>${item.path}</code>
+            <code>${displayPath(item.path)}</code>
           </div>
           <div class="integration-meta">
             <span class="pill ${item.initialized && item.at_expected_revision ? "good-pill" : "warn-pill"}">
@@ -2584,7 +2594,7 @@ window.SorterPages = {
           </div>
         </div>
       `).join("");
-      raw.textContent = pretty(data);
+      raw.textContent = prettyDisplay(data);
     };
     const setExternalLink = (element, url) => {
       element.href = url || "#";
