@@ -650,3 +650,52 @@ def test_visual_index_manager_keeps_heartbeat_fresh_while_refresh_is_blocked(tmp
     final_state = manager.status(running=False, auto_start=False)
     assert final_state["refreshing"] is False
     assert final_state["progress_message"] == "Indexed 1/1 cards"
+
+
+def test_visual_index_manager_clears_stale_refresh_after_restart(tmp_path):
+    project_root = tmp_path
+    config_path = tmp_path / "config/card_engine/engine.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    refresh_module.save_visual_index_policy(config_path, 7)
+    source_catalog = tmp_path / "data/catalog/default-cards.json"
+    source_catalog.parent.mkdir(parents=True, exist_ok=True)
+    source_catalog.write_text("[]", encoding="utf-8")
+    index_path = tmp_path / "data/index/card_embeddings.npz"
+    metadata_path = tmp_path / "data/index/card_embeddings.jsonl"
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    index_path.write_bytes(b"npz")
+    metadata_path.write_text("", encoding="utf-8")
+    reference_dir = tmp_path / "data/index/reference_images"
+
+    manager = refresh_module.VisualIndexRefreshManager(
+        project_root=project_root,
+        config_path=config_path,
+        source_catalog_path=source_catalog,
+        index_path=index_path,
+        metadata_path=metadata_path,
+        reference_dir=reference_dir,
+    )
+    manager._write_state(
+        {
+            "refreshing": True,
+            "last_started_at_utc": "2026-07-29T14:00:00Z",
+            "last_heartbeat_at_utc": "2026-07-29T14:10:00Z",
+            "progress_current": 12,
+            "progress_total": 100,
+            "progress_percent": 12.0,
+            "progress_eta_seconds": 3600.0,
+            "progress_eta_text": "about 1 hour left",
+            "progress_phase": "Actively indexing",
+            "progress_stage": "Downloading images",
+            "progress_message": "Downloading card 12/100",
+            "requires_full_rebuild": False,
+            "last_action": "refreshing",
+        }
+    )
+
+    status = manager.status(running=False, auto_start=False)
+
+    assert status["refreshing"] is False
+    assert status["action"] == "stalled"
+    assert status["progress_message"] == "Visual index sync stopped before completing and can be restarted."

@@ -58,7 +58,7 @@ DEFAULT_VISUAL_INDEX_REFERENCE_DIR = Path("data/index/reference_images")
 VISUAL_INDEX_PROGRESS_HEARTBEAT_STALE_SECONDS = 120.0
 VISUAL_INDEX_PROGRESS_HEARTBEAT_INTERVAL_SECONDS = 15.0
 REQUEST_HEADERS = {
-    "User-Agent": "card-sorter-testbed/0.8.27 (+visual index refresh)",
+    "User-Agent": "card-sorter-testbed/0.8.28 (+visual index refresh)",
     "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
 }
 
@@ -599,6 +599,27 @@ class VisualIndexRefreshManager:
             refresh_days = self.refresh_days()
             needs_refresh, age_days, reason = self._needs_refresh(refresh_days, state)
             refreshing = bool(state.get("refreshing")) or refresh_thread_alive
+            heartbeat = _parse_iso_datetime(state.get("last_heartbeat_at_utc"))
+            heartbeat_age = _seconds_since(heartbeat)
+            refresh_stalled = (
+                bool(state.get("refreshing"))
+                and not refresh_thread_alive
+                and heartbeat_age is not None
+                and heartbeat_age >= VISUAL_INDEX_PROGRESS_HEARTBEAT_STALE_SECONDS
+            )
+            if refresh_stalled:
+                stalled_message = "Visual index sync stopped before completing and can be restarted."
+                state = {
+                    **state,
+                    "refreshing": False,
+                    "last_action": "stalled",
+                    "progress_phase": "Interrupted",
+                    "progress_stage": "Restart sync",
+                    "progress_message": stalled_message,
+                    "last_error": None,
+                }
+                self._write_state(state)
+                refreshing = False
             rebuild_required = bool(state.get("requires_full_rebuild"))
             ready = self.index_path.is_file() and self.metadata_path.is_file() and not needs_refresh
 
