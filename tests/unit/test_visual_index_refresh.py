@@ -88,6 +88,22 @@ def test_eta_estimation_smooths_recent_slowdowns():
     assert eta_seconds < 6 * 60 * 60
 
 
+def test_eta_estimation_weights_prefetch_bursts_by_elapsed_time():
+    started_at = datetime.now(UTC) - timedelta(seconds=20)
+    samples = [(started_at, 0)]
+    current = 0
+    for batch in range(10):
+        batch_started_at = started_at + timedelta(seconds=batch * 2)
+        for item in range(8):
+            current += 1
+            samples.append((batch_started_at + timedelta(milliseconds=(item + 1) * 10), current))
+
+    eta_seconds = refresh_module._estimate_eta_seconds_from_samples(samples=samples, total=480)
+
+    assert eta_seconds is not None
+    assert 70 <= eta_seconds <= 120
+
+
 def test_build_visual_index_from_catalog_uses_project_root_and_builds_index(tmp_path, monkeypatch):
     project_root = tmp_path
     source_catalog = tmp_path / "data/catalog/default-cards.json"

@@ -748,7 +748,14 @@ def _estimate_eta_seconds_from_samples(
             continue
         rate = completed / elapsed
         interval_age = max(0.0, (latest_time - end_time).total_seconds())
-        weight = math.exp(-interval_age / decay_seconds)
+        # Prefetched downloads can complete in short bursts. Weighting every
+        # callback interval equally makes those millisecond-long bursts look
+        # like the sustained indexing rate. Integrate the decay over each
+        # interval so its influence reflects both duration and recency.
+        weight = decay_seconds * (
+            math.exp(-interval_age / decay_seconds)
+            - math.exp(-(interval_age + elapsed) / decay_seconds)
+        )
         weighted_rate += rate * weight
         weighted_rate_weight += weight
 
