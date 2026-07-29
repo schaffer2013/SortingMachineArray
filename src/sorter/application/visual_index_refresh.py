@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections import deque
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 import importlib
 import math
@@ -59,11 +60,41 @@ DEFAULT_VISUAL_INDEX_DIAGNOSTIC_LOG_PATH = Path("data/index/visual_index_sync.js
 DEFAULT_VISUAL_INDEX_REFERENCE_DIR = Path("data/index/reference_images")
 VISUAL_INDEX_PROGRESS_HEARTBEAT_STALE_SECONDS = 120.0
 VISUAL_INDEX_PROGRESS_HEARTBEAT_INTERVAL_SECONDS = 15.0
+VISUAL_INDEX_DOWNLOAD_WORKERS = 4
+VISUAL_INDEX_DOWNLOAD_PREFETCH = 8
+SCRYFALL_IMAGE_REQUESTS_PER_SECOND = 5.0
 REQUEST_HEADERS = {
-    "User-Agent": "card-sorter-testbed/0.8.31 (+visual index refresh)",
+    "User-Agent": "SortingMachineArray/0.8.37 (+https://github.com/schaffer2013/SortingMachineArray)",
     "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
 }
 _DIAGNOSTIC_LOG_LOCK = threading.Lock()
+
+
+class _RequestRateLimiter:
+    def __init__(self, requests_per_second: float) -> None:
+        self._lock = threading.Lock()
+        self._minimum_interval = 1.0 / max(0.1, float(requests_per_second))
+        self._next_request_at = 0.0
+
+    def acquire(self) -> None:
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                wait_seconds = self._next_request_at - now
+                if wait_seconds <= 0:
+                    self._next_request_at = now + self._minimum_interval
+                    return
+            time.sleep(wait_seconds)
+
+    def penalize(self, seconds: float, *, slow_down: bool = False) -> None:
+        with self._lock:
+            now = time.monotonic()
+            self._next_request_at = max(self._next_request_at, now + max(0.0, float(seconds)))
+            if slow_down:
+                self._minimum_interval = min(1.0, self._minimum_interval * 2.0)
+
+
+_IMAGE_REQUEST_RATE_LIMITER = _RequestRateLimiter(SCRYFALL_IMAGE_REQUESTS_PER_SECOND)
 
 
 def _append_visual_index_diagnostic(path: Path, event: str, **details: Any) -> None:
@@ -438,12 +469,32 @@ def _run_checkpointed_visual_index_job(
         downloaded = 0
         reused = 0
 
+        pending_entries: list[tuple[int, str, dict[str, Any]]] = []
         for ordinal, card_key, card in job_entries:
             if card_key in resumable_rows:
                 reused += 1
                 continue
-            if card_key in resumable_failures:
-                continue
+            if card_key not in resumable_failures:
+                pending_entries.append((ordinal, card_key, card))
+
+        _append_visual_index_diagnostic(
+            diagnostic_log_path,
+            "download_pipeline_started",
+            workers=VISUAL_INDEX_DOWNLOAD_WORKERS,
+            prefetch=VISUAL_INDEX_DOWNLOAD_PREFETCH,
+            requests_per_second=SCRYFALL_IMAGE_REQUESTS_PER_SECOND,
+            pending_card_count=len(pending_entries),
+        )
+        pending_iterator = iter(pending_entries)
+        download_queue: deque[
+            tuple[int, str, dict[str, Any], str, float, dict[str, Any], Future[tuple[np.ndarray, str] | None]]
+        ] = deque()
+
+        def submit_download(
+            executor: ThreadPoolExecutor,
+            entry: tuple[int, str, dict[str, Any]],
+        ) -> None:
+            ordinal, card_key, card = entry
             card_name = str(card.get("name") or card_key or f"card {ordinal + 1}")
             card_started_at = time.monotonic()
             card_context = {
@@ -453,113 +504,139 @@ def _run_checkpointed_visual_index_job(
                 "card_key": card_key,
                 "card_name": card_name,
             }
-            _append_visual_index_diagnostic(diagnostic_log_path, "card_started", **card_context)
-            try:
-                image_selection = _load_reference_image_for_card(
-                    card,
-                    diagnostic_log_path=diagnostic_log_path,
-                    diagnostic_context=card_context,
-                )
-            except ValueError as exc:
-                _upsert_checkpoint_failure(
-                    conn,
-                    ordinal=ordinal,
-                    card_key=card_key,
-                    card_name=card_name,
-                    error=str(exc),
-                )
-                resumable_failures[card_key] = {
-                    "ordinal": ordinal,
-                    "card_key": card_key,
-                    "card_name": card_name,
-                    "error": str(exc),
-                }
-                processed_count += 1
-                _append_visual_index_diagnostic(
-                    diagnostic_log_path,
-                    "card_skipped",
-                    **card_context,
-                    error_type=type(exc).__name__,
-                    error=str(exc),
-                    elapsed_ms=round((time.monotonic() - card_started_at) * 1000, 1),
-                )
+            _append_visual_index_diagnostic(diagnostic_log_path, "card_queued", **card_context)
+            future = executor.submit(
+                _load_reference_image_for_card,
+                card,
+                diagnostic_log_path=diagnostic_log_path,
+                diagnostic_context=card_context,
+            )
+            download_queue.append(
+                (ordinal, card_key, card, card_name, card_started_at, card_context, future)
+            )
+
+        with ThreadPoolExecutor(
+            max_workers=VISUAL_INDEX_DOWNLOAD_WORKERS,
+            thread_name_prefix="visual-index-download",
+        ) as executor:
+            for _ in range(VISUAL_INDEX_DOWNLOAD_PREFETCH):
+                try:
+                    submit_download(executor, next(pending_iterator))
+                except StopIteration:
+                    break
+
+            while download_queue:
+                ordinal, card_key, card, card_name, card_started_at, card_context, future = download_queue.popleft()
                 if progress_callback is not None:
                     progress_callback(
                         processed_count,
                         len(job_entries),
-                        f"Skipped {card_name} after image failure ({processed_count:,}/{len(job_entries):,} processed): {exc}",
+                        f"Downloading {progress_label[:-1] if progress_label.endswith('s') else progress_label} "
+                        f"{ordinal + 1:,}/{len(job_entries):,}: {card_name}",
                     )
-                continue
-            if image_selection is None:
-                continue
-            image, image_url = image_selection
-            if progress_callback is not None:
-                progress_callback(
-                    processed_count,
-                    len(job_entries),
-                    f"Downloading {progress_label[:-1] if progress_label.endswith('s') else progress_label} {ordinal + 1:,}/{len(job_entries):,}: {card_name}",
-                )
-            reference_path = reference_dir / _reference_file_name(card, image_url)
-            downloaded += 1
-            if progress_callback is not None:
-                progress_callback(
-                    processed_count,
-                    len(job_entries),
-                    f"Embedding {progress_label[:-1] if progress_label.endswith('s') else progress_label} {ordinal + 1:,}/{len(job_entries):,}: {card_name}",
-                )
-            embedding_started_at = time.monotonic()
-            _append_visual_index_diagnostic(
-                diagnostic_log_path,
-                "embedding_started",
-                **card_context,
-                image_url=image_url,
-            )
-            vector = embedder.embed(image)
-            if progress_callback is not None:
-                progress_callback(
-                    processed_count,
-                    len(job_entries),
-                    f"Saving checkpoint for {card_name}",
-                )
-            metadata = {
-                "name": card.get("name"),
-                "scryfall_id": card.get("id") or card.get("scryfall_id"),
-                "oracle_id": card.get("oracle_id"),
-                "set_code": card.get("set") or card.get("set_code"),
-                "collector_number": card.get("collector_number"),
-                "image_url": image_url,
-                "image_path": reference_path.relative_to(project_root).as_posix(),
-                "crop_type": "full_card",
-            }
-            _upsert_checkpoint_card(
-                conn,
-                ordinal=ordinal,
-                card_key=card_key,
-                metadata=metadata,
-                embedding=vector,
-            )
-            _delete_reference_artifact(project_root, metadata)
-            resumable_rows[card_key] = {
-                "ordinal": ordinal,
-                "card_key": card_key,
-                "metadata": metadata,
-                "embedding": np.asarray(vector, dtype=np.float32).reshape(-1),
-            }
-            processed_count += 1
-            _append_visual_index_diagnostic(
-                diagnostic_log_path,
-                "card_checkpointed",
-                **{**card_context, "completed_card_count": processed_count},
-                image_url=image_url,
-                embedding_ms=round((time.monotonic() - embedding_started_at) * 1000, 1),
-                elapsed_ms=round((time.monotonic() - card_started_at) * 1000, 1),
-            )
-            if progress_callback is not None:
-                progress_callback(
-                    processed_count,
-                    len(job_entries),
-                    f"Indexed {processed_count:,}/{len(job_entries):,} {progress_label}",
-                )
+                try:
+                    image_selection = future.result()
+                    if image_selection is None:
+                        raise ValueError(f"No image URLs are available for {card_name}")
+                except ValueError as exc:
+                    _upsert_checkpoint_failure(
+                        conn,
+                        ordinal=ordinal,
+                        card_key=card_key,
+                        card_name=card_name,
+                        error=str(exc),
+                    )
+                    resumable_failures[card_key] = {
+                        "ordinal": ordinal,
+                        "card_key": card_key,
+                        "card_name": card_name,
+                        "error": str(exc),
+                    }
+                    processed_count += 1
+                    _append_visual_index_diagnostic(
+                        diagnostic_log_path,
+                        "card_skipped",
+                        **{**card_context, "completed_card_count": processed_count},
+                        error_type=type(exc).__name__,
+                        error=str(exc),
+                        elapsed_ms=round((time.monotonic() - card_started_at) * 1000, 1),
+                    )
+                    if progress_callback is not None:
+                        progress_callback(
+                            processed_count,
+                            len(job_entries),
+                            f"Skipped {card_name} after image failure "
+                            f"({processed_count:,}/{len(job_entries):,} processed): {exc}",
+                        )
+                else:
+                    image, image_url = image_selection
+                    reference_path = reference_dir / _reference_file_name(card, image_url)
+                    downloaded += 1
+                    if progress_callback is not None:
+                        progress_callback(
+                            processed_count,
+                            len(job_entries),
+                            f"Embedding {progress_label[:-1] if progress_label.endswith('s') else progress_label} "
+                            f"{ordinal + 1:,}/{len(job_entries):,}: {card_name}",
+                        )
+                    embedding_started_at = time.monotonic()
+                    _append_visual_index_diagnostic(
+                        diagnostic_log_path,
+                        "embedding_started",
+                        **card_context,
+                        image_url=image_url,
+                    )
+                    vector = embedder.embed(image)
+                    if progress_callback is not None:
+                        progress_callback(
+                            processed_count,
+                            len(job_entries),
+                            f"Saving checkpoint for {card_name}",
+                        )
+                    metadata = {
+                        "name": card.get("name"),
+                        "scryfall_id": card.get("id") or card.get("scryfall_id"),
+                        "oracle_id": card.get("oracle_id"),
+                        "set_code": card.get("set") or card.get("set_code"),
+                        "collector_number": card.get("collector_number"),
+                        "image_url": image_url,
+                        "image_path": reference_path.relative_to(project_root).as_posix(),
+                        "crop_type": "full_card",
+                    }
+                    _upsert_checkpoint_card(
+                        conn,
+                        ordinal=ordinal,
+                        card_key=card_key,
+                        metadata=metadata,
+                        embedding=vector,
+                    )
+                    _delete_reference_artifact(project_root, metadata)
+                    resumable_rows[card_key] = {
+                        "ordinal": ordinal,
+                        "card_key": card_key,
+                        "metadata": metadata,
+                        "embedding": np.asarray(vector, dtype=np.float32).reshape(-1),
+                    }
+                    processed_count += 1
+                    _append_visual_index_diagnostic(
+                        diagnostic_log_path,
+                        "card_checkpointed",
+                        **{**card_context, "completed_card_count": processed_count},
+                        image_url=image_url,
+                        embedding_ms=round((time.monotonic() - embedding_started_at) * 1000, 1),
+                        elapsed_ms=round((time.monotonic() - card_started_at) * 1000, 1),
+                    )
+                    if progress_callback is not None:
+                        progress_callback(
+                            processed_count,
+                            len(job_entries),
+                            f"Indexed {processed_count:,}/{len(job_entries):,} {progress_label}",
+                        )
+
+                try:
+                    submit_download(executor, next(pending_iterator))
+                except StopIteration:
+                    pass
 
         final_rows = [
             resumable_rows[card_key]
@@ -1603,7 +1680,7 @@ def _extract_image_urls(card: dict[str, Any]) -> list[str]:
 
     image_uris = card.get("image_uris")
     if isinstance(image_uris, dict):
-        for key in ("png", "large", "normal", "small"):
+        for key in ("normal", "large", "small", "png"):
             value = image_uris.get(key)
             if isinstance(value, str) and value.strip():
                 image_urls.append(value.strip())
@@ -1616,7 +1693,7 @@ def _extract_image_urls(card: dict[str, Any]) -> list[str]:
             face_uris = face.get("image_uris")
             if not isinstance(face_uris, dict):
                 continue
-            for key in ("png", "large", "normal", "small"):
+            for key in ("normal", "large", "small", "png"):
                 value = face_uris.get(key)
                 if isinstance(value, str) and value.strip():
                     image_urls.append(value.strip())
@@ -1644,18 +1721,37 @@ def _slug(value: str) -> str:
     return "".join(character.lower() if character.isalnum() else "-" for character in value).strip("-") or "card"
 
 
-def _download_image_bytes(image_url: str) -> bytes:
+def _retry_after_seconds(exc: HTTPError, *, fallback: float) -> float:
+    retry_after = exc.headers.get("Retry-After") if exc.headers is not None else None
+    try:
+        return max(float(retry_after), fallback)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _download_image_bytes(
+    image_url: str,
+    *,
+    rate_limiter: _RequestRateLimiter | None = None,
+) -> bytes:
     request = Request(image_url, headers=REQUEST_HEADERS)
+    limiter = rate_limiter or _IMAGE_REQUEST_RATE_LIMITER
     last_error: Exception | None = None
     for attempt in range(3):
+        limiter.acquire()
         try:
             with urlopen(request, timeout=30) as response:
                 return response.read()
         except HTTPError as exc:
             last_error = exc
-            retryable = exc.code in {408, 429} or exc.code >= 500
-            if retryable and attempt < 2:
-                time.sleep(0.5 * (attempt + 1))
+            if exc.code == 429:
+                cooldown = _retry_after_seconds(exc, fallback=15.0 * (2**attempt))
+                limiter.penalize(cooldown, slow_down=True)
+                if attempt < 2:
+                    continue
+                raise
+            if (exc.code == 408 or exc.code >= 500) and attempt < 2:
+                time.sleep(1.0 * (attempt + 1))
                 continue
             raise
         except (URLError, OSError) as exc:
