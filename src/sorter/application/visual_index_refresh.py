@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from collections import deque
 from datetime import UTC, datetime, timedelta
 import importlib
+import math
 import hashlib
 import json
 import os
@@ -58,7 +59,7 @@ DEFAULT_VISUAL_INDEX_REFERENCE_DIR = Path("data/index/reference_images")
 VISUAL_INDEX_PROGRESS_HEARTBEAT_STALE_SECONDS = 120.0
 VISUAL_INDEX_PROGRESS_HEARTBEAT_INTERVAL_SECONDS = 15.0
 REQUEST_HEADERS = {
-    "User-Agent": "card-sorter-testbed/0.8.29 (+visual index refresh)",
+    "User-Agent": "card-sorter-testbed/0.8.30 (+visual index refresh)",
     "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
 }
 
@@ -425,30 +426,49 @@ def _estimate_eta_seconds_from_samples(
     total: int,
     minimum_completed_cards: int = 5,
     minimum_samples: int = 2,
-    max_lookback: timedelta = timedelta(minutes=10),
+    max_lookback: timedelta = timedelta(minutes=30),
+    decay_half_life: timedelta = timedelta(minutes=6),
 ) -> float | None:
     if total <= 0:
         return None
     if len(samples) < minimum_samples:
         return None
-    latest_time, latest_current = samples[-1]
+    ordered_samples = sorted(samples, key=lambda sample: sample[0])
+    latest_time, latest_current = ordered_samples[-1]
     if latest_current < minimum_completed_cards:
         return None
 
-    window = [sample for sample in samples if latest_time - sample[0] <= max_lookback]
+    window = [sample for sample in ordered_samples if latest_time - sample[0] <= max_lookback]
     if len(window) < minimum_samples:
         return None
-    earliest_time, earliest_current = window[0]
-    completed = latest_current - earliest_current
-    if completed <= 0:
+    overall_time, overall_current = window[0]
+    decay_seconds = max(1.0, decay_half_life.total_seconds())
+    weighted_rate = 0.0
+    weighted_rate_weight = 0.0
+    for (start_time, start_current), (end_time, end_current) in zip(window, window[1:]):
+        completed = end_current - start_current
+        elapsed = (end_time - start_time).total_seconds()
+        if completed <= 0 or elapsed <= 0:
+            continue
+        rate = completed / elapsed
+        interval_age = max(0.0, (latest_time - end_time).total_seconds())
+        weight = math.exp(-interval_age / decay_seconds)
+        weighted_rate += rate * weight
+        weighted_rate_weight += weight
+
+    if weighted_rate_weight <= 0:
         return None
-    elapsed = (latest_time - earliest_time).total_seconds()
-    if elapsed <= 0:
+    weighted_rate /= weighted_rate_weight
+
+    overall_completed = latest_current - overall_current
+    overall_elapsed = (latest_time - overall_time).total_seconds()
+    if overall_completed <= 0 or overall_elapsed <= 0:
+        return None
+    overall_rate = overall_completed / overall_elapsed
+    if overall_rate <= 0:
         return None
 
-    rate = completed / elapsed
-    if rate <= 0:
-        return None
+    rate = weighted_rate * 0.7 + overall_rate * 0.3
 
     remaining = max(0, total - latest_current)
     return remaining / rate
@@ -780,8 +800,13 @@ class VisualIndexRefreshManager:
                     last_progress_snapshot["message"] = message
                     if current > last_reported_current:
                         progress_samples.append((heartbeat_at, current))
+                        raw_eta_seconds = _estimate_eta_seconds_from_samples(samples=list(progress_samples), total=total)
+                        if raw_eta_seconds is not None:
+                            if last_eta_seconds is None:
+                                last_eta_seconds = raw_eta_seconds
+                            else:
+                                last_eta_seconds = (last_eta_seconds * 0.75) + (raw_eta_seconds * 0.25)
                         last_reported_current = current
-                        last_eta_seconds = _estimate_eta_seconds_from_samples(samples=list(progress_samples), total=total)
                     eta_seconds = last_eta_seconds if current > 0 else None
                     self._write_state(
                         {

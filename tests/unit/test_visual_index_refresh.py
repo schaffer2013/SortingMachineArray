@@ -46,7 +46,24 @@ def test_eta_estimation_ignores_warmup_time_and_uses_recent_samples():
     eta_seconds = refresh_module._estimate_eta_seconds_from_samples(samples=samples, total=300)
 
     assert eta_seconds is not None
-    assert eta_seconds == pytest.approx(2220.0, rel=0.1)
+    assert eta_seconds == pytest.approx(2700.0, rel=0.1)
+
+
+def test_eta_estimation_smooths_recent_slowdowns():
+    now = datetime.now(UTC)
+    samples = [
+        (now - timedelta(minutes=25), 0),
+        (now - timedelta(minutes=20), 100),
+        (now - timedelta(minutes=15), 200),
+        (now - timedelta(minutes=10), 201),
+        (now - timedelta(minutes=5), 202),
+        (now, 203),
+    ]
+
+    eta_seconds = refresh_module._estimate_eta_seconds_from_samples(samples=samples, total=500)
+
+    assert eta_seconds is not None
+    assert eta_seconds < 6 * 60 * 60
 
 
 def test_build_visual_index_from_catalog_uses_project_root_and_builds_index(tmp_path, monkeypatch):
