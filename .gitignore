@@ -172,6 +172,8 @@ data/catalog/
 data/recognition_reports/
 local_data/
 .tmp_pytest/
+data/index/
+.pytest_tmp_ui_run/
 data/vision/raw/*
 !data/vision/raw/.gitkeep
 data/vision/normalized/*

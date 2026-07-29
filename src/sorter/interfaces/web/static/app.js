@@ -53,6 +53,11 @@ const formatSeconds = value => {
   if (!Number.isFinite(number)) return "--";
   return number < 1 ? `${Math.round(number * 1000)} ms` : `${number.toFixed(2)} s`;
 };
+const formatDays = value => {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "--";
+  return `${number.toFixed(1)} days`;
+};
 const timingValue = (timings, keys) => {
   for (const key of keys) {
     if (timings[key] !== undefined && timings[key] !== null) return timings[key];
@@ -2444,6 +2449,12 @@ window.SorterPages = {
     const collectionOpen = document.querySelector("#collection-open");
     const collectionReview = document.querySelector("#collection-review");
     const collectionMessage = document.querySelector("#collection-message");
+    const visualIndexPill = document.querySelector("#visual-index-pill");
+    const visualIndexDetails = document.querySelector("#visual-index-details");
+    const visualIndexRefreshDays = document.querySelector("#visual-index-refresh-days");
+    const visualIndexSavePolicy = document.querySelector("#visual-index-save-policy");
+    const visualIndexRefresh = document.querySelector("#visual-index-refresh");
+    const visualIndexMessage = document.querySelector("#visual-index-message");
     const runtimeMode = document.querySelector("#runtime-mode");
     const runtimeApply = document.querySelector("#runtime-apply");
     const runtimeMessage = document.querySelector("#runtime-message");
@@ -2462,6 +2473,30 @@ window.SorterPages = {
     const serialCommandLog = document.querySelector("#serial-command-log");
     const serialPollLog = document.querySelector("#serial-poll-log");
     let serialOperationActive = false;
+    const renderVisualIndex = visualIndex => {
+      if (!visualIndex) return;
+      const visualReady = Boolean(visualIndex.ready);
+      const visualRefreshing = Boolean(visualIndex.refreshing);
+      const visualNeedsRefresh = Boolean(visualIndex.needs_refresh);
+      if (visualIndexPill) {
+        visualIndexPill.textContent = visualRefreshing ? "Refreshing" : visualReady && !visualNeedsRefresh ? "Ready" : visualNeedsRefresh ? "Stale" : "Checking";
+        visualIndexPill.className = visualRefreshing || visualNeedsRefresh ? "pill warn-pill" : "pill good-pill";
+      }
+      if (visualIndexRefreshDays && visualIndex.configured_refresh_days) {
+        visualIndexRefreshDays.value = String(visualIndex.configured_refresh_days);
+      }
+      if (visualIndexDetails) {
+        visualIndexDetails.innerHTML = [
+          ["Status", visualIndex.message || "--"],
+          ["Policy", visualIndex.configured_refresh_days ? `${visualIndex.configured_refresh_days} days` : "--"],
+          ["Age", formatDays(visualIndex.age_days)],
+          ["Cards indexed", visualIndex.indexed_card_count ?? "--"],
+          ["Source cards", visualIndex.source_card_count ?? "--"],
+          ["Last updated", visualIndex.updated_at_utc || "--"],
+        ].map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
+      }
+      if (visualIndexMessage) visualIndexMessage.textContent = visualIndex.message || "";
+    };
     const render = data => {
       pill.textContent = data.update_available ? "Update available" : "Current";
       pill.className = data.update_available ? "pill warn-pill" : "pill good-pill";
@@ -2476,6 +2511,7 @@ window.SorterPages = {
         ["Local changes", data.dirty ? "Yes" : "No"],
       ].map(([k,v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
       message.textContent = data.message || (data.restart_required ? "Update applied. Restart required." : "");
+      renderVisualIndex(data.visual_index || {});
       const modules = data.submodules || [];
       const modulesReady = modules.length > 0 && modules.every(item => item.initialized && item.at_expected_revision);
       submodulePill.textContent = modulesReady ? "Ready" : "Attention";
@@ -2543,8 +2579,39 @@ window.SorterPages = {
       message.textContent = refreshRemote ? "Checking origin/main..." : "Loading system state...";
       render(await json(`/api/system${refreshRemote ? "?refresh=true" : ""}`));
     }
+    async function refreshVisualIndex() {
+      visualIndexMessage.textContent = "Checking visual index...";
+      try {
+        renderVisualIndex(await json("/api/system/visual-index"));
+      } catch (error) {
+        visualIndexMessage.textContent = error.message;
+      }
+    }
     checkButton.onclick = () => refresh(true);
     collectionRefresh.onclick = refreshCollection;
+    visualIndexSavePolicy.onclick = async () => {
+      try {
+        const result = await json("/api/system/visual-index/policy", {
+          method: "POST",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify({refresh_days: Number(visualIndexRefreshDays.value)}),
+        });
+        renderVisualIndex(result);
+      } catch (error) {
+        visualIndexMessage.textContent = error.message;
+      }
+    };
+    visualIndexRefresh.onclick = async () => {
+      visualIndexRefresh.disabled = true;
+      visualIndexMessage.textContent = "Starting visual index refresh...";
+      try {
+        renderVisualIndex(await json("/api/system/visual-index/refresh", {method: "POST"}));
+      } catch (error) {
+        visualIndexMessage.textContent = error.message;
+      } finally {
+        visualIndexRefresh.disabled = false;
+      }
+    };
     updateButton.onclick = async () => {
       updateButton.disabled = true;
       message.textContent = "Updating from origin/main...";
@@ -2660,6 +2727,7 @@ window.SorterPages = {
     };
     refresh(true);
     refreshCollection();
+    refreshVisualIndex();
     refreshRuntime();
     refreshSerial(false);
     setInterval(async () => {

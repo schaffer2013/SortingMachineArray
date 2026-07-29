@@ -33,6 +33,7 @@ from sorter.application.card_back_training import (
     CardBackTrainingStore,
     generate_spring_capture_points,
 )
+from sorter.application.visual_index_refresh import VISUAL_INDEX_REFRESH_DAY_OPTIONS, VisualIndexRefreshManager
 from sorter.application.orchestrator import Orchestrator
 from sorter.adapters.hardware.marlin_transport import MarlinSerialTransport
 from sorter.adapters.hardware.neopixel_lights import NeoPixelLightsAdapter
@@ -699,6 +700,7 @@ class WebRuntime:
         self.light_profiles_seed_path = light_profiles_seed_path
         self.calibration_path = calibration_path
         self.repo_root = _repo_root()
+        self.visual_index = VisualIndexRefreshManager(project_root=self.repo_root)
         self.control_audit_path = self.repo_root / "data" / "logs" / "control_audit.jsonl"
         self.debug_events_path = self.repo_root / "data" / "logs" / "debug_events.jsonl"
         self.serial_log_path = self.repo_root / "data" / "logs" / "serial_commands.jsonl"
@@ -2483,7 +2485,8 @@ class WebRuntime:
         self.orchestrator.world.snapshot.pose.z_mm = float(z_mm)
         self.orchestrator.world.snapshot.pose.c_mm = float(c_mm)
 
-    def system_info(self, refresh_remote: bool = False) -> dict[str, Any]:
+    def system_info(self, refresh_remote: bool = False, refresh_visual_index: bool = False) -> dict[str, Any]:
+        runtime_status = self.status()
         current_sha = _git(["rev-parse", "--short", "HEAD"], cwd=self.repo_root)
         current_branch = _git(["branch", "--show-current"], cwd=self.repo_root, default="detached")
         package_version = _package_version()
@@ -2507,6 +2510,10 @@ class WebRuntime:
             reason = "Commit or stash local changes before updating"
         elif fetch_error:
             reason = fetch_error
+        visual_index = self.visual_index.status(
+            running=runtime_status["lifecycle"] == "RUNNING",
+            auto_start=refresh_visual_index,
+        )
         return {
             "version": f"{package_version}-{current_sha}",
             "package_version": package_version,
@@ -2535,22 +2542,24 @@ class WebRuntime:
                     "Collection and review service",
                 ),
             ],
+            "visual_index": visual_index,
+            "runtime": runtime_status,
         }
 
     def update_from_remote(self) -> dict[str, Any]:
-        before = self.system_info(refresh_remote=True)
+        before = self.system_info(refresh_remote=True, refresh_visual_index=False)
         if not before["can_update"]:
             return {"ok": False, **before}
         pull = _run_git(["pull", "--ff-only", "origin", "main"], cwd=self.repo_root, timeout=120)
         if pull.returncode != 0:
-            after = self.system_info(refresh_remote=False)
+            after = self.system_info(refresh_remote=False, refresh_visual_index=False)
             return {
                 "ok": False,
                 **after,
                 "message": pull.stderr.strip() or pull.stdout.strip() or "Update failed",
             }
         deploy = _run_deploy_script(self.repo_root)
-        after = self.system_info(refresh_remote=False)
+        after = self.system_info(refresh_remote=False, refresh_visual_index=False)
         if deploy.returncode != 0:
             return {
                 "ok": False,
@@ -2572,6 +2581,20 @@ class WebRuntime:
             "restart_required": restart_required,
             "restart_scheduled": restart_scheduled,
         }
+
+    def visual_index_status(self, refresh_if_idle: bool = True) -> dict[str, Any]:
+        runtime_status = self.status()
+        return self.visual_index.status(
+            running=runtime_status["lifecycle"] == "RUNNING",
+            auto_start=refresh_if_idle,
+        )
+
+    def refresh_visual_index(self) -> dict[str, Any]:
+        return self.visual_index.refresh(force=True)
+
+    def set_visual_index_policy(self, refresh_days: int) -> dict[str, Any]:
+        self.visual_index.save_policy(refresh_days)
+        return self.visual_index_status(refresh_if_idle=False)
 
 
 def create_web_app(
@@ -2808,7 +2831,30 @@ def create_web_app(
 
     @app.get("/api/system")
     def api_system():
-        return jsonify(runtime.system_info(refresh_remote=request.args.get("refresh") == "true"))
+        return jsonify(runtime.system_info(refresh_remote=request.args.get("refresh") == "true", refresh_visual_index=not app.testing))
+
+    @app.get("/api/system/visual-index")
+    def api_system_visual_index():
+        return jsonify(runtime.visual_index_status(refresh_if_idle=not app.testing))
+
+    @app.post("/api/system/visual-index/refresh")
+    def api_system_visual_index_refresh():
+        return jsonify(runtime.refresh_visual_index())
+
+    @app.post("/api/system/visual-index/policy")
+    def api_system_visual_index_policy():
+        payload = request.get_json(silent=True) or {}
+        try:
+            refresh_days = int(payload.get("refresh_days"))
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "message": "refresh_days must be one of 1, 3, 7, 14, 30, 60, or 90"}), 400
+        if refresh_days not in VISUAL_INDEX_REFRESH_DAY_OPTIONS:
+            return jsonify({"ok": False, "message": "refresh_days must be one of 1, 3, 7, 14, 30, 60, or 90"}), 400
+        try:
+            status = runtime.set_visual_index_policy(refresh_days)
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
+        return jsonify({"ok": True, **status})
 
     @app.get("/api/collection-service")
     def api_collection_service():

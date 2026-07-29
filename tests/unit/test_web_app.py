@@ -1546,6 +1546,9 @@ def test_system_api_reports_version_and_update_state():
     assert payload["remote"] == "origin/main"
     assert "update_available" in payload
     assert "can_update" in payload
+    assert "visual_index" in payload
+    assert payload["visual_index"]["configured_refresh_days"] == 7
+    assert payload["visual_index"]["refresh_options"] == [1, 3, 7, 14, 30, 60, 90]
     assert [item["name"] for item in payload["submodules"]] == [
         "fuzzy-enigma",
         "magic-the-collecting",
@@ -1563,7 +1566,7 @@ def test_collection_service_api_reports_unconfigured_adapter():
 def test_system_update_refuses_when_not_safe(monkeypatch):
     client = _client()
 
-    def fake_system_info(self, refresh_remote=False):
+    def fake_system_info(self, refresh_remote=False, refresh_visual_index=False):
         return {
             "version": "0.1.0-abc1234",
             "package_version": "0.1.0",
@@ -1628,7 +1631,11 @@ def test_system_update_schedules_restart_after_successful_pull(monkeypatch):
     )
     scheduled = []
 
-    monkeypatch.setattr(web_app_module.WebRuntime, "system_info", lambda self, refresh_remote=False: next(states))
+    monkeypatch.setattr(
+        web_app_module.WebRuntime,
+        "system_info",
+        lambda self, refresh_remote=False, refresh_visual_index=False: next(states),
+    )
     monkeypatch.setattr(
         web_app_module,
         "_run_git",
@@ -1689,7 +1696,11 @@ def test_system_update_reports_deploy_install_failure(monkeypatch):
         ]
     )
 
-    monkeypatch.setattr(web_app_module.WebRuntime, "system_info", lambda self, refresh_remote=False: next(states))
+    monkeypatch.setattr(
+        web_app_module.WebRuntime,
+        "system_info",
+        lambda self, refresh_remote=False, refresh_visual_index=False: next(states),
+    )
     monkeypatch.setattr(
         web_app_module,
         "_run_git",
@@ -1709,6 +1720,43 @@ def test_system_update_reports_deploy_install_failure(monkeypatch):
     assert payload["ok"] is False
     assert payload["message"] == "install failed"
     assert payload["deploy_returncode"] == 2
+
+
+def test_system_visual_index_policy_endpoint_can_save_refresh_days():
+    client = _client()
+    runtime = client.application.config["runtime"]
+    runtime.set_visual_index_policy = lambda refresh_days: {
+        "configured_refresh_days": refresh_days,
+        "message": "saved",
+        "refresh_options": [1, 3, 7, 14, 30, 60, 90],
+    }
+
+    response = client.post("/api/system/visual-index/policy", json={"refresh_days": 14})
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["configured_refresh_days"] == 14
+    assert payload["message"] == "saved"
+
+
+def test_system_visual_index_refresh_endpoint_returns_refresh_status():
+    client = _client()
+    runtime = client.application.config["runtime"]
+    runtime.refresh_visual_index = lambda: {
+        "configured_refresh_days": 7,
+        "refreshing": True,
+        "message": "started",
+        "refresh_options": [1, 3, 7, 14, 30, 60, 90],
+    }
+
+    response = client.post("/api/system/visual-index/refresh")
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["configured_refresh_days"] == 7
+    assert payload["refreshing"] is True
+    assert payload["message"] == "started"
 
 
 def test_calibration_can_be_updated_from_web_app(tmp_path):
