@@ -57,35 +57,32 @@ def test_visual_index_policy_round_trip(tmp_path):
     assert refresh_module.load_visual_index_policy(config_path) == 30
 
 
-def test_eta_estimation_ignores_warmup_time_and_uses_recent_samples():
+def test_eta_estimation_uses_available_completed_cards_during_startup():
     now = datetime.now(UTC)
     samples = [
-        (now - timedelta(minutes=30), 10),
-        (now - timedelta(minutes=3), 100),
-        (now, 115),
+        (now - timedelta(seconds=20), 10),
+        (now - timedelta(seconds=10), 20),
+        (now, 30),
     ]
 
-    eta_seconds = refresh_module._estimate_eta_seconds_from_samples(samples=samples, total=300)
+    eta_seconds = refresh_module._estimate_eta_seconds_from_samples(samples=samples, total=130)
 
     assert eta_seconds is not None
-    assert eta_seconds == pytest.approx(2700.0, rel=0.1)
+    assert eta_seconds == pytest.approx(100.0)
 
 
-def test_eta_estimation_smooths_recent_slowdowns():
+def test_eta_estimation_uses_only_the_latest_500_completed_cards():
     now = datetime.now(UTC)
     samples = [
-        (now - timedelta(minutes=25), 0),
-        (now - timedelta(minutes=20), 100),
-        (now - timedelta(minutes=15), 200),
-        (now - timedelta(minutes=10), 201),
-        (now - timedelta(minutes=5), 202),
-        (now, 203),
+        (now - timedelta(seconds=600), 0),
+        (now - timedelta(seconds=100), 500),
+        (now, 1000),
     ]
 
-    eta_seconds = refresh_module._estimate_eta_seconds_from_samples(samples=samples, total=500)
+    eta_seconds = refresh_module._estimate_eta_seconds_from_samples(samples=samples, total=1500)
 
     assert eta_seconds is not None
-    assert eta_seconds < 6 * 60 * 60
+    assert eta_seconds == pytest.approx(100.0)
 
 
 def test_eta_estimation_weights_prefetch_bursts_by_elapsed_time():

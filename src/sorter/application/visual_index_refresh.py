@@ -5,7 +5,6 @@ from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 import importlib
-import math
 import hashlib
 import json
 import time
@@ -63,8 +62,9 @@ VISUAL_INDEX_PROGRESS_HEARTBEAT_INTERVAL_SECONDS = 15.0
 VISUAL_INDEX_DOWNLOAD_WORKERS = 4
 VISUAL_INDEX_DOWNLOAD_PREFETCH = 8
 SCRYFALL_IMAGE_REQUESTS_PER_SECOND = 5.0
+VISUAL_INDEX_ETA_CARD_WINDOW = 500
 REQUEST_HEADERS = {
-    "User-Agent": "SortingMachineArray/0.8.37 (+https://github.com/schaffer2013/SortingMachineArray)",
+    "User-Agent": "SortingMachineArray/0.8.39 (+https://github.com/schaffer2013/SortingMachineArray)",
     "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
 }
 _DIAGNOSTIC_LOG_LOCK = threading.Lock()
@@ -722,8 +722,7 @@ def _estimate_eta_seconds_from_samples(
     total: int,
     minimum_completed_cards: int = 5,
     minimum_samples: int = 2,
-    max_lookback: timedelta = timedelta(minutes=30),
-    decay_half_life: timedelta = timedelta(minutes=6),
+    card_window: int = VISUAL_INDEX_ETA_CARD_WINDOW,
 ) -> float | None:
     if total <= 0:
         return None
@@ -731,47 +730,20 @@ def _estimate_eta_seconds_from_samples(
         return None
     ordered_samples = sorted(samples, key=lambda sample: sample[0])
     latest_time, latest_current = ordered_samples[-1]
-    if latest_current < minimum_completed_cards:
-        return None
+    window_start_current = max(0, latest_current - max(1, int(card_window)))
+    eligible_starts = [sample for sample in ordered_samples[:-1] if sample[1] <= window_start_current]
+    if eligible_starts:
+        start_time, start_current = eligible_starts[-1]
+    else:
+        start_time, start_current = ordered_samples[0]
 
-    window = [sample for sample in ordered_samples if latest_time - sample[0] <= max_lookback]
-    if len(window) < minimum_samples:
+    completed = latest_current - start_current
+    elapsed = (latest_time - start_time).total_seconds()
+    if completed < minimum_completed_cards or elapsed <= 0:
         return None
-    overall_time, overall_current = window[0]
-    decay_seconds = max(1.0, decay_half_life.total_seconds())
-    weighted_rate = 0.0
-    weighted_rate_weight = 0.0
-    for (start_time, start_current), (end_time, end_current) in zip(window, window[1:]):
-        completed = end_current - start_current
-        elapsed = (end_time - start_time).total_seconds()
-        if completed <= 0 or elapsed <= 0:
-            continue
-        rate = completed / elapsed
-        interval_age = max(0.0, (latest_time - end_time).total_seconds())
-        # Prefetched downloads can complete in short bursts. Weighting every
-        # callback interval equally makes those millisecond-long bursts look
-        # like the sustained indexing rate. Integrate the decay over each
-        # interval so its influence reflects both duration and recency.
-        weight = decay_seconds * (
-            math.exp(-interval_age / decay_seconds)
-            - math.exp(-(interval_age + elapsed) / decay_seconds)
-        )
-        weighted_rate += rate * weight
-        weighted_rate_weight += weight
-
-    if weighted_rate_weight <= 0:
+    rate = completed / elapsed
+    if rate <= 0:
         return None
-    weighted_rate /= weighted_rate_weight
-
-    overall_completed = latest_current - overall_current
-    overall_elapsed = (latest_time - overall_time).total_seconds()
-    if overall_completed <= 0 or overall_elapsed <= 0:
-        return None
-    overall_rate = overall_completed / overall_elapsed
-    if overall_rate <= 0:
-        return None
-
-    rate = weighted_rate * 0.7 + overall_rate * 0.3
 
     remaining = max(0, total - latest_current)
     return remaining / rate
@@ -1095,7 +1067,7 @@ class VisualIndexRefreshManager:
         result: VisualIndexBuildResult | None = None
         try:
             progress_lock = threading.Lock()
-            progress_samples: deque[tuple[datetime, int]] = deque(maxlen=16)
+            progress_samples: deque[tuple[datetime, int]] = deque(maxlen=VISUAL_INDEX_ETA_CARD_WINDOW + 1)
             last_reported_current = 0
             last_eta_seconds: float | None = None
             last_progress_snapshot: dict[str, int | str] = {
@@ -1123,10 +1095,7 @@ class VisualIndexRefreshManager:
                         progress_samples.append((heartbeat_at, current))
                         raw_eta_seconds = _estimate_eta_seconds_from_samples(samples=list(progress_samples), total=total)
                         if raw_eta_seconds is not None:
-                            if last_eta_seconds is None:
-                                last_eta_seconds = raw_eta_seconds
-                            else:
-                                last_eta_seconds = (last_eta_seconds * 0.75) + (raw_eta_seconds * 0.25)
+                            last_eta_seconds = raw_eta_seconds
                         last_reported_current = current
                     eta_seconds = last_eta_seconds if current > 0 else None
                     self._write_state(
