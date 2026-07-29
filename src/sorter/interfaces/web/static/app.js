@@ -2473,11 +2473,17 @@ window.SorterPages = {
     const serialCommandLog = document.querySelector("#serial-command-log");
     const serialPollLog = document.querySelector("#serial-poll-log");
     let serialOperationActive = false;
+    let visualIndexPollTimer = null;
     const renderVisualIndex = visualIndex => {
       if (!visualIndex) return;
       const visualReady = Boolean(visualIndex.ready);
       const visualRefreshing = Boolean(visualIndex.refreshing);
       const visualNeedsRefresh = Boolean(visualIndex.needs_refresh);
+      const progress = visualIndex.progress || {};
+      const progressPercent = Number(progress.percent);
+      const progressText = Number.isFinite(progressPercent)
+        ? `${progressPercent.toFixed(1)}%${progress.current !== undefined && progress.total !== undefined ? ` (${Number(progress.current).toLocaleString()}/${Number(progress.total).toLocaleString()})` : ""}`
+        : "--";
       if (visualIndexPill) {
         visualIndexPill.textContent = visualRefreshing ? "Refreshing" : visualReady && !visualNeedsRefresh ? "Ready" : visualNeedsRefresh ? "Stale" : "Checking";
         visualIndexPill.className = visualRefreshing || visualNeedsRefresh ? "pill warn-pill" : "pill good-pill";
@@ -2492,10 +2498,25 @@ window.SorterPages = {
           ["Age", formatDays(visualIndex.age_days)],
           ["Cards indexed", visualIndex.indexed_card_count ?? "--"],
           ["Source cards", visualIndex.source_card_count ?? "--"],
+          ["Progress", progressText],
           ["Last updated", visualIndex.updated_at_utc || "--"],
         ].map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
       }
       if (visualIndexMessage) visualIndexMessage.textContent = visualIndex.message || "";
+      if (visualIndexRefreshing) {
+        if (!visualIndexPollTimer) {
+          visualIndexPollTimer = setInterval(async () => {
+            try {
+              renderVisualIndex(await json("/api/system/visual-index"));
+            } catch (error) {
+              if (visualIndexMessage) visualIndexMessage.textContent = error.message;
+            }
+          }, 3000);
+        }
+      } else if (visualIndexPollTimer) {
+        clearInterval(visualIndexPollTimer);
+        visualIndexPollTimer = null;
+      }
     };
     const render = data => {
       pill.textContent = data.update_available ? "Update available" : "Current";

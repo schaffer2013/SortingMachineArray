@@ -97,6 +97,9 @@ def test_visual_index_manager_refreshes_in_background(tmp_path, monkeypatch):
     reference_dir = tmp_path / "data/index/reference_images"
 
     def fake_build(**kwargs):
+        progress_callback = kwargs.get("progress_callback")
+        if callable(progress_callback):
+            progress_callback(1, 4, "Indexed 1/4 cards")
         kwargs["index_path"].parent.mkdir(parents=True, exist_ok=True)
         kwargs["metadata_path"].parent.mkdir(parents=True, exist_ok=True)
         kwargs["index_path"].write_bytes(b"npz")
@@ -136,6 +139,7 @@ def test_visual_index_manager_refreshes_in_background(tmp_path, monkeypatch):
         time.sleep(0.05)
 
     assert status["ready"] is True
+    assert status["progress_percent"] == 100.0
     assert status["indexed_card_count"] == 1
     assert status["source_card_count"] == 1
     assert status["updated_at_utc"] == "2026-07-29T00:00:00Z"

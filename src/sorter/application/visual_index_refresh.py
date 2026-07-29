@@ -29,7 +29,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for the vendored subm
     from card_engine.retrieval.index import VisualIndex  # type: ignore
 
 
-ProgressCallback = Callable[[str], None]
+ProgressCallback = Callable[[int, int, str | None], None]
 
 DEFAULT_VISUAL_INDEX_REFRESH_DAYS = 7
 VISUAL_INDEX_REFRESH_DAY_OPTIONS = (1, 3, 7, 14, 30, 60, 90)
@@ -114,10 +114,15 @@ class VisualIndexRefreshManager:
                 "age_days": age_days,
                 "source_card_count": state.get("source_card_count"),
                 "indexed_card_count": state.get("indexed_card_count"),
+                "progress_current": state.get("progress_current"),
+                "progress_total": state.get("progress_total"),
+                "progress_percent": state.get("progress_percent"),
+                "progress_message": state.get("progress_message"),
                 "needs_refresh": needs_refresh,
                 "running": running,
                 "refreshing": refreshing,
                 "ready": ready,
+                "progress": self._progress_payload(state, refreshing=refreshing),
                 "action": state.get("last_action") or ("refreshing" if refreshing else ("stale" if needs_refresh else "reuse")),
                 "message": self._status_message(
                     running=running,
@@ -166,6 +171,10 @@ class VisualIndexRefreshManager:
                 "last_started_at_utc": _utc_now_iso(),
                 "last_action": "refreshing" if force else reason,
                 "last_error": None,
+                "progress_current": 0,
+                "progress_total": None,
+                "progress_percent": 0.0,
+                "progress_message": "Starting refresh...",
             }
         )
         self._refresh_thread = threading.Thread(
@@ -177,6 +186,34 @@ class VisualIndexRefreshManager:
 
     def _refresh_worker(self, *, force: bool, reason: str) -> None:
         try:
+            progress_lock = threading.Lock()
+            last_reported_percent = {"value": -1.0}
+
+            def report_progress(current: int, total: int, message: str | None = None) -> None:
+                if total > 0:
+                    percent = max(0.0, min(100.0, (current / total) * 100.0))
+                else:
+                    percent = 0.0
+                if message is None:
+                    message = f"Indexed {current:,}/{total:,} cards" if total > 0 else "Refreshing visual index..."
+                with progress_lock:
+                    if percent < 100.0 and percent - last_reported_percent["value"] < 1.0:
+                        return
+                    last_reported_percent["value"] = percent
+                self._write_state(
+                    {
+                        **self._read_state(),
+                        "refreshing": True,
+                        "last_started_at_utc": self._read_state().get("last_started_at_utc"),
+                        "last_action": reason if reason != "manual" else "manual",
+                        "last_error": None,
+                        "progress_current": current,
+                        "progress_total": total,
+                        "progress_percent": round(percent, 2),
+                        "progress_message": message,
+                    }
+                )
+
             result = build_visual_index_from_catalog(
                 project_root=self.project_root,
                 source_catalog_path=self.source_catalog_path,
@@ -187,7 +224,7 @@ class VisualIndexRefreshManager:
                 model=self.model,
                 model_path=self.model_path,
                 overwrite_downloads=self.overwrite_downloads or force,
-                progress_callback=None,
+                progress_callback=report_progress,
             )
             self._write_state(
                 {
@@ -203,6 +240,10 @@ class VisualIndexRefreshManager:
                     "source_catalog_size": result.source_catalog_path.stat().st_size,
                     "indexed_card_count": result.card_count,
                     "source_card_count": result.card_count,
+                    "progress_current": result.card_count,
+                    "progress_total": result.card_count,
+                    "progress_percent": 100.0,
+                    "progress_message": f"Indexed {result.card_count:,}/{result.card_count:,} cards",
                     "index_path": str(result.index_path),
                     "metadata_path": str(result.metadata_path),
                     "reference_dir": str(result.reference_dir),
@@ -246,6 +287,9 @@ class VisualIndexRefreshManager:
             return f"Visual index is ready ({age_days:.1f} days old)."
         if running and needs_refresh:
             return "Visual index refresh is deferred while the sorter is running."
+        progress = self._progress_payload(state, refreshing=refreshing)
+        if refreshing and progress["percent"] is not None:
+            return f"Visual index refresh is running ({progress['percent']:.1f}%)."
         if reason == "missing":
             return "Visual index is missing and will refresh when the sorter is idle."
         if reason == "stale":
@@ -253,6 +297,21 @@ class VisualIndexRefreshManager:
         if reason == "source_changed":
             return "Visual index source catalog changed and will refresh when the sorter is idle."
         return "Visual index refresh is pending."
+
+    def _progress_payload(self, state: dict[str, Any], *, refreshing: bool) -> dict[str, Any]:
+        current = state.get("progress_current")
+        total = state.get("progress_total")
+        percent = state.get("progress_percent")
+        if percent is None and isinstance(current, int) and isinstance(total, int) and total > 0:
+            percent = round((current / total) * 100.0, 2)
+        if percent is None:
+            percent = 0.0 if refreshing else None
+        return {
+            "current": current,
+            "total": total,
+            "percent": percent,
+            "message": state.get("progress_message"),
+        }
 
     def _read_state(self) -> dict[str, Any]:
         if not self.state_path.exists():
@@ -385,8 +444,8 @@ def build_visual_index_from_catalog(
                 "crop_type": "full_card",
             }
         )
-        if progress_callback is not None and index % 1000 == 0:
-            progress_callback(f"Indexed {index + 1}/{len(selected_cards)} cards...")
+        if progress_callback is not None:
+            progress_callback(index + 1, len(selected_cards), f"Indexed {index + 1:,}/{len(selected_cards):,} cards")
 
     if vectors is None:
         raise ValueError("Visual index builder did not produce any embeddings.")
