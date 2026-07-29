@@ -293,3 +293,81 @@ def test_visual_index_manager_refreshes_in_background(tmp_path, monkeypatch):
     assert status["source_card_count"] == 1
     assert status["updated_at_utc"] == "2026-07-29T00:00:00Z"
     assert manager.status(running=False, auto_start=False)["last_error"] is None
+
+
+def test_visual_index_manager_reports_every_progress_callback(tmp_path, monkeypatch):
+    project_root = tmp_path
+    config_path = tmp_path / "config/card_engine/engine.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    refresh_module.save_visual_index_policy(config_path, 7)
+    source_catalog = tmp_path / "data/catalog/default-cards.json"
+    source_catalog.parent.mkdir(parents=True, exist_ok=True)
+    source_catalog.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "Alpha",
+                    "id": "aaaaaaaa-0000-0000-0000-000000000001",
+                    "set": "alp",
+                    "collector_number": "1",
+                    "image_uris": {"png": "https://example.invalid/alpha.png"},
+                }
+            ],
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    index_path = tmp_path / "data/index/card_embeddings.npz"
+    metadata_path = tmp_path / "data/index/card_embeddings.jsonl"
+    reference_dir = tmp_path / "data/index/reference_images"
+
+    progress_calls: list[dict[str, object]] = []
+
+    def fake_build(**kwargs):
+        progress_callback = kwargs.get("progress_callback")
+        if callable(progress_callback):
+            progress_callback(0, 2, "Indexed 0/2 cards")
+            progress_callback(1, 2, "Indexed 1/2 cards")
+        kwargs["index_path"].parent.mkdir(parents=True, exist_ok=True)
+        kwargs["metadata_path"].parent.mkdir(parents=True, exist_ok=True)
+        kwargs["index_path"].write_bytes(b"npz")
+        kwargs["metadata_path"].write_text("{\"name\": \"Alpha\"}\n", encoding="utf-8")
+        return refresh_module.VisualIndexBuildResult(
+            index_path=Path(kwargs["index_path"]),
+            metadata_path=Path(kwargs["metadata_path"]),
+            reference_dir=Path(kwargs["reference_dir"]),
+            source_catalog_path=Path(kwargs["source_catalog_path"]),
+            card_count=1,
+            downloaded_count=1,
+            reused_count=0,
+            updated_at_utc="2026-07-29T00:00:00Z",
+            refresh_days=7,
+        )
+
+    monkeypatch.setattr(refresh_module, "build_visual_index_from_catalog", fake_build)
+    manager = refresh_module.VisualIndexRefreshManager(
+        project_root=project_root,
+        config_path=config_path,
+        source_catalog_path=source_catalog,
+        index_path=index_path,
+        metadata_path=metadata_path,
+        reference_dir=reference_dir,
+    )
+    original_write_state = manager._write_state
+
+    def capture_write_state(payload):
+        if isinstance(payload, dict) and payload.get("progress_current") is not None:
+            progress_calls.append(dict(payload))
+        return original_write_state(payload)
+
+    monkeypatch.setattr(manager, "_write_state", capture_write_state)
+
+    manager.refresh(force=True)
+
+    deadline = time.time() + 5.0
+    while time.time() < deadline:
+        if not manager.status(running=False, auto_start=False)["refreshing"]:
+            break
+        time.sleep(0.05)
+
+    assert [call["progress_current"] for call in progress_calls] == [0, 0, 1, 1]

@@ -331,7 +331,6 @@ class VisualIndexRefreshManager:
     def _refresh_worker(self, *, force: bool, reason: str, full_rebuild: bool) -> None:
         try:
             progress_lock = threading.Lock()
-            last_reported_percent = {"value": -1.0}
 
             def report_progress(current: int, total: int, message: str | None = None) -> None:
                 if total > 0:
@@ -341,26 +340,23 @@ class VisualIndexRefreshManager:
                 if message is None:
                     message = f"Indexed {current:,}/{total:,} cards" if total > 0 else "Syncing visual index..."
                 with progress_lock:
-                    if percent < 100.0 and percent - last_reported_percent["value"] < 1.0:
-                        return
-                    last_reported_percent["value"] = percent
-                started_at = _parse_iso_datetime(self._read_state().get("last_started_at_utc"))
-                eta_seconds = _estimate_eta_seconds(started_at=started_at, current=current, total=total)
-                self._write_state(
-                    {
-                        **self._read_state(),
-                        "refreshing": True,
-                        "last_started_at_utc": self._read_state().get("last_started_at_utc"),
-                        "last_action": reason if reason != "manual" else "manual",
-                        "last_error": None,
-                        "progress_current": current,
-                        "progress_total": total,
-                        "progress_percent": round(percent, 2),
-                        "progress_eta_seconds": eta_seconds,
-                        "progress_eta_text": _format_eta_text(eta_seconds),
-                        "progress_message": message,
-                    }
-                )
+                    started_at = _parse_iso_datetime(self._read_state().get("last_started_at_utc"))
+                    eta_seconds = _estimate_eta_seconds(started_at=started_at, current=current, total=total)
+                    self._write_state(
+                        {
+                            **self._read_state(),
+                            "refreshing": True,
+                            "last_started_at_utc": self._read_state().get("last_started_at_utc"),
+                            "last_action": reason if reason != "manual" else "manual",
+                            "last_error": None,
+                            "progress_current": current,
+                            "progress_total": total,
+                            "progress_percent": round(percent, 2),
+                            "progress_eta_seconds": eta_seconds,
+                            "progress_eta_text": _format_eta_text(eta_seconds),
+                            "progress_message": message,
+                        }
+                    )
 
             if full_rebuild:
                 result = build_visual_index_from_catalog(
