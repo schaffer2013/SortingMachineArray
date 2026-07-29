@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import time
 from pathlib import Path
 
@@ -84,6 +85,7 @@ def test_build_visual_index_from_catalog_uses_project_root_and_builds_index(tmp_
     assert result.metadata_path == metadata_path
     assert index_path.is_file()
     assert metadata_path.is_file()
+    assert not (project_root / "data/index/visual_index_checkpoint.sqlite3").exists()
     assert len(metadata_path.read_text(encoding="utf-8").splitlines()) == 2
     assert (project_root / "data/index/reference_images").is_dir()
     assert progress_calls[0] == (0, 2, "Preparing 2 cards")
@@ -164,6 +166,7 @@ def test_refresh_visual_index_from_catalog_appends_new_cards(tmp_path, monkeypat
     assert result.downloaded_count == 1
     assert len(loaded.metadata) == 2
     assert [item["name"] for item in loaded.metadata] == ["Alpha", "Beta"]
+    assert not (project_root / "data/index/visual_index_checkpoint.sqlite3").exists()
 
 
 def test_refresh_visual_index_from_catalog_requires_full_rebuild_for_removed_cards(tmp_path, monkeypatch):
@@ -215,6 +218,71 @@ def test_refresh_visual_index_from_catalog_requires_full_rebuild_for_removed_car
             reference_dir=reference_dir,
             overwrite_downloads=False,
         )
+
+
+def test_build_visual_index_from_catalog_leaves_checkpoint_when_interrupted(tmp_path, monkeypatch):
+    project_root = tmp_path
+    source_catalog = tmp_path / "data/catalog/default-cards.json"
+    source_catalog.parent.mkdir(parents=True, exist_ok=True)
+    source_catalog.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "Alpha",
+                    "id": "aaaaaaaa-0000-0000-0000-000000000001",
+                    "set": "alp",
+                    "collector_number": "1",
+                    "image_uris": {"png": "https://example.invalid/alpha.png"},
+                },
+                {
+                    "name": "Beta",
+                    "id": "bbbbbbbb-0000-0000-0000-000000000002",
+                    "set": "bet",
+                    "collector_number": "2",
+                    "image_uris": {"png": "https://example.invalid/beta.png"},
+                },
+            ],
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    index_path = tmp_path / "data/index/card_embeddings.npz"
+    metadata_path = tmp_path / "data/index/card_embeddings.jsonl"
+    reference_dir = tmp_path / "data/index/reference_images"
+
+    class FlakyEmbedder:
+        def __init__(self):
+            self.calls = 0
+
+        def embed(self, image):
+            self.calls += 1
+            if self.calls > 1:
+                raise RuntimeError("sync interrupted")
+            return np.array([float(image.mean())], dtype=np.float32)
+
+    monkeypatch.setattr(refresh_module, "create_embedder", lambda model, model_path: FlakyEmbedder())
+
+    def fake_download(image_url: str, output_path: Path) -> None:
+        _write_png(output_path, (255, 0, 0) if "alpha" in image_url else (0, 0, 255))
+
+    monkeypatch.setattr(refresh_module, "_download", fake_download)
+
+    with pytest.raises(RuntimeError, match="sync interrupted"):
+        refresh_module.build_visual_index_from_catalog(
+            project_root=project_root,
+            source_catalog_path=source_catalog,
+            index_path=index_path,
+            metadata_path=metadata_path,
+            reference_dir=reference_dir,
+            overwrite_downloads=True,
+        )
+
+    checkpoint_path = project_root / "data/index/visual_index_checkpoint.sqlite3"
+    assert checkpoint_path.is_file()
+    with sqlite3.connect(checkpoint_path) as conn:
+        assert refresh_module._checkpoint_card_count(conn) == 1
+    assert not index_path.exists()
+    assert not metadata_path.exists()
 
 
 def test_visual_index_manager_refreshes_in_background(tmp_path, monkeypatch):
