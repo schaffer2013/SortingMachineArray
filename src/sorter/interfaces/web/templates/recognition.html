@@ -14,7 +14,13 @@
     <form id="recognition-form">
       <label>Image<input name="image" type="file" accept="image/*"></label>
       <div class="form-grid">
-        <label>Backend<input name="backend" placeholder="moss_machine"></label>
+        <label>Backend
+          <select name="backend">
+            {% for backend in recognition_backends %}
+            <option value="{{ backend }}"{% if backend == selected_recognition_backend %} selected{% endif %}>{{ backend }}</option>
+            {% endfor %}
+          </select>
+        </label>
         <label>Mode
           <select name="mode">
             <option>greenfield</option>
