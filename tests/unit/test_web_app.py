@@ -942,6 +942,7 @@ def test_hardware_panels_are_grouped_by_domain():
     assert b'value="95"' in machine.data
     assert b'name="backend"' in recognition.data
     assert b'<option value="fuzzy_enigma"' in recognition.data
+    assert b'<option value="visual_retrieval"' in recognition.data
     assert b'<option value="moss_machine"' in recognition.data
     assert b'<option value="sim_truth"' in recognition.data
     assert b'name="moss_threshold" type="number" min="1" max="80" step="1" value="80"' in recognition.data
