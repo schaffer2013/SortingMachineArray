@@ -31,6 +31,18 @@ def _png_bytes(color: tuple[int, int, int] = (0, 255, 0)) -> bytes:
     return encoded.tobytes()
 
 
+class _NoopRateLimiter:
+    def __init__(self) -> None:
+        self.acquire_count = 0
+        self.penalties: list[tuple[float, bool]] = []
+
+    def acquire(self) -> None:
+        self.acquire_count += 1
+
+    def penalize(self, seconds: float, *, slow_down: bool = False) -> None:
+        self.penalties.append((seconds, slow_down))
+
+
 def test_visual_index_policy_round_trip(tmp_path):
     config_path = tmp_path / "engine.json"
     config_path.write_text(json.dumps({"recognition_backend": "visual_retrieval"}, indent=2), encoding="utf-8")
@@ -303,11 +315,17 @@ def test_download_image_bytes_retries_transient_http_error(monkeypatch):
         return FakeResponse(_png_bytes((9, 9, 9)))
 
     monkeypatch.setattr(refresh_module, "urlopen", fake_urlopen)
+    monkeypatch.setattr(refresh_module.time, "sleep", lambda _seconds: None)
+    limiter = _NoopRateLimiter()
 
-    payload = refresh_module._download_image_bytes("https://example.invalid/retry.png")
+    payload = refresh_module._download_image_bytes(
+        "https://example.invalid/retry.png",
+        rate_limiter=limiter,
+    )
 
     assert attempts == ["https://example.invalid/retry.png", "https://example.invalid/retry.png"]
     assert payload == _png_bytes((9, 9, 9))
+    assert limiter.acquire_count == 2
 
 
 def test_download_image_bytes_does_not_retry_permanent_404(monkeypatch):
@@ -318,25 +336,87 @@ def test_download_image_bytes_does_not_retry_permanent_404(monkeypatch):
         raise HTTPError(request.full_url, 404, "Not Found", hdrs=None, fp=None)
 
     monkeypatch.setattr(refresh_module, "urlopen", fake_urlopen)
+    limiter = _NoopRateLimiter()
 
     with pytest.raises(HTTPError) as error:
-        refresh_module._download_image_bytes("https://example.invalid/missing.png")
+        refresh_module._download_image_bytes(
+            "https://example.invalid/missing.png",
+            rate_limiter=limiter,
+        )
 
     assert error.value.code == 404
     assert attempts == ["https://example.invalid/missing.png"]
+    assert limiter.acquire_count == 1
+
+
+def test_download_image_bytes_honors_429_cooldown_and_slows_rate(monkeypatch):
+    attempts = 0
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return _png_bytes((1, 2, 3))
+
+    def fake_urlopen(request, timeout=30):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise HTTPError(
+                request.full_url,
+                429,
+                "Too Many Requests",
+                hdrs={"Retry-After": "20"},
+                fp=None,
+            )
+        return FakeResponse()
+
+    limiter = _NoopRateLimiter()
+    monkeypatch.setattr(refresh_module, "urlopen", fake_urlopen)
+
+    payload = refresh_module._download_image_bytes(
+        "https://example.invalid/rate-limited.jpg",
+        rate_limiter=limiter,
+    )
+
+    assert payload == _png_bytes((1, 2, 3))
+    assert limiter.acquire_count == 2
+    assert limiter.penalties == [(20.0, True)]
+
+
+def test_extract_image_urls_prefers_normal_jpeg_before_larger_formats():
+    card = {
+        "image_uris": {
+            "png": "https://example.invalid/card.png",
+            "large": "https://example.invalid/card-large.jpg",
+            "normal": "https://example.invalid/card-normal.jpg",
+            "small": "https://example.invalid/card-small.jpg",
+        }
+    }
+
+    assert refresh_module._extract_image_urls(card) == [
+        "https://example.invalid/card-normal.jpg",
+        "https://example.invalid/card-large.jpg",
+        "https://example.invalid/card-small.jpg",
+        "https://example.invalid/card.png",
+    ]
 
 
 def test_load_reference_image_for_card_uses_fallback_url(tmp_path, monkeypatch):
     card = {
         "name": "Crowded Crypt",
         "image_uris": {
-            "png": "https://example.invalid/crowded-crypt.png",
+            "normal": "https://example.invalid/crowded-crypt-missing.jpg",
             "large": "https://example.invalid/crowded-crypt-large.jpg",
         },
     }
 
     def fake_download(image_url: str) -> bytes:
-        if image_url.endswith(".png"):
+        if "missing" in image_url:
             raise HTTPError(image_url, 404, "Not Found", hdrs=None, fp=None)
         return _png_bytes((7, 8, 9))
 
@@ -355,7 +435,7 @@ def test_load_reference_image_for_card_uses_fallback_url(tmp_path, monkeypatch):
     failed = next(event for event in events if event["event"] == "image_download_failed")
     assert failed["http_status"] == 404
     assert failed["http_reason"] == "Not Found"
-    assert failed["image_url"] == "https://example.invalid/crowded-crypt.png"
+    assert failed["image_url"] == "https://example.invalid/crowded-crypt-missing.jpg"
     assert events[-1]["event"] == "image_download_succeeded"
 
 
@@ -399,6 +479,56 @@ def test_build_visual_index_checkpoints_and_skips_permanent_image_failure(tmp_pa
     assert result.skipped_count == 1
     assert not (tmp_path / "data/index/visual_index_checkpoint.sqlite3").exists()
     assert not (tmp_path / "data/index/visual_index_sync.jsonl").exists()
+
+
+def test_build_visual_index_prefetches_downloads_and_preserves_source_order(tmp_path, monkeypatch):
+    source_catalog = tmp_path / "data/catalog/default-cards.json"
+    source_catalog.parent.mkdir(parents=True, exist_ok=True)
+    source_catalog.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "First",
+                    "id": "first-card",
+                    "image_uris": {"normal": "https://example.invalid/first.jpg"},
+                },
+                {
+                    "name": "Second",
+                    "id": "second-card",
+                    "image_uris": {"normal": "https://example.invalid/second.jpg"},
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    started_lock = threading.Lock()
+    both_started = threading.Event()
+    started_count = 0
+
+    def fake_download(_image_url: str) -> bytes:
+        nonlocal started_count
+        with started_lock:
+            started_count += 1
+            if started_count == 2:
+                both_started.set()
+        assert both_started.wait(timeout=2.0)
+        return _png_bytes()
+
+    monkeypatch.setattr(refresh_module, "_download_image_bytes", fake_download)
+    result = refresh_module.build_visual_index_from_catalog(
+        project_root=tmp_path,
+        source_catalog_path=source_catalog,
+        index_path=tmp_path / "data/index/card_embeddings.npz",
+        metadata_path=tmp_path / "data/index/card_embeddings.jsonl",
+        reference_dir=tmp_path / "data/index/reference_images",
+    )
+    metadata = [
+        json.loads(line)
+        for line in result.metadata_path.read_text(encoding="utf-8").splitlines()
+    ]
+
+    assert started_count == 2
+    assert [item["name"] for item in metadata] == ["First", "Second"]
 
 
 def test_refresh_visual_index_from_catalog_requires_full_rebuild_for_removed_cards(tmp_path, monkeypatch):
