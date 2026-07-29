@@ -2503,7 +2503,7 @@ window.SorterPages = {
         ].map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
       }
       if (visualIndexMessage) visualIndexMessage.textContent = visualIndex.message || "";
-      if (visualIndexRefreshing) {
+      if (visualRefreshing) {
         if (!visualIndexPollTimer) {
           visualIndexPollTimer = setInterval(async () => {
             try {
