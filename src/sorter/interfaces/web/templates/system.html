@@ -17,28 +17,35 @@
     </div>
     <p id="system-message" class="muted"></p>
   </article>
-    <article class="panel">
+  <article class="panel">
       <p class="eyebrow">Runtime</p>
       <h2>Runtime mode</h2>
-      <p class="muted">
-      Choose hardware or simulation. The current status is shown below in one line.
-      </p>
-    <label>Mode
-      <select id="runtime-mode">
-        <option value="hardware">Hardware</option>
-        <option value="simulation">Simulation</option>
-      </select>
-    </label>
-    <button id="runtime-apply" type="button">Apply runtime</button>
-    <label>Theme
-      <select id="theme-mode">
-        <option value="dark">Dark</option>
-        <option value="light">Light</option>
-      </select>
-    </label>
-    <button id="theme-apply" type="button" class="secondary">Apply theme</button>
-    <p id="runtime-message" class="muted"></p>
-    <pre id="system-raw" class="code-block"></pre>
+      <p class="muted">Choose hardware or simulation. Status stays on one line.</p>
+    <div class="stacked-copy">
+      <label>Mode
+        <select id="runtime-mode">
+          <option value="hardware">Hardware</option>
+          <option value="simulation">Simulation</option>
+        </select>
+      </label>
+      <div class="button-row compact-button-row">
+        <button id="runtime-apply" type="button">Apply runtime</button>
+      </div>
+      <label>Theme
+        <select id="theme-mode">
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
+        </select>
+      </label>
+      <div class="button-row compact-button-row">
+        <button id="theme-apply" type="button" class="secondary">Apply theme</button>
+      </div>
+      <p id="runtime-message" class="muted"></p>
+      <details class="runtime-debug">
+        <summary>Runtime debug JSON</summary>
+        <pre id="system-raw" class="code-block compact-code-block"></pre>
+      </details>
+    </div>
   </article>
 </section>
 <section class="two-column">
