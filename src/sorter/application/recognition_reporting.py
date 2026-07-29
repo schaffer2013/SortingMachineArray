@@ -19,6 +19,8 @@ _REVIEW_REASON_FAMILIES = {
     "recognition_confirmation_contradiction": "perception",
     "recognition_false_empty": "perception",
     "confidence_below_threshold": "policy",
+    "candidate_pool_not_in_catalog": "policy",
+    "visual_candidate_pool_miss": "policy",
 }
 
 
@@ -66,6 +68,10 @@ def recommend_recovery_action(frame, result) -> str | None:
         return "attach_expected_card_or_switch_mode"
     if reason == "expected_card_not_found":
         return "verify_expected_identity_against_catalog"
+    if reason == "candidate_pool_not_in_catalog":
+        return "verify_candidate_pool_against_catalog"
+    if reason == "visual_candidate_pool_miss":
+        return "verify_candidate_pool_against_visual_index"
     if reason == "expected_card_contradicted":
         return "operator_confirm_or_retry_confirmation"
     if reason in {"candidate_tie_unresolved", "recognition_ambiguous_candidates"}:

@@ -649,9 +649,12 @@ def _openapi_schema_for_route(endpoint: str, method: str, path: str) -> dict[str
                 "prefer_visual_small_pool": {"type": "boolean"},
                 "use_tracked_pool": {"type": "boolean"},
                 "track_result": {"type": "boolean"},
+                "candidate_pool": {"type": "string"},
             },
             "additionalProperties": True,
         }
+    if endpoint == "api_recognition_tracked_pool":
+        return {"type": "object", "properties": {}, "additionalProperties": True}
     return {"type": "object", "additionalProperties": True}
 
 
@@ -2254,6 +2257,15 @@ class WebRuntime:
             "suggestions": suggestions,
         }
 
+    def recognition_tracked_pool_payload(self) -> dict[str, Any]:
+        recognizer = getattr(self.orchestrator, "recognizer", None)
+        getter = getattr(recognizer, "get_tracked_pool_entries", None)
+        entries = list(getter()) if callable(getter) else []
+        return {
+            "count": len(entries),
+            "entries": [asdict(entry) if hasattr(entry, "__dataclass_fields__") else entry for entry in entries],
+        }
+
     def recognize_uploaded_image(self, image_path: Path, request_payload: dict[str, Any]) -> dict[str, Any]:
         return self._recognize_image(image_path, request_payload, camera_id="web_upload", source_mode="manual_web")
 
@@ -2942,6 +2954,9 @@ def create_web_app(
             "use_tracked_pool": request.form.get("use_tracked_pool") == "true",
             "track_result": request.form.get("track_result") == "true",
         }
+        candidate_pool = request.form.get("candidate_pool", "").strip()
+        if candidate_pool:
+            payload["candidate_pool"] = candidate_pool
         crop = _crop_payload_from_form(request.form)
         if crop is not None:
             payload["crop"] = crop
@@ -2972,6 +2987,10 @@ def create_web_app(
             return jsonify({"ok": True, "result": result})
         except Exception as exc:
             return jsonify({"ok": False, "message": str(exc)}), 500
+
+    @app.get("/api/recognition/tracked-pool")
+    def api_recognition_tracked_pool():
+        return jsonify(runtime.recognition_tracked_pool_payload())
 
     @app.get("/api/runs")
     def api_runs():

@@ -33,6 +33,7 @@
         <label>Expected name<input name="expected_name"></label>
         <label>Expected set<input name="expected_set"></label>
         <label>Collector #<input name="expected_collector"></label>
+        <label>Candidate pool<textarea name="candidate_pool" rows="4" placeholder="One card per line. Use Name | Set | Collector or JSON like [{&quot;name&quot;:&quot;Opt&quot;,&quot;set_code&quot;:&quot;M11&quot;,&quot;collector_number&quot;:&quot;73&quot;}]"></textarea></label>
       </div>
       <div class="checkbox-row">
         <label><input type="checkbox" name="prefer_visual_small_pool"> Prefer visual small pool</label>
@@ -44,6 +45,16 @@
         <button class="secondary" data-recognition-source="camera">Use live camera</button>
       </div>
     </form>
+    <div class="stacked-copy" style="margin-top: 1rem;">
+      <div class="panel-heading compact-heading">
+        <div>
+          <p class="eyebrow">Small pool</p>
+          <h3>Available candidates</h3>
+        </div>
+        <span id="recognition-pool-count" class="pill subtle-pill">0</span>
+      </div>
+      <div id="recognition-pool" class="muted">Loading tracked pool…</div>
+    </div>
   </article>
 </section>
 <section class="panel">

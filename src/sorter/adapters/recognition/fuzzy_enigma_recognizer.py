@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import importlib
 import importlib.util
 import os
@@ -135,6 +136,7 @@ class FuzzyEnigmaRecognizerAdapter:
         self._mode = mode
         self._prefer_visual_small_pool = prefer_visual_small_pool
         self._expected_card_from_values = modules.operational_modes.expected_card_from_values
+        self._candidate_pool_cls = getattr(modules.operational_modes, "CandidatePool", None)
         self._recognizer = modules.sortingmachine.SortingMachineRecognizer(
             config=config,
             auto_track_results=auto_track_results,
@@ -184,6 +186,8 @@ class FuzzyEnigmaRecognizerAdapter:
 
         use_tracked_pool = request.get("use_tracked_pool")
         track_result = request.get("track_result")
+        candidate_pool_payload = request.get("candidate_pool")
+        candidate_pool = None
         expected_card_payload = request.get("expected_card")
         expected_card = None
         if isinstance(expected_card_payload, dict):
@@ -194,6 +198,38 @@ class FuzzyEnigmaRecognizerAdapter:
                 set_code=expected_card_payload.get("set_code"),
                 collector_number=expected_card_payload.get("collector_number"),
             )
+        if candidate_pool_payload not in (None, "", []):
+            try:
+                candidate_pool = self._candidate_pool_from_request(
+                    candidate_pool_payload,
+                    catalog=self._recognizer._load_catalog(),
+                    candidate_pool_cls=self._candidate_pool_cls,
+                )
+            except ValueError as exc:
+                error_message = str(exc)
+                error_code = _engine_error_code(error_message)
+                if error_code is None:
+                    raise
+                return RecognitionResult(
+                    card_name=None,
+                    confidence=0.0,
+                    backend=requested_backend or self.card_engine_requested_backend,
+                    requested_mode=requested_mode,
+                    effective_mode=requested_mode,
+                    failure_code=error_code,
+                    review_reason=error_code,
+                    needs_review=True,
+                    mode_features=_mode_features(
+                        mode_flags=None,
+                        pipeline_summary={"resolution_path": "precondition_failed"},
+                        prefer_visual_small_pool=prefer_visual_small_pool,
+                    ),
+                    pipeline_summary={"resolution_path": "precondition_failed"},
+                    debug={
+                        "engine_error_code": error_code,
+                        "engine_error": error_message,
+                    },
+                )
 
         previous_bytecode_env = _disable_bytecode_for_moss_subprocess(
             requested_backend or self.card_engine_requested_backend
@@ -205,6 +241,8 @@ class FuzzyEnigmaRecognizerAdapter:
                     frame.path,
                     mode=requested_mode,
                     expected_card=expected_card,
+                    candidate_pool=candidate_pool,
+                    candidate_pool_cls=self._candidate_pool_cls,
                     use_tracked_pool=use_tracked_pool,
                     track_result=track_result,
                     prefer_visual_small_pool=prefer_visual_small_pool,
@@ -286,6 +324,17 @@ class FuzzyEnigmaRecognizerAdapter:
             },
         )
 
+    def get_tracked_pool_entries(self) -> list[Any]:
+        getter = getattr(self._recognizer, "get_tracked_pool_entries", None)
+        if callable(getter):
+            return list(getter())
+        return []
+
+    def clear_tracked_pool(self) -> None:
+        clearer = getattr(self._recognizer, "clear_tracked_pool", None)
+        if callable(clearer):
+            clearer()
+
 
 def _progress_callback_from_value(value: Any):
     if callable(value):
@@ -294,6 +343,120 @@ def _progress_callback_from_value(value: Any):
     if callable(update):
         return update
     return None
+
+
+def _candidate_pool_from_request(value: Any, *, catalog: Any, candidate_pool_cls: Any):
+    if hasattr(value, "records"):
+        return value
+    entries = _normalize_candidate_pool_entries(value)
+    if not entries:
+        return None
+
+    resolved_records = []
+    seen: set[tuple[str, str | None, str | None]] = set()
+    for entry in entries:
+        for record in _resolve_candidate_pool_entry(catalog, entry):
+            key = (record.name, record.set_code, record.collector_number)
+            if key in seen:
+                continue
+            seen.add(key)
+            resolved_records.append(record)
+
+    if not resolved_records:
+        raise ValueError("Candidate pool did not resolve to any catalog records.")
+    if candidate_pool_cls is None:
+        raise ValueError("Candidate pool support is unavailable.")
+    return candidate_pool_cls.from_records(resolved_records)
+
+
+def _normalize_candidate_pool_entries(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    if isinstance(value, dict):
+        for key in ("cards", "records", "items"):
+            nested = value.get(key)
+            if isinstance(nested, (list, tuple)):
+                return list(nested)
+        return [value]
+    if not isinstance(value, str):
+        return []
+
+    text = value.strip()
+    if not text:
+        return []
+    if text[:1] in {"[", "{"}:
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = None
+        else:
+            return _normalize_candidate_pool_entries(parsed)
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def _resolve_candidate_pool_entry(catalog: Any, entry: Any):
+    if isinstance(entry, dict):
+        scryfall_id = str(entry.get("scryfall_id") or "").strip()
+        if scryfall_id:
+            record = catalog.find_record_by_scryfall_id(scryfall_id)
+            return [record] if record is not None else []
+        oracle_id = str(entry.get("oracle_id") or "").strip()
+        if oracle_id:
+            records = catalog.records_for_oracle_id(oracle_id)
+            set_code = str(entry.get("set_code") or "").strip().lower()
+            collector_number = str(entry.get("collector_number") or "").strip().lower()
+            if set_code or collector_number:
+                records = [
+                    record
+                    for record in records
+                    if (not set_code or (record.set_code or "").lower() == set_code)
+                    and (not collector_number or str(record.collector_number or "").lower() == collector_number)
+                ]
+            return records
+        name = str(entry.get("name") or "").strip()
+        if name:
+            set_code = str(entry.get("set_code") or "").strip()
+            collector_number = str(entry.get("collector_number") or "").strip()
+            if set_code or collector_number:
+                record = catalog.find_record(
+                    name=name,
+                    set_code=set_code or None,
+                    collector_number=collector_number or None,
+                )
+                return [record] if record is not None else []
+            return list(catalog.exact_lookup(name))
+        return []
+
+    if isinstance(entry, str):
+        text = entry.strip()
+        if not text:
+            return []
+        if "|" in text:
+            parts = [part.strip() for part in text.split("|")]
+            while len(parts) < 3:
+                parts.append("")
+            name, set_code, collector_number = parts[:3]
+            if not name:
+                return []
+            if set_code or collector_number:
+                record = catalog.find_record(
+                    name=name,
+                    set_code=set_code or None,
+                    collector_number=collector_number or None,
+                )
+                return [record] if record is not None else []
+            return list(catalog.exact_lookup(name))
+        if text.lower().startswith("scryfall_id:"):
+            record = catalog.find_record_by_scryfall_id(text.split(":", 1)[1].strip())
+            return [record] if record is not None else []
+        if text.lower().startswith("oracle_id:"):
+            return list(catalog.records_for_oracle_id(text.split(":", 1)[1].strip()))
+        return list(catalog.exact_lookup(text))
+
+    return []
+
 
 
 def _disable_bytecode_for_moss_subprocess(backend: str | None) -> str | object:
@@ -322,6 +485,8 @@ def _recognize_card_engine_detailed(
     *,
     mode: str,
     expected_card: Any,
+    candidate_pool: Any,
+    candidate_pool_cls: Any,
     use_tracked_pool: Any,
     track_result: Any,
     prefer_visual_small_pool: bool,
@@ -333,6 +498,7 @@ def _recognize_card_engine_detailed(
             image_path,
             mode=mode,
             expected_card=expected_card,
+            candidate_pool=candidate_pool,
             use_tracked_pool=use_tracked_pool,
             track_result=track_result,
             progress_callback=progress_callback,
@@ -342,6 +508,7 @@ def _recognize_card_engine_detailed(
     kwargs = {
         "mode": mode,
         "expected_card": expected_card,
+        "candidate_pool": candidate_pool,
         "use_tracked_pool": use_tracked_pool,
         "track_result": track_result,
         "detailed": True,
@@ -369,6 +536,8 @@ def _engine_error_code(message: str) -> str | None:
         return "missing_tracked_pool"
     if "requires an expected_card." in message:
         return "missing_expected_card"
+    if "Candidate pool did not resolve to any catalog records." in message:
+        return "candidate_pool_not_in_catalog"
     if "No catalog records found for expected card:" in message:
         return "expected_card_not_in_catalog"
     return None

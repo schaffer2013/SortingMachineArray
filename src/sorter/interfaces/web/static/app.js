@@ -1676,6 +1676,8 @@ window.SorterPages = {
     const resultSummary = document.querySelector("#recognition-summary");
     const cameraFeed = document.querySelector("#recognition-camera-feed");
     const cameraRefresh = document.querySelector("#recognition-camera-refresh");
+    const recognitionPool = document.querySelector("#recognition-pool");
+    const recognitionPoolCount = document.querySelector("#recognition-pool-count");
     const cropTool = createSkewCropTool({
       feed: cameraFeed,
       cropStage: document.querySelector("#recognition-crop-stage"),
@@ -1705,6 +1707,27 @@ window.SorterPages = {
           ? `No exact match. Suggestions: ${data.suggestions.join(", ")}`
           : "No exact match.";
     };
+    async function refreshRecognitionPool() {
+      try {
+        const data = await json("/api/recognition/tracked-pool");
+        const entries = Array.isArray(data.entries) ? data.entries : [];
+        recognitionPoolCount.textContent = String(data.count ?? entries.length ?? 0);
+        recognitionPool.innerHTML = entries.length
+          ? `<ul class="compact-list">${entries.map(entry => {
+              const label = [
+                entry.name,
+                entry.set_code || "",
+                entry.collector_number ? `#${entry.collector_number}` : "",
+              ].filter(Boolean).join(" · ");
+              const suffix = entry.has_observed_art_fingerprint ? " · art fingerprint" : "";
+              return `<li>${escapeHtml(label)}${escapeHtml(suffix)}</li>`;
+            }).join("")}</ul>`
+          : `<span class="muted">No tracked candidates yet.</span>`;
+      } catch (error) {
+        recognitionPoolCount.textContent = "!";
+        recognitionPool.textContent = error.message;
+      }
+    }
     form.onsubmit = async event => {
       event.preventDefault();
       const data = new FormData(form);
@@ -1729,11 +1752,14 @@ window.SorterPages = {
       if (body.ok) {
         renderRecognitionSummary(resultSummary, body.result);
         result.textContent = pretty(body.result);
+        refreshRecognitionPool();
       } else {
         resultSummary.hidden = true;
         result.textContent = body.message;
       }
     };
+    refreshRecognitionPool();
+    setInterval(refreshRecognitionPool, 15000);
   },
   cardBackTraining() {
     const modelSelect = document.querySelector("#training-model-select");
