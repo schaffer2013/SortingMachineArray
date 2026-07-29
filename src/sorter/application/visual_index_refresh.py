@@ -40,6 +40,7 @@ DEFAULT_VISUAL_METADATA_PATH = Path("data/index/card_embeddings.jsonl")
 DEFAULT_VISUAL_INDEX_STATE_PATH = Path("data/index/visual_index_state.json")
 DEFAULT_VISUAL_INDEX_CHECKPOINT_PATH = Path("data/index/visual_index_checkpoint.sqlite3")
 DEFAULT_VISUAL_INDEX_REFERENCE_DIR = Path("data/index/reference_images")
+VISUAL_INDEX_PROGRESS_HEARTBEAT_STALE_SECONDS = 120.0
 REQUEST_HEADERS = {
     "User-Agent": "card-sorter-testbed/0.8.10 (+visual index refresh)",
     "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
@@ -226,10 +227,10 @@ def _run_checkpointed_visual_index_job(
                 progress_callback(
                     processed_count,
                     len(job_entries),
-                    f"Resuming {processed_count:,}/{len(job_entries):,} {progress_label}",
+                    f"Resuming {processed_count:,}/{len(job_entries):,} {progress_label} from checkpoint",
                 )
             else:
-                progress_callback(0, len(job_entries), f"Preparing {len(job_entries):,} {progress_label}")
+                progress_callback(0, len(job_entries), f"Parsing catalog and preparing {len(job_entries):,} {progress_label}")
 
         embedder = create_embedder(model, model_path)
         downloaded = 0
@@ -238,9 +239,16 @@ def _run_checkpointed_visual_index_job(
         for ordinal, card_key, card in job_entries:
             if card_key in resumable_rows:
                 continue
+            card_name = str(card.get("name") or card_key or f"card {ordinal + 1}")
             image_url = _extract_image_url(card)
             if not image_url:
                 continue
+            if progress_callback is not None:
+                progress_callback(
+                    processed_count,
+                    len(job_entries),
+                    f"Downloading {progress_label[:-1] if progress_label.endswith('s') else progress_label} {ordinal + 1:,}/{len(job_entries):,}: {card_name}",
+                )
             reference_path = reference_dir / _reference_file_name(card, image_url)
             reference_path.parent.mkdir(parents=True, exist_ok=True)
             if overwrite_downloads or not reference_path.exists():
@@ -248,8 +256,20 @@ def _run_checkpointed_visual_index_job(
                 downloaded += 1
             else:
                 reused += 1
+            if progress_callback is not None:
+                progress_callback(
+                    processed_count,
+                    len(job_entries),
+                    f"Embedding {progress_label[:-1] if progress_label.endswith('s') else progress_label} {ordinal + 1:,}/{len(job_entries):,}: {card_name}",
+                )
             image = _load_image(reference_path)
             vector = embedder.embed(image)
+            if progress_callback is not None:
+                progress_callback(
+                    processed_count,
+                    len(job_entries),
+                    f"Saving checkpoint for {card_name}",
+                )
             metadata = {
                 "name": card.get("name"),
                 "scryfall_id": card.get("id") or card.get("scryfall_id"),
@@ -282,6 +302,12 @@ def _run_checkpointed_visual_index_job(
                 )
 
         final_rows = [resumable_rows[card_key] for _, card_key, _ in sorted(job_entries, key=lambda item: item[0])]
+        if progress_callback is not None:
+            progress_callback(
+                len(final_rows),
+                len(job_entries),
+                f"Finalizing {progress_label} index",
+            )
         if existing_index is None:
             embeddings = np.vstack([row["embedding"] for row in final_rows])
             metadata = [row["metadata"] for row in final_rows]
@@ -488,6 +514,7 @@ class VisualIndexRefreshManager:
                 "progress_eta_seconds": state.get("progress_eta_seconds"),
                 "progress_eta_text": state.get("progress_eta_text"),
                 "progress_message": state.get("progress_message"),
+                "last_heartbeat_at_utc": state.get("last_heartbeat_at_utc"),
                 "needs_refresh": needs_refresh,
                 "requires_full_rebuild": rebuild_required,
                 "running": running,
@@ -566,16 +593,17 @@ class VisualIndexRefreshManager:
                 **self._read_state(),
                 "refreshing": True,
                 "last_started_at_utc": _utc_now_iso(),
-                "last_action": "refreshing" if force else reason,
-                "last_error": None,
-                "requires_full_rebuild": False,
-                "progress_current": 0,
-                "progress_total": None,
-                "progress_percent": 0.0,
-                "progress_eta_seconds": None,
-                "progress_eta_text": "ETA unavailable",
-                "progress_message": "Starting sync...",
-            }
+            "last_action": "refreshing" if force else reason,
+            "last_error": None,
+            "requires_full_rebuild": False,
+            "progress_current": 0,
+            "progress_total": None,
+            "progress_percent": 0.0,
+            "progress_eta_seconds": None,
+            "progress_eta_text": "ETA unavailable",
+            "progress_message": "Starting sync...",
+            "last_heartbeat_at_utc": _utc_now_iso(),
+        }
         )
         self._refresh_thread = threading.Thread(
             target=self._refresh_worker,
@@ -595,6 +623,7 @@ class VisualIndexRefreshManager:
                     percent = 0.0
                 if message is None:
                     message = f"Indexed {current:,}/{total:,} cards" if total > 0 else "Syncing visual index..."
+                heartbeat_at = _utc_now_iso()
                 with progress_lock:
                     started_at = _parse_iso_datetime(self._read_state().get("last_started_at_utc"))
                     eta_seconds = _estimate_eta_seconds(started_at=started_at, current=current, total=total)
@@ -611,6 +640,7 @@ class VisualIndexRefreshManager:
                             "progress_eta_seconds": eta_seconds,
                             "progress_eta_text": _format_eta_text(eta_seconds),
                             "progress_message": message,
+                            "last_heartbeat_at_utc": heartbeat_at,
                         }
                     )
 
@@ -714,7 +744,16 @@ class VisualIndexRefreshManager:
         state: dict[str, Any],
     ) -> str:
         if refreshing:
-            return "Visual index sync is running in the background."
+            progress = self._progress_payload(state, refreshing=refreshing)
+            heartbeat = _parse_iso_datetime(state.get("last_heartbeat_at_utc"))
+            heartbeat_age = _seconds_since(heartbeat)
+            heartbeat_note = ""
+            if heartbeat_age is not None and heartbeat_age >= VISUAL_INDEX_PROGRESS_HEARTBEAT_STALE_SECONDS:
+                heartbeat_minutes = max(1, int(round(heartbeat_age / 60.0)))
+                heartbeat_note = f" Last heartbeat {heartbeat_minutes} minute{'s' if heartbeat_minutes != 1 else ''} ago."
+            phase = progress.get("message")
+            phase_note = f" {phase}" if phase else ""
+            return f"Visual index sync is running in the background.{phase_note}{heartbeat_note}"
         if requires_full_rebuild:
             return "The visual index needs a full rebuild because the source catalog changed in a non-additive way."
         if self._refresh_error or state.get("last_error"):
@@ -1022,6 +1061,12 @@ def _format_eta_text(seconds: float | None) -> str:
     if hours < 1:
         return f"about {minutes} minute{'s' if minutes != 1 else ''} left"
     return f"about {hours} hour{'s' if hours != 1 else ''} {remainder:02d} minutes left"
+
+
+def _seconds_since(earlier: datetime | None) -> float | None:
+    if earlier is None:
+        return None
+    return max(0.0, (datetime.now(UTC) - earlier).total_seconds())
 
 
 def _state_age_days(state: dict[str, Any]) -> float | None:

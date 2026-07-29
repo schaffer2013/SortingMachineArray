@@ -88,7 +88,11 @@ def test_build_visual_index_from_catalog_uses_project_root_and_builds_index(tmp_
     assert not (project_root / "data/index/visual_index_checkpoint.sqlite3").exists()
     assert len(metadata_path.read_text(encoding="utf-8").splitlines()) == 2
     assert (project_root / "data/index/reference_images").is_dir()
-    assert progress_calls[0] == (0, 2, "Preparing 2 cards")
+    assert progress_calls[0] == (0, 2, "Parsing catalog and preparing 2 cards")
+    assert any("Downloading card" in (message or "") for _, _, message in progress_calls)
+    assert any("Embedding card" in (message or "") for _, _, message in progress_calls)
+    assert any("Saving checkpoint for" in (message or "") for _, _, message in progress_calls)
+    assert any("Finalizing cards index" in (message or "") for _, _, message in progress_calls)
     assert progress_calls[-1][0] == 2
     assert progress_calls[-1][1] == 2
 
