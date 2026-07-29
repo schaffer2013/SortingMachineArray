@@ -88,7 +88,7 @@
     </div>
     <dl id="visual-index-details" class="metric-list"></dl>
     <div class="form-grid">
-      <label>Refresh after
+      <label>Sync after
         <select id="visual-index-refresh-days">
           <option value="1">1 day</option>
           <option value="3">3 days</option>
@@ -102,7 +102,7 @@
     </div>
     <div class="button-row">
       <button id="visual-index-save-policy" type="button" class="secondary">Save policy</button>
-      <button id="visual-index-refresh" type="button">Refresh now</button>
+      <button id="visual-index-refresh" type="button">Sync now</button>
     </div>
     <p id="visual-index-message" class="muted"></p>
   </article>
@@ -110,11 +110,11 @@
     <p class="eyebrow">Routing note</p>
     <h2>Backend coverage</h2>
     <p class="muted">
-      Visual retrieval uses the full card catalog index. When the index is stale, the web app can rebuild it while idle or on demand.
+      Visual retrieval uses the full card catalog index. When the catalog grows, the web app can sync the index while idle or on demand. Full rebuild is a separate maintenance action.
     </p>
     <dl class="metric-list">
       <div><dt>Options</dt><dd>1, 3, 7, 14, 30, 60, 90 days</dd></div>
-      <div><dt>Trigger</dt><dd>Manual or idle auto-refresh</dd></div>
+      <div><dt>Trigger</dt><dd>Manual or idle sync for additions</dd></div>
       <div><dt>Source</dt><dd>data/catalog/default-cards.json</dd></div>
     </dl>
   </article>

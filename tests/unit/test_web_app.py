@@ -1759,6 +1759,36 @@ def test_system_visual_index_refresh_endpoint_returns_refresh_status():
     assert payload["message"] == "started"
 
 
+def test_system_visual_index_rebuild_endpoint_requires_confirmation():
+    client = _client()
+
+    response = client.post("/api/system/visual-index/rebuild", json={"confirm": "not enough"})
+    payload = response.get_json()
+
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert "FULL REBUILD" in payload["message"]
+
+
+def test_system_visual_index_rebuild_endpoint_can_start_full_rebuild():
+    client = _client()
+    runtime = client.application.config["runtime"]
+    runtime.rebuild_visual_index = lambda confirm: {
+        "configured_refresh_days": 7,
+        "refreshing": True,
+        "message": f"rebuild started with {confirm}",
+        "refresh_options": [1, 3, 7, 14, 30, 60, 90],
+    }
+
+    response = client.post("/api/system/visual-index/rebuild", json={"confirm": "FULL REBUILD"})
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["configured_refresh_days"] == 7
+    assert payload["refreshing"] is True
+    assert payload["message"] == "rebuild started with FULL REBUILD"
+
+
 def test_calibration_can_be_updated_from_web_app(tmp_path):
     settings = _sim_truth_settings()
     orchestrator = build_sim_orchestrator(settings)

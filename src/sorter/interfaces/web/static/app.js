@@ -2479,6 +2479,7 @@ window.SorterPages = {
       const visualReady = Boolean(visualIndex.ready);
       const visualRefreshing = Boolean(visualIndex.refreshing);
       const visualNeedsRefresh = Boolean(visualIndex.needs_refresh);
+      const visualRequiresFullRebuild = Boolean(visualIndex.requires_full_rebuild);
       const progress = visualIndex.progress || {};
       const progressPercent = Number(progress.percent);
       const progressCurrent = Number(progress.current);
@@ -2487,10 +2488,24 @@ window.SorterPages = {
       const progressEta = progress.eta_text || "";
       const progressText = progressHasTotal && Number.isFinite(progressPercent)
         ? `${progressPercent.toFixed(1)}% (${Number.isFinite(progressCurrent) ? progressCurrent.toLocaleString() : "0"}/${progressTotal.toLocaleString()})${progressEta && progressEta !== "ETA unavailable" ? ` — ${progressEta}` : ""}`
-        : (visualRefreshing ? (progress.message || "Preparing refresh...") : "--");
+        : (visualRefreshing ? (progress.message || "Preparing sync...") : "--");
       if (visualIndexPill) {
-        visualIndexPill.textContent = visualRefreshing ? "Refreshing" : visualReady && !visualNeedsRefresh ? "Ready" : visualNeedsRefresh ? "Stale" : "Checking";
-        visualIndexPill.className = visualRefreshing || visualNeedsRefresh ? "pill warn-pill" : "pill good-pill";
+        visualIndexPill.textContent = visualRequiresFullRebuild
+          ? "Rebuild needed"
+          : visualRefreshing
+            ? "Refreshing"
+            : visualReady && !visualNeedsRefresh
+              ? "Ready"
+              : visualNeedsRefresh
+                ? "Stale"
+                : "Checking";
+        visualIndexPill.className = visualRefreshing || visualNeedsRefresh || visualRequiresFullRebuild ? "pill warn-pill" : "pill good-pill";
+      }
+      if (visualIndexRefresh) {
+        visualIndexRefresh.disabled = visualRefreshing || visualRequiresFullRebuild;
+        visualIndexRefresh.title = visualRequiresFullRebuild
+          ? "A full rebuild is required. Sync only checks for added cards."
+          : "";
       }
       if (visualIndexRefreshDays && visualIndex.configured_refresh_days) {
         visualIndexRefreshDays.value = String(visualIndex.configured_refresh_days);
@@ -2498,6 +2513,7 @@ window.SorterPages = {
       if (visualIndexDetails) {
         visualIndexDetails.innerHTML = [
           ["Status", visualIndex.message || "--"],
+          ["Mode", visualRequiresFullRebuild ? "Full rebuild required" : (visualRefreshing ? "Syncing additions" : "Incremental sync")],
           ["Policy", visualIndex.configured_refresh_days ? `${visualIndex.configured_refresh_days} days` : "--"],
           ["Age", formatDays(visualIndex.age_days)],
           ["Cards indexed", visualIndex.indexed_card_count ?? "--"],
@@ -2628,7 +2644,7 @@ window.SorterPages = {
     };
     visualIndexRefresh.onclick = async () => {
       visualIndexRefresh.disabled = true;
-      visualIndexMessage.textContent = "Starting visual index refresh...";
+      visualIndexMessage.textContent = "Starting visual index sync...";
       try {
         renderVisualIndex(await json("/api/system/visual-index/refresh", {method: "POST"}));
       } catch (error) {

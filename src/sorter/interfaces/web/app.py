@@ -2590,7 +2590,10 @@ class WebRuntime:
         )
 
     def refresh_visual_index(self) -> dict[str, Any]:
-        return self.visual_index.refresh(force=True)
+        return self.visual_index.refresh(force=False)
+
+    def rebuild_visual_index(self, confirm: str) -> dict[str, Any]:
+        return self.visual_index.rebuild(confirm=confirm)
 
     def set_visual_index_policy(self, refresh_days: int) -> dict[str, Any]:
         self.visual_index.save_policy(refresh_days)
@@ -2840,6 +2843,14 @@ def create_web_app(
     @app.post("/api/system/visual-index/refresh")
     def api_system_visual_index_refresh():
         return jsonify(runtime.refresh_visual_index())
+
+    @app.post("/api/system/visual-index/rebuild")
+    def api_system_visual_index_rebuild():
+        payload = request.get_json(silent=True) or {}
+        try:
+            return jsonify(runtime.rebuild_visual_index(str(payload.get("confirm", ""))))
+        except ValueError as exc:
+            return jsonify({"ok": False, "message": str(exc), "status": runtime.visual_index_status(refresh_if_idle=False)}), 400
 
     @app.post("/api/system/visual-index/policy")
     def api_system_visual_index_policy():

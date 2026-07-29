@@ -57,6 +57,117 @@ class VisualIndexBuildResult:
     refresh_days: int
 
 
+class FullVisualIndexRebuildRequired(RuntimeError):
+        """Raised when the existing visual index cannot be synced incrementally."""
+
+
+def _load_selected_catalog_cards(source_path: Path, *, limit: int | None = None) -> list[dict[str, Any]]:
+    payload = json.loads(source_path.read_text(encoding="utf-8"))
+    cards = payload if isinstance(payload, list) else payload.get("cards", [])
+    if not isinstance(cards, list):
+        raise ValueError(f"Catalog did not contain a card list: {source_path}")
+
+    selected_cards = [card for card in cards if isinstance(card, dict) and _extract_image_url(card)]
+    selected_cards.sort(
+        key=lambda card: (
+            str(card.get("set") or card.get("set_code") or "").lower(),
+            str(card.get("collector_number") or "").lower(),
+            str(card.get("name") or "").lower(),
+            str(card.get("id") or card.get("scryfall_id") or "").lower(),
+        )
+    )
+    if limit is not None:
+        selected_cards = selected_cards[: max(0, int(limit))]
+    return selected_cards
+
+
+def _visual_index_card_key(card: dict[str, Any]) -> str | None:
+    for field in ("id", "scryfall_id"):
+        value = card.get(field)
+        if isinstance(value, str) and value.strip():
+            return value.strip().lower()
+    set_code = str(card.get("set") or card.get("set_code") or "").strip().lower()
+    collector_number = str(card.get("collector_number") or "").strip().lower()
+    name = str(card.get("name") or "").strip().lower()
+    if any((set_code, collector_number, name)):
+        return "|".join((set_code, collector_number, name))
+    return None
+
+
+def _build_visual_index_from_cards(
+    *,
+    selected_cards: list[dict[str, Any]],
+    project_root: Path,
+    source_catalog_path: Path,
+    index_path: Path,
+    metadata_path: Path,
+    reference_dir: Path,
+    refresh_days: int,
+    model: str,
+    model_path: str | None,
+    overwrite_downloads: bool,
+    progress_callback: ProgressCallback | None,
+) -> VisualIndexBuildResult:
+    if not selected_cards:
+        raise ValueError("No cards with image URLs were found in the source catalog.")
+
+    embedder = create_embedder(model, model_path)
+    vectors: np.ndarray | None = None
+    metadata: list[dict[str, Any]] = []
+    downloaded = 0
+    reused = 0
+    if progress_callback is not None:
+        progress_callback(0, len(selected_cards), f"Preparing {len(selected_cards):,} cards")
+
+    for index, card in enumerate(selected_cards, start=0):
+        image_url = _extract_image_url(card)
+        if not image_url:
+            continue
+        reference_path = reference_dir / _reference_file_name(card, image_url)
+        if overwrite_downloads or not reference_path.exists():
+            _download(image_url, reference_path)
+            downloaded += 1
+        else:
+            reused += 1
+        image = _load_image(reference_path)
+        vector = embedder.embed(image)
+        if vectors is None:
+            vectors = np.empty((len(selected_cards), vector.shape[0]), dtype=np.float32)
+        vectors[index] = vector
+        metadata.append(
+            {
+                "name": card.get("name"),
+                "scryfall_id": card.get("id") or card.get("scryfall_id"),
+                "oracle_id": card.get("oracle_id"),
+                "set_code": card.get("set") or card.get("set_code"),
+                "collector_number": card.get("collector_number"),
+                "image_url": image_url,
+                "image_path": reference_path.relative_to(project_root).as_posix(),
+                "crop_type": "full_card",
+            }
+        )
+        if progress_callback is not None:
+            progress_callback(index + 1, len(selected_cards), f"Indexed {index + 1:,}/{len(selected_cards):,} cards")
+
+    if vectors is None:
+        raise ValueError("Visual index builder did not produce any embeddings.")
+
+    index = VisualIndex(vectors, metadata)
+    index.save(index_path, metadata_path)
+    updated_at = _utc_now_iso()
+    return VisualIndexBuildResult(
+        index_path=index_path,
+        metadata_path=metadata_path,
+        reference_dir=reference_dir,
+        source_catalog_path=source_catalog_path,
+        card_count=len(metadata),
+        downloaded_count=downloaded,
+        reused_count=reused,
+        updated_at_utc=updated_at,
+        refresh_days=_normalize_refresh_days(refresh_days),
+    )
+
+
 @dataclass
 class VisualIndexRefreshManager:
     project_root: Path
@@ -92,9 +203,10 @@ class VisualIndexRefreshManager:
             refresh_days = self.refresh_days()
             needs_refresh, age_days, reason = self._needs_refresh(refresh_days, state)
             refreshing = bool(state.get("refreshing")) or refresh_thread_alive
+            rebuild_required = bool(state.get("requires_full_rebuild"))
             ready = self.index_path.is_file() and self.metadata_path.is_file() and not needs_refresh
 
-            if auto_start and needs_refresh and not running and not refreshing:
+            if auto_start and needs_refresh and not running and not refreshing and not rebuild_required:
                 self._start_background_refresh(force=False, reason=reason)
                 refreshing = True
 
@@ -121,16 +233,20 @@ class VisualIndexRefreshManager:
                 "progress_eta_text": state.get("progress_eta_text"),
                 "progress_message": state.get("progress_message"),
                 "needs_refresh": needs_refresh,
+                "requires_full_rebuild": rebuild_required,
                 "running": running,
                 "refreshing": refreshing,
                 "ready": ready,
                 "progress": self._progress_payload(state, refreshing=refreshing),
-                "action": state.get("last_action") or ("refreshing" if refreshing else ("stale" if needs_refresh else "reuse")),
+                "action": state.get("last_action") or (
+                    "rebuild_required" if rebuild_required else ("refreshing" if refreshing else ("stale" if needs_refresh else "reuse"))
+                ),
                 "message": self._status_message(
                     running=running,
                     refreshing=refreshing,
                     ready=ready,
                     needs_refresh=needs_refresh,
+                    requires_full_rebuild=rebuild_required,
                     age_days=age_days,
                     reason=reason,
                     state=state,
@@ -140,19 +256,42 @@ class VisualIndexRefreshManager:
                 "source_catalog_size": state.get("source_catalog_size"),
             }
 
-    def refresh(self, *, force: bool = True) -> dict[str, Any]:
+    def refresh(self, *, force: bool = False) -> dict[str, Any]:
         with self._lock:
             if self._refresh_thread is not None and self._refresh_thread.is_alive():
                 return {
                     **self.status(running=False, auto_start=False),
                     "ok": True,
-                    "message": "Visual index refresh is already running.",
+                    "message": "Visual index sync is already running.",
                 }
-            self._start_background_refresh(force=force, reason="manual")
+            if self._read_state().get("requires_full_rebuild"):
+                return {
+                    **self.status(running=False, auto_start=False),
+                    "ok": False,
+                    "message": "A full rebuild is required before this index can be synced.",
+                }
+            self._start_background_refresh(force=force, reason="manual", full_rebuild=False)
             return {
                 **self.status(running=False, auto_start=False),
                 "ok": True,
-                "message": "Visual index refresh started.",
+                "message": "Visual index sync started.",
+            }
+
+    def rebuild(self, *, confirm: str) -> dict[str, Any]:
+        if confirm.strip() != "FULL REBUILD":
+            raise ValueError("Full rebuild confirmation must be 'FULL REBUILD'")
+        with self._lock:
+            if self._refresh_thread is not None and self._refresh_thread.is_alive():
+                return {
+                    **self.status(running=False, auto_start=False),
+                    "ok": True,
+                    "message": "Visual index sync is already running.",
+                }
+            self._start_background_refresh(force=True, reason="manual_rebuild", full_rebuild=True)
+            return {
+                **self.status(running=False, auto_start=False),
+                "ok": True,
+                "message": "Full visual index rebuild started.",
             }
 
     def maybe_refresh(self, *, running: bool, auto_start: bool = True) -> dict[str, Any]:
@@ -162,7 +301,7 @@ class VisualIndexRefreshManager:
         save_visual_index_policy(self.config_path, refresh_days)
         return self.status(running=False, auto_start=False)
 
-    def _start_background_refresh(self, *, force: bool, reason: str) -> None:
+    def _start_background_refresh(self, *, force: bool, reason: str, full_rebuild: bool) -> None:
         if self._refresh_thread is not None and self._refresh_thread.is_alive():
             return
         self._refresh_error = None
@@ -173,22 +312,23 @@ class VisualIndexRefreshManager:
                 "last_started_at_utc": _utc_now_iso(),
                 "last_action": "refreshing" if force else reason,
                 "last_error": None,
+                "requires_full_rebuild": False,
                 "progress_current": 0,
                 "progress_total": None,
                 "progress_percent": 0.0,
                 "progress_eta_seconds": None,
                 "progress_eta_text": "ETA unavailable",
-                "progress_message": "Starting refresh...",
+                "progress_message": "Starting sync...",
             }
         )
         self._refresh_thread = threading.Thread(
             target=self._refresh_worker,
-            kwargs={"force": force, "reason": reason},
+            kwargs={"force": force, "reason": reason, "full_rebuild": full_rebuild},
             daemon=True,
         )
         self._refresh_thread.start()
 
-    def _refresh_worker(self, *, force: bool, reason: str) -> None:
+    def _refresh_worker(self, *, force: bool, reason: str, full_rebuild: bool) -> None:
         try:
             progress_lock = threading.Lock()
             last_reported_percent = {"value": -1.0}
@@ -199,7 +339,7 @@ class VisualIndexRefreshManager:
                 else:
                     percent = 0.0
                 if message is None:
-                    message = f"Indexed {current:,}/{total:,} cards" if total > 0 else "Refreshing visual index..."
+                    message = f"Indexed {current:,}/{total:,} cards" if total > 0 else "Syncing visual index..."
                 with progress_lock:
                     if percent < 100.0 and percent - last_reported_percent["value"] < 1.0:
                         return
@@ -222,18 +362,32 @@ class VisualIndexRefreshManager:
                     }
                 )
 
-            result = build_visual_index_from_catalog(
-                project_root=self.project_root,
-                source_catalog_path=self.source_catalog_path,
-                index_path=self.index_path,
-                metadata_path=self.metadata_path,
-                reference_dir=self.reference_dir,
-                refresh_days=self.refresh_days(),
-                model=self.model,
-                model_path=self.model_path,
-                overwrite_downloads=self.overwrite_downloads or force,
-                progress_callback=report_progress,
-            )
+            if full_rebuild:
+                result = build_visual_index_from_catalog(
+                    project_root=self.project_root,
+                    source_catalog_path=self.source_catalog_path,
+                    index_path=self.index_path,
+                    metadata_path=self.metadata_path,
+                    reference_dir=self.reference_dir,
+                    refresh_days=self.refresh_days(),
+                    model=self.model,
+                    model_path=self.model_path,
+                    overwrite_downloads=self.overwrite_downloads or force,
+                    progress_callback=report_progress,
+                )
+            else:
+                result = refresh_visual_index_from_catalog(
+                    project_root=self.project_root,
+                    source_catalog_path=self.source_catalog_path,
+                    index_path=self.index_path,
+                    metadata_path=self.metadata_path,
+                    reference_dir=self.reference_dir,
+                    refresh_days=self.refresh_days(),
+                    model=self.model,
+                    model_path=self.model_path,
+                    overwrite_downloads=self.overwrite_downloads or force,
+                    progress_callback=report_progress,
+                )
             self._write_state(
                 {
                     "updated_at_utc": result.updated_at_utc,
@@ -242,6 +396,7 @@ class VisualIndexRefreshManager:
                     "last_action": reason if reason != "manual" else "manual",
                     "refreshing": False,
                     "last_error": None,
+                    "requires_full_rebuild": False,
                     "refresh_days": result.refresh_days,
                     "source_catalog_path": str(result.source_catalog_path),
                     "source_catalog_mtime_ns": result.source_catalog_path.stat().st_mtime_ns,
@@ -261,6 +416,21 @@ class VisualIndexRefreshManager:
                     "reused_count": result.reused_count,
                 }
             )
+        except FullVisualIndexRebuildRequired as exc:
+            self._refresh_error = None
+            self._write_state(
+                {
+                    **self._read_state(),
+                    "refreshing": False,
+                    "last_finished_at_utc": _utc_now_iso(),
+                    "last_error": None,
+                    "requires_full_rebuild": True,
+                    "last_action": "rebuild_required",
+                    "progress_eta_seconds": None,
+                    "progress_eta_text": "ETA unavailable",
+                    "progress_message": str(exc),
+                }
+            )
         except Exception as exc:  # pragma: no cover - surfaced through status and API
             self._refresh_error = str(exc)
             self._write_state(
@@ -270,6 +440,7 @@ class VisualIndexRefreshManager:
                     "last_finished_at_utc": _utc_now_iso(),
                     "last_error": self._refresh_error,
                     "last_action": "error",
+                    "requires_full_rebuild": False,
                     "progress_eta_seconds": None,
                     "progress_eta_text": "ETA unavailable",
                 }
@@ -285,32 +456,35 @@ class VisualIndexRefreshManager:
         refreshing: bool,
         ready: bool,
         needs_refresh: bool,
+        requires_full_rebuild: bool,
         age_days: float | None,
         reason: str,
         state: dict[str, Any],
     ) -> str:
         if refreshing:
-            return "Visual index refresh is running in the background."
+            return "Visual index sync is running in the background."
+        if requires_full_rebuild:
+            return "The visual index needs a full rebuild because the source catalog changed in a non-additive way."
         if self._refresh_error or state.get("last_error"):
-            return f"Visual index refresh failed: {self._refresh_error or state.get('last_error')}"
+            return f"Visual index sync failed: {self._refresh_error or state.get('last_error')}"
         if ready and not needs_refresh:
             if age_days is None:
                 return "Visual index is ready."
             return f"Visual index is ready ({age_days:.1f} days old)."
         if running and needs_refresh:
-            return "Visual index refresh is deferred while the sorter is running."
+            return "Visual index sync is deferred while the sorter is running."
         progress = self._progress_payload(state, refreshing=refreshing)
         if refreshing and progress["percent"] is not None:
             eta_text = progress["eta_text"]
             suffix = f", {eta_text}" if eta_text and eta_text != "ETA unavailable" else ""
-            return f"Visual index refresh is running ({progress['percent']:.1f}%{suffix})."
+            return f"Visual index sync is running ({progress['percent']:.1f}%{suffix})."
         if reason == "missing":
-            return "Visual index is missing and will refresh when the sorter is idle."
+            return "Visual index is missing and will sync when the sorter is idle."
         if reason == "stale":
-            return f"Visual index is stale ({age_days:.1f} days old) and will refresh when the sorter is idle."
+            return f"Visual index is stale ({age_days:.1f} days old) and will sync when the sorter is idle."
         if reason == "source_changed":
-            return "Visual index source catalog changed and will refresh when the sorter is idle."
-        return "Visual index refresh is pending."
+            return "Visual index source catalog changed and will sync when the sorter is idle."
+        return "Visual index sync is pending."
 
     def _progress_payload(self, state: dict[str, Any], *, refreshing: bool) -> dict[str, Any]:
         current = state.get("progress_current")
@@ -411,35 +585,127 @@ def build_visual_index_from_catalog(
     index_file.parent.mkdir(parents=True, exist_ok=True)
     metadata_file.parent.mkdir(parents=True, exist_ok=True)
     reference_root.mkdir(parents=True, exist_ok=True)
-
-    payload = json.loads(source_path.read_text(encoding="utf-8"))
-    cards = payload if isinstance(payload, list) else payload.get("cards", [])
-    if not isinstance(cards, list):
-        raise ValueError(f"Catalog did not contain a card list: {source_path}")
-
-    selected_cards = [card for card in cards if isinstance(card, dict) and _extract_image_url(card)]
-    selected_cards.sort(
-        key=lambda card: (
-            str(card.get("set") or card.get("set_code") or "").lower(),
-            str(card.get("collector_number") or "").lower(),
-            str(card.get("name") or "").lower(),
-            str(card.get("id") or card.get("scryfall_id") or "").lower(),
-        )
+    selected_cards = _load_selected_catalog_cards(source_path, limit=limit)
+    return _build_visual_index_from_cards(
+        selected_cards=selected_cards,
+        project_root=project_root_path,
+        source_catalog_path=source_path,
+        index_path=index_file,
+        metadata_path=metadata_file,
+        reference_dir=reference_root,
+        refresh_days=refresh_days,
+        model=model,
+        model_path=model_path,
+        overwrite_downloads=overwrite_downloads,
+        progress_callback=progress_callback,
     )
-    if limit is not None:
-        selected_cards = selected_cards[: max(0, int(limit))]
+
+
+def refresh_visual_index_from_catalog(
+    *,
+    project_root: str | Path,
+    source_catalog_path: str | Path,
+    index_path: str | Path,
+    metadata_path: str | Path,
+    reference_dir: str | Path,
+    refresh_days: int = DEFAULT_VISUAL_INDEX_REFRESH_DAYS,
+    model: str = "opencv_v1",
+    model_path: str | None = None,
+    overwrite_downloads: bool = False,
+    limit: int | None = None,
+    progress_callback: ProgressCallback | None = None,
+) -> VisualIndexBuildResult:
+    project_root_path = Path(project_root)
+    source_path = Path(source_catalog_path)
+    index_file = Path(index_path)
+    metadata_file = Path(metadata_path)
+    reference_root = Path(reference_dir)
+    index_file.parent.mkdir(parents=True, exist_ok=True)
+    metadata_file.parent.mkdir(parents=True, exist_ok=True)
+    reference_root.mkdir(parents=True, exist_ok=True)
+
+    selected_cards = _load_selected_catalog_cards(source_path, limit=limit)
     if not selected_cards:
         raise ValueError(f"No cards with image URLs were found in {source_path}")
 
+    if not index_file.exists() or not metadata_file.exists():
+        return build_visual_index_from_catalog(
+            project_root=project_root_path,
+            source_catalog_path=source_path,
+            index_path=index_file,
+            metadata_path=metadata_file,
+            reference_dir=reference_root,
+            refresh_days=refresh_days,
+            model=model,
+            model_path=model_path,
+            overwrite_downloads=overwrite_downloads,
+            limit=limit,
+            progress_callback=progress_callback,
+        )
+
+    try:
+        existing_index = VisualIndex.load(index_file, metadata_file)
+    except Exception as exc:  # pragma: no cover - surfaced through status and API
+        raise FullVisualIndexRebuildRequired("Existing visual index is unreadable and must be rebuilt.") from exc
+
+    existing_cards: dict[str, dict[str, Any]] = {}
+    for item in existing_index.metadata:
+        if not isinstance(item, dict):
+            raise FullVisualIndexRebuildRequired("Existing visual index metadata is malformed and must be rebuilt.")
+        key = _visual_index_card_key(item)
+        if key is None:
+            raise FullVisualIndexRebuildRequired("Existing visual index metadata is missing card identity fields.")
+        if key in existing_cards:
+            raise FullVisualIndexRebuildRequired("Existing visual index contains duplicate card identities.")
+        existing_cards[key] = item
+
+    source_cards: dict[str, dict[str, Any]] = {}
+    for card in selected_cards:
+        key = _visual_index_card_key(card)
+        if key is None:
+            raise FullVisualIndexRebuildRequired("Source catalog contains cards that cannot be keyed for refresh.")
+        if key in source_cards:
+            raise FullVisualIndexRebuildRequired("Source catalog contains duplicate card identities.")
+        source_cards[key] = card
+
+    removed_cards = sorted(key for key in existing_cards if key not in source_cards)
+    changed_cards = sorted(
+        key
+        for key, metadata in existing_cards.items()
+        if key in source_cards and str(_extract_image_url(source_cards[key]) or "") != str(metadata.get("image_url") or "")
+    )
+    if removed_cards or changed_cards:
+        raise FullVisualIndexRebuildRequired(
+            "The source catalog changed in a non-additive way; a full rebuild is required."
+        )
+
+    new_cards = [card for card in selected_cards if _visual_index_card_key(card) not in existing_cards]
+    existing_count = len(existing_index.metadata)
+    if not new_cards:
+        if progress_callback is not None:
+            progress_callback(existing_count, existing_count, "No new cards to refresh")
+        updated_at = _utc_now_iso()
+        return VisualIndexBuildResult(
+            index_path=index_file,
+            metadata_path=metadata_file,
+            reference_dir=reference_root,
+            source_catalog_path=source_path,
+            card_count=existing_count,
+            downloaded_count=0,
+            reused_count=0,
+            updated_at_utc=updated_at,
+            refresh_days=_normalize_refresh_days(refresh_days),
+        )
+
     embedder = create_embedder(model, model_path)
-    vectors: np.ndarray | None = None
-    metadata: list[dict[str, Any]] = []
+    new_vectors: list[np.ndarray] = []
+    new_metadata: list[dict[str, Any]] = []
     downloaded = 0
     reused = 0
     if progress_callback is not None:
-        progress_callback(0, len(selected_cards), f"Preparing {len(selected_cards):,} cards")
+        progress_callback(0, len(new_cards), f"Preparing {len(new_cards):,} new cards")
 
-    for index, card in enumerate(selected_cards, start=0):
+    for index, card in enumerate(new_cards, start=0):
         image_url = _extract_image_url(card)
         if not image_url:
             continue
@@ -450,11 +716,8 @@ def build_visual_index_from_catalog(
         else:
             reused += 1
         image = _load_image(reference_path)
-        vector = embedder.embed(image)
-        if vectors is None:
-            vectors = np.empty((len(selected_cards), vector.shape[0]), dtype=np.float32)
-        vectors[index] = vector
-        metadata.append(
+        new_vectors.append(embedder.embed(image))
+        new_metadata.append(
             {
                 "name": card.get("name"),
                 "scryfall_id": card.get("id") or card.get("scryfall_id"),
@@ -467,12 +730,14 @@ def build_visual_index_from_catalog(
             }
         )
         if progress_callback is not None:
-            progress_callback(index + 1, len(selected_cards), f"Indexed {index + 1:,}/{len(selected_cards):,} cards")
+            progress_callback(index + 1, len(new_cards), f"Indexed {index + 1:,}/{len(new_cards):,} new cards")
 
-    if vectors is None:
-        raise ValueError("Visual index builder did not produce any embeddings.")
+    if not new_vectors:
+        raise ValueError("Visual index sync did not produce any new embeddings.")
 
-    index = VisualIndex(vectors, metadata)
+    combined_embeddings = np.vstack([existing_index.embeddings, np.asarray(new_vectors, dtype=np.float32)])
+    combined_metadata = [dict(item) for item in existing_index.metadata] + new_metadata
+    index = VisualIndex(combined_embeddings, combined_metadata)
     index.save(index_file, metadata_file)
     updated_at = _utc_now_iso()
     return VisualIndexBuildResult(
@@ -480,7 +745,7 @@ def build_visual_index_from_catalog(
         metadata_path=metadata_file,
         reference_dir=reference_root,
         source_catalog_path=source_path,
-        card_count=len(metadata),
+        card_count=len(combined_metadata),
         downloaded_count=downloaded,
         reused_count=reused,
         updated_at_utc=updated_at,

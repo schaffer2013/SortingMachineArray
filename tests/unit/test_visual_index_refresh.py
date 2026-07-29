@@ -6,6 +6,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import pytest
 
 from sorter.application import visual_index_refresh as refresh_module
 
@@ -90,6 +91,132 @@ def test_build_visual_index_from_catalog_uses_project_root_and_builds_index(tmp_
     assert progress_calls[-1][1] == 2
 
 
+def test_refresh_visual_index_from_catalog_appends_new_cards(tmp_path, monkeypatch):
+    project_root = tmp_path
+    source_catalog = tmp_path / "data/catalog/default-cards.json"
+    source_catalog.parent.mkdir(parents=True, exist_ok=True)
+    source_catalog.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "Alpha",
+                    "id": "aaaaaaaa-0000-0000-0000-000000000001",
+                    "set": "alp",
+                    "collector_number": "1",
+                    "image_uris": {"png": "https://example.invalid/alpha.png"},
+                },
+                {
+                    "name": "Beta",
+                    "id": "bbbbbbbb-0000-0000-0000-000000000002",
+                    "set": "bet",
+                    "collector_number": "2",
+                    "image_uris": {"png": "https://example.invalid/beta.png"},
+                },
+            ],
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    index_path = tmp_path / "data/index/card_embeddings.npz"
+    metadata_path = tmp_path / "data/index/card_embeddings.jsonl"
+    reference_dir = tmp_path / "data/index/reference_images"
+    reference_dir.mkdir(parents=True, exist_ok=True)
+
+    existing_index = refresh_module.VisualIndex(
+        np.array([[1.0]], dtype=np.float32),
+        [
+            {
+                "name": "Alpha",
+                "scryfall_id": "aaaaaaaa-0000-0000-0000-000000000001",
+                "oracle_id": "oracle-alpha",
+                "set_code": "alp",
+                "collector_number": "1",
+                "image_url": "https://example.invalid/alpha.png",
+                "image_path": "data/index/reference_images/alpha.png",
+                "crop_type": "full_card",
+            }
+        ],
+    )
+    existing_index.save(index_path, metadata_path)
+
+    class FakeEmbedder:
+        def embed(self, image):
+            return np.array([float(image.mean())], dtype=np.float32)
+
+    monkeypatch.setattr(refresh_module, "create_embedder", lambda model, model_path: FakeEmbedder())
+
+    def fake_download(image_url: str, output_path: Path) -> None:
+        _write_png(output_path, (255, 0, 0) if "alpha" in image_url else (0, 0, 255))
+
+    monkeypatch.setattr(refresh_module, "_download", fake_download)
+
+    result = refresh_module.refresh_visual_index_from_catalog(
+        project_root=project_root,
+        source_catalog_path=source_catalog,
+        index_path=index_path,
+        metadata_path=metadata_path,
+        reference_dir=reference_dir,
+        overwrite_downloads=False,
+    )
+
+    loaded = refresh_module.VisualIndex.load(index_path, metadata_path)
+    assert result.card_count == 2
+    assert result.downloaded_count == 1
+    assert len(loaded.metadata) == 2
+    assert [item["name"] for item in loaded.metadata] == ["Alpha", "Beta"]
+
+
+def test_refresh_visual_index_from_catalog_requires_full_rebuild_for_removed_cards(tmp_path, monkeypatch):
+    project_root = tmp_path
+    source_catalog = tmp_path / "data/catalog/default-cards.json"
+    source_catalog.parent.mkdir(parents=True, exist_ok=True)
+    source_catalog.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "Beta",
+                    "id": "bbbbbbbb-0000-0000-0000-000000000002",
+                    "set": "bet",
+                    "collector_number": "2",
+                    "image_uris": {"png": "https://example.invalid/beta.png"},
+                }
+            ],
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    index_path = tmp_path / "data/index/card_embeddings.npz"
+    metadata_path = tmp_path / "data/index/card_embeddings.jsonl"
+    reference_dir = tmp_path / "data/index/reference_images"
+
+    existing_index = refresh_module.VisualIndex(
+        np.array([[1.0]], dtype=np.float32),
+        [
+            {
+                "name": "Alpha",
+                "scryfall_id": "aaaaaaaa-0000-0000-0000-000000000001",
+                "oracle_id": "oracle-alpha",
+                "set_code": "alp",
+                "collector_number": "1",
+                "image_url": "https://example.invalid/alpha.png",
+                "image_path": "data/index/reference_images/alpha.png",
+                "crop_type": "full_card",
+            }
+        ],
+    )
+    existing_index.save(index_path, metadata_path)
+
+    with pytest.raises(refresh_module.FullVisualIndexRebuildRequired):
+        refresh_module.refresh_visual_index_from_catalog(
+            project_root=project_root,
+            source_catalog_path=source_catalog,
+            index_path=index_path,
+            metadata_path=metadata_path,
+            reference_dir=reference_dir,
+            overwrite_downloads=False,
+        )
+
+
 def test_visual_index_manager_refreshes_in_background(tmp_path, monkeypatch):
     project_root = tmp_path
     config_path = tmp_path / "config/card_engine/engine.json"
@@ -97,7 +224,21 @@ def test_visual_index_manager_refreshes_in_background(tmp_path, monkeypatch):
     refresh_module.save_visual_index_policy(config_path, 7)
     source_catalog = tmp_path / "data/catalog/default-cards.json"
     source_catalog.parent.mkdir(parents=True, exist_ok=True)
-    source_catalog.write_text("[]", encoding="utf-8")
+    source_catalog.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "Alpha",
+                    "id": "aaaaaaaa-0000-0000-0000-000000000001",
+                    "set": "alp",
+                    "collector_number": "1",
+                    "image_uris": {"png": "https://example.invalid/alpha.png"},
+                }
+            ],
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     index_path = tmp_path / "data/index/card_embeddings.npz"
     metadata_path = tmp_path / "data/index/card_embeddings.jsonl"
     reference_dir = tmp_path / "data/index/reference_images"
