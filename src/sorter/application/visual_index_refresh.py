@@ -4,8 +4,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import hashlib
 import json
+import os
 import sqlite3
 import threading
+import tempfile
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -298,8 +300,12 @@ def _run_checkpointed_visual_index_job(
                 )
             reference_path = reference_dir / _reference_file_name(card, image_url)
             reference_path.parent.mkdir(parents=True, exist_ok=True)
-            if overwrite_downloads or not reference_path.exists():
-                _download(image_url, reference_path)
+            image, downloaded_now = _load_reference_image_with_retry(
+                reference_path,
+                image_url=image_url,
+                overwrite_downloads=overwrite_downloads,
+            )
+            if downloaded_now:
                 downloaded += 1
             else:
                 reused += 1
@@ -309,7 +315,6 @@ def _run_checkpointed_visual_index_job(
                     len(job_entries),
                     f"Embedding {progress_label[:-1] if progress_label.endswith('s') else progress_label} {ordinal + 1:,}/{len(job_entries):,}: {card_name}",
                 )
-            image = _load_image(reference_path)
             vector = embedder.embed(image)
             if progress_callback is not None:
                 progress_callback(
@@ -453,12 +458,15 @@ def _build_visual_index_from_cards(
         if not image_url:
             continue
         reference_path = reference_dir / _reference_file_name(card, image_url)
-        if overwrite_downloads or not reference_path.exists():
-            _download(image_url, reference_path)
+        image, downloaded_now = _load_reference_image_with_retry(
+            reference_path,
+            image_url=image_url,
+            overwrite_downloads=overwrite_downloads,
+        )
+        if downloaded_now:
             downloaded += 1
         else:
             reused += 1
-        image = _load_image(reference_path)
         vector = embedder.embed(image)
         if vectors is None:
             vectors = np.empty((len(selected_cards), vector.shape[0]), dtype=np.float32)
@@ -1193,7 +1201,35 @@ def _slug(value: str) -> str:
 def _download(image_url: str, output_path: Path) -> None:
     request = Request(image_url, headers=REQUEST_HEADERS)
     with urlopen(request, timeout=30) as response:
-        output_path.write_bytes(response.read())
+        data = response.read()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=output_path.parent, delete=False) as temp_file:
+        temp_path = Path(temp_file.name)
+        temp_file.write(data)
+        temp_file.flush()
+    try:
+        os.replace(temp_path, output_path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink(missing_ok=True)
+
+
+def _load_reference_image_with_retry(
+    reference_path: Path,
+    *,
+    image_url: str,
+    overwrite_downloads: bool,
+) -> tuple[np.ndarray, bool]:
+    if overwrite_downloads or not reference_path.exists():
+        _download(image_url, reference_path)
+        return _load_image(reference_path), True
+
+    try:
+        return _load_image(reference_path), False
+    except ValueError:
+        reference_path.unlink(missing_ok=True)
+        _download(image_url, reference_path)
+        return _load_image(reference_path), True
 
 
 def _load_image(path: Path) -> np.ndarray:

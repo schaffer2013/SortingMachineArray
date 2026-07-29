@@ -173,6 +173,64 @@ def test_refresh_visual_index_from_catalog_appends_new_cards(tmp_path, monkeypat
     assert not (project_root / "data/index/visual_index_checkpoint.sqlite3").exists()
 
 
+def test_build_visual_index_from_catalog_recovers_corrupted_cached_reference_image(tmp_path, monkeypatch):
+    project_root = tmp_path
+    source_catalog = tmp_path / "data/catalog/default-cards.json"
+    source_catalog.parent.mkdir(parents=True, exist_ok=True)
+    source_catalog.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "Gamma",
+                    "id": "cccccccc-0000-0000-0000-000000000003",
+                    "set": "gma",
+                    "collector_number": "3",
+                    "image_uris": {"png": "https://example.invalid/gamma.png"},
+                }
+            ],
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    index_path = tmp_path / "data/index/card_embeddings.npz"
+    metadata_path = tmp_path / "data/index/card_embeddings.jsonl"
+    reference_dir = tmp_path / "data/index/reference_images"
+    reference_dir.mkdir(parents=True, exist_ok=True)
+
+    card = json.loads(source_catalog.read_text(encoding="utf-8"))[0]
+    reference_path = reference_dir / refresh_module._reference_file_name(card, "https://example.invalid/gamma.png")
+    reference_path.write_text("not an image", encoding="utf-8")
+
+    class FakeEmbedder:
+        def embed(self, image):
+            return np.array([float(image.mean())], dtype=np.float32)
+
+    monkeypatch.setattr(refresh_module, "create_embedder", lambda model, model_path: FakeEmbedder())
+
+    download_calls: list[str] = []
+
+    def fake_download(image_url: str, output_path: Path) -> None:
+        download_calls.append(image_url)
+        _write_png(output_path, (128, 64, 32))
+
+    monkeypatch.setattr(refresh_module, "_download", fake_download)
+
+    result = refresh_module.build_visual_index_from_catalog(
+        project_root=project_root,
+        source_catalog_path=source_catalog,
+        index_path=index_path,
+        metadata_path=metadata_path,
+        reference_dir=reference_dir,
+        overwrite_downloads=False,
+    )
+
+    assert result.card_count == 1
+    assert result.downloaded_count == 1
+    assert download_calls == ["https://example.invalid/gamma.png"]
+    assert reference_path.is_file()
+    assert reference_path.read_bytes() != b"not an image"
+
+
 def test_refresh_visual_index_from_catalog_requires_full_rebuild_for_removed_cards(tmp_path, monkeypatch):
     project_root = tmp_path
     source_catalog = tmp_path / "data/catalog/default-cards.json"
