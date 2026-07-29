@@ -91,6 +91,12 @@ MOTION_CONTROL_ACTIONS = {
     "jog_zc_interface",
 }
 
+RECOGNITION_BACKEND_OPTIONS = (
+    "fuzzy_enigma",
+    "moss_machine",
+    "sim_truth",
+)
+
 
 class SerialBoardSession:
     def __init__(
@@ -2628,7 +2634,15 @@ def create_web_app(
 
     @app.get("/recognition")
     def recognition():
-        return render_template("recognition.html")
+        recognizer = getattr(runtime.orchestrator, "recognizer", None)
+        selected_backend = getattr(recognizer, "sorter_backend", None)
+        if not isinstance(selected_backend, str) or not selected_backend.strip():
+            selected_backend = "fuzzy_enigma"
+        return render_template(
+            "recognition.html",
+            recognition_backends=RECOGNITION_BACKEND_OPTIONS,
+            selected_recognition_backend=selected_backend.strip().lower(),
+        )
 
     @app.get("/card-back-training")
     def card_back_training():
