@@ -309,6 +309,28 @@ def test_download_image_bytes_retries_transient_http_error(monkeypatch):
     assert payload == _png_bytes((9, 9, 9))
 
 
+def test_load_reference_image_for_card_uses_fallback_url(monkeypatch):
+    card = {
+        "name": "Crowded Crypt",
+        "image_uris": {
+            "png": "https://example.invalid/crowded-crypt.png",
+            "large": "https://example.invalid/crowded-crypt-large.jpg",
+        },
+    }
+
+    def fake_download(image_url: str) -> bytes:
+        if image_url.endswith(".png"):
+            raise HTTPError(image_url, 404, "Not Found", hdrs=None, fp=None)
+        return _png_bytes((7, 8, 9))
+
+    monkeypatch.setattr(refresh_module, "_download_image_bytes", fake_download)
+
+    image, image_url = refresh_module._load_reference_image_for_card(card)
+
+    assert image_url == "https://example.invalid/crowded-crypt-large.jpg"
+    assert image is not None
+
+
 def test_refresh_visual_index_from_catalog_requires_full_rebuild_for_removed_cards(tmp_path, monkeypatch):
     project_root = tmp_path
     source_catalog = tmp_path / "data/catalog/default-cards.json"

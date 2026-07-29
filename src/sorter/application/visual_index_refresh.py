@@ -310,9 +310,19 @@ def _run_checkpointed_visual_index_job(
                 reused += 1
                 continue
             card_name = str(card.get("name") or card_key or f"card {ordinal + 1}")
-            image_url = _extract_image_url(card)
-            if not image_url:
+            try:
+                image_selection = _load_reference_image_for_card(card)
+            except ValueError as exc:
+                if progress_callback is not None:
+                    progress_callback(
+                        processed_count,
+                        len(job_entries),
+                        f"Skipping {card_name}: {exc}",
+                    )
                 continue
+            if image_selection is None:
+                continue
+            image, image_url = image_selection
             if progress_callback is not None:
                 progress_callback(
                     processed_count,
@@ -320,7 +330,6 @@ def _run_checkpointed_visual_index_job(
                     f"Downloading {progress_label[:-1] if progress_label.endswith('s') else progress_label} {ordinal + 1:,}/{len(job_entries):,}: {card_name}",
                 )
             reference_path = reference_dir / _reference_file_name(card, image_url)
-            image = _load_reference_image_from_url(image_url)
             downloaded += 1
             if progress_callback is not None:
                 progress_callback(
@@ -473,7 +482,7 @@ def _load_selected_catalog_cards(source_path: Path, *, limit: int | None = None)
     if not isinstance(cards, list):
         raise ValueError(f"Catalog did not contain a card list: {source_path}")
 
-    selected_cards = [card for card in cards if isinstance(card, dict) and _extract_image_url(card)]
+    selected_cards = [card for card in cards if isinstance(card, dict) and _extract_image_urls(card)]
     selected_cards.sort(
         key=lambda card: (
             str(card.get("set") or card.get("set_code") or "").lower(),
@@ -518,7 +527,7 @@ def _build_visual_index_from_cards(
         raise ValueError("No cards with image URLs were found in the source catalog.")
 
     embedder = create_embedder(model, model_path)
-    vectors: np.ndarray | None = None
+    rows: list[tuple[np.ndarray, dict[str, Any]]] = []
     metadata: list[dict[str, Any]] = []
     downloaded = 0
     reused = 0
@@ -526,35 +535,33 @@ def _build_visual_index_from_cards(
         progress_callback(0, len(selected_cards), f"Preparing {len(selected_cards):,} cards")
 
     for index, card in enumerate(selected_cards, start=0):
-        image_url = _extract_image_url(card)
-        if not image_url:
+        image_selection = _load_reference_image_for_card(card)
+        if image_selection is None:
             continue
+        image, image_url = image_selection
         reference_path = reference_dir / _reference_file_name(card, image_url)
-        image = _load_reference_image_from_url(image_url)
         downloaded += 1
-        vector = embedder.embed(image)
-        if vectors is None:
-            vectors = np.empty((len(selected_cards), vector.shape[0]), dtype=np.float32)
-        vectors[index] = vector
-        metadata.append(
-            {
-                "name": card.get("name"),
-                "scryfall_id": card.get("id") or card.get("scryfall_id"),
-                "oracle_id": card.get("oracle_id"),
-                "set_code": card.get("set") or card.get("set_code"),
-                "collector_number": card.get("collector_number"),
-                "image_url": image_url,
-                "image_path": reference_path.relative_to(project_root).as_posix(),
-                "crop_type": "full_card",
-            }
-        )
+        vector = np.asarray(embedder.embed(image), dtype=np.float32).reshape(-1)
+        row_metadata = {
+            "name": card.get("name"),
+            "scryfall_id": card.get("id") or card.get("scryfall_id"),
+            "oracle_id": card.get("oracle_id"),
+            "set_code": card.get("set") or card.get("set_code"),
+            "collector_number": card.get("collector_number"),
+            "image_url": image_url,
+            "image_path": reference_path.relative_to(project_root).as_posix(),
+            "crop_type": "full_card",
+        }
+        rows.append((vector, row_metadata))
+        metadata.append(row_metadata)
         if progress_callback is not None:
             progress_callback(index + 1, len(selected_cards), f"Indexed {index + 1:,}/{len(selected_cards):,} cards")
 
-    if vectors is None:
+    if not rows:
         raise ValueError("Visual index builder did not produce any embeddings.")
 
-    index = VisualIndex(vectors, metadata)
+    embeddings = np.vstack([row[0] for row in rows]).astype(np.float32, copy=False)
+    index = VisualIndex(embeddings, metadata)
     index.save(index_path, metadata_path)
     updated_at = _utc_now_iso()
     return VisualIndexBuildResult(
@@ -1163,7 +1170,7 @@ def refresh_visual_index_from_catalog(
     changed_cards = sorted(
         key
         for key, metadata in existing_cards.items()
-        if key in source_cards and str(_extract_image_url(source_cards[key]) or "") != str(metadata.get("image_url") or "")
+        if key in source_cards and str((_extract_image_urls(source_cards[key]) or [""])[0]) != str(metadata.get("image_url") or "")
     )
     if removed_cards or changed_cards:
         raise FullVisualIndexRebuildRequired(
@@ -1316,13 +1323,15 @@ def _cleanup_reference_directory(reference_dir: Path) -> tuple[int, int]:
     return removed_files, removed_dirs
 
 
-def _extract_image_url(card: dict[str, Any]) -> str | None:
+def _extract_image_urls(card: dict[str, Any]) -> list[str]:
+    image_urls: list[str] = []
+
     image_uris = card.get("image_uris")
     if isinstance(image_uris, dict):
-        for key in ("png", "large", "normal"):
+        for key in ("png", "large", "normal", "small"):
             value = image_uris.get(key)
             if isinstance(value, str) and value.strip():
-                return value.strip()
+                image_urls.append(value.strip())
 
     card_faces = card.get("card_faces")
     if isinstance(card_faces, list):
@@ -1332,11 +1341,18 @@ def _extract_image_url(card: dict[str, Any]) -> str | None:
             face_uris = face.get("image_uris")
             if not isinstance(face_uris, dict):
                 continue
-            for key in ("png", "large", "normal"):
+            for key in ("png", "large", "normal", "small"):
                 value = face_uris.get(key)
                 if isinstance(value, str) and value.strip():
-                    return value.strip()
-    return None
+                    image_urls.append(value.strip())
+    deduplicated_urls: list[str] = []
+    seen_urls: set[str] = set()
+    for image_url in image_urls:
+        if image_url in seen_urls:
+            continue
+        seen_urls.add(image_url)
+        deduplicated_urls.append(image_url)
+    return deduplicated_urls
 
 
 def _reference_file_name(card: dict[str, Any], image_url: str) -> str:
@@ -1371,12 +1387,27 @@ def _download_image_bytes(image_url: str) -> bytes:
     raise RuntimeError(f"Unable to download reference image: {image_url}")
 
 
-def _load_reference_image_from_url(image_url: str) -> np.ndarray:
-    data = _download_image_bytes(image_url)
-    image = _load_image_from_bytes(data, source=image_url)
-    if image is None:  # pragma: no cover - defensive guard for unexpected control flow
-        raise ValueError(f"Unable to decode downloaded reference image: {image_url}")
-    return image
+def _load_reference_image_for_card(card: dict[str, Any]) -> tuple[np.ndarray, str] | None:
+    image_urls = _extract_image_urls(card)
+    if not image_urls:
+        return None
+
+    last_error: Exception | None = None
+    for image_url in image_urls:
+        try:
+            data = _download_image_bytes(image_url)
+            image = _load_image_from_bytes(data, source=image_url)
+            if image is None:  # pragma: no cover - defensive guard for unexpected control flow
+                raise ValueError(f"Unable to decode downloaded reference image: {image_url}")
+            return image, image_url
+        except Exception as exc:  # pragma: no cover - surfaced through progress and fallback behavior
+            last_error = exc
+            continue
+
+    card_name = str(card.get("name") or "card")
+    if last_error is None:  # pragma: no cover - defensive guard for unexpected control flow
+        return None
+    raise ValueError(f"Unable to download a usable image for {card_name}: {last_error}") from last_error
 
 
 def _load_image_from_bytes(data: bytes, *, source: str) -> np.ndarray | None:
