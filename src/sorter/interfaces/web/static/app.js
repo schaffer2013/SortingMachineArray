@@ -58,6 +58,12 @@ const formatDays = value => {
   if (!Number.isFinite(number)) return "--";
   return `${number.toFixed(1)} days`;
 };
+const formatTimestamp = value => {
+  if (!value) return "--";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "--";
+  return date.toLocaleString();
+};
 const timingValue = (timings, keys) => {
   for (const key of keys) {
     if (timings[key] !== undefined && timings[key] !== null) return timings[key];
@@ -2513,12 +2519,14 @@ window.SorterPages = {
       if (visualIndexDetails) {
         visualIndexDetails.innerHTML = [
           ["Status", visualIndex.message || "--"],
+          ["Phase", visualIndex.progress_message || progress.message || "--"],
           ["Mode", visualRequiresFullRebuild ? "Full rebuild required" : (visualRefreshing ? "Syncing additions" : "Incremental sync")],
           ["Policy", visualIndex.configured_refresh_days ? `${visualIndex.configured_refresh_days} days` : "--"],
           ["Age", formatDays(visualIndex.age_days)],
           ["Cards indexed", visualIndex.indexed_card_count ?? "--"],
           ["Source cards", visualIndex.source_card_count ?? "--"],
           ["Progress", progressText],
+          ["Last heartbeat", formatTimestamp(visualIndex.last_heartbeat_at_utc)],
           ["Last updated", visualIndex.updated_at_utc || "--"],
         ].map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
       }
