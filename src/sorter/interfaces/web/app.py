@@ -33,7 +33,17 @@ from sorter.application.card_back_training import (
     CardBackTrainingStore,
     generate_spring_capture_points,
 )
-from sorter.application.visual_index_refresh import VISUAL_INDEX_REFRESH_DAY_OPTIONS, VisualIndexRefreshManager
+from sorter.application.catalog_recognition_benchmark import (
+    BENCHMARK_BACKEND_OPTIONS,
+    DEFAULT_BENCHMARK_SAMPLE_SIZE,
+    MAX_BENCHMARK_SAMPLE_SIZE,
+    CatalogRecognitionBenchmarkManager,
+)
+from sorter.application.visual_index_refresh import (
+    VISUAL_INDEX_REFRESH_DAY_OPTIONS,
+    VisualIndexRefreshManager,
+    _download_image_bytes,
+)
 from sorter.application.orchestrator import Orchestrator
 from sorter.adapters.hardware.marlin_transport import MarlinSerialTransport
 from sorter.adapters.hardware.neopixel_lights import NeoPixelLightsAdapter
@@ -655,6 +665,26 @@ def _openapi_schema_for_route(endpoint: str, method: str, path: str) -> dict[str
         }
     if endpoint == "api_recognition_tracked_pool":
         return {"type": "object", "properties": {}, "additionalProperties": True}
+    if endpoint == "api_recognition_benchmark_start":
+        return {
+            "type": "object",
+            "properties": {
+                "sample_size": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": MAX_BENCHMARK_SAMPLE_SIZE,
+                    "default": DEFAULT_BENCHMARK_SAMPLE_SIZE,
+                },
+                "backends": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": list(BENCHMARK_BACKEND_OPTIONS)},
+                    "minItems": 1,
+                },
+                "seed": {"type": "integer", "nullable": True},
+            },
+            "required": ["sample_size", "backends"],
+            "additionalProperties": False,
+        }
     return {"type": "object", "additionalProperties": True}
 
 
@@ -845,6 +875,13 @@ class WebRuntime:
         self.calibration_path = calibration_path
         self.repo_root = _repo_root()
         self.visual_index = VisualIndexRefreshManager(project_root=self.repo_root)
+        self.recognition_lock = threading.RLock()
+        self.recognition_benchmark = CatalogRecognitionBenchmarkManager(
+            source_path=self.repo_root / "data" / "catalog" / "default-cards.json",
+            state_path=self.repo_root / "local_data" / "recognition_benchmark.json",
+            recognize_image=self._recognize_benchmark_image,
+            download_image=_download_image_bytes,
+        )
         self.control_audit_path = self.repo_root / "data" / "logs" / "control_audit.jsonl"
         self.debug_events_path = self.repo_root / "data" / "logs" / "debug_events.jsonl"
         self.serial_log_path = self.repo_root / "data" / "logs" / "serial_commands.jsonl"
@@ -2266,6 +2303,51 @@ class WebRuntime:
             "entries": [asdict(entry) if hasattr(entry, "__dataclass_fields__") else entry for entry in entries],
         }
 
+    def recognition_benchmark_status(self) -> dict[str, Any]:
+        return self.recognition_benchmark.status()
+
+    def start_recognition_benchmark(self, payload: dict[str, Any]) -> dict[str, Any]:
+        sample_size = int(payload.get("sample_size", DEFAULT_BENCHMARK_SAMPLE_SIZE))
+        backends = payload.get("backends")
+        if not isinstance(backends, list):
+            raise ValueError("Backends must be provided as a list")
+        seed = payload.get("seed")
+        return self.recognition_benchmark.start(
+            sample_size=sample_size,
+            backends=backends,
+            seed=None if seed in (None, "") else int(seed),
+        )
+
+    def cancel_recognition_benchmark(self) -> dict[str, Any]:
+        return self.recognition_benchmark.cancel()
+
+    def _recognize_benchmark_image(self, image_path: Path, payload: dict[str, Any]) -> dict[str, Any]:
+        recognizer = self.orchestrator.recognizer
+        primary = getattr(recognizer, "primary", recognizer)
+        engine = getattr(primary, "_recognizer", None)
+        config = getattr(engine, "config", None)
+        previous_values = {
+            "sorter_backend": getattr(primary, "sorter_backend", None),
+            "card_engine_requested_backend": getattr(primary, "card_engine_requested_backend", None),
+            "recognition_backend": getattr(config, "recognition_backend", None),
+        }
+        with self.recognition_lock:
+            try:
+                return self._recognize_image(
+                    image_path,
+                    payload,
+                    camera_id="catalog_benchmark",
+                    source_mode="catalog_benchmark",
+                    record_result=False,
+                )
+            finally:
+                if previous_values["sorter_backend"] is not None:
+                    setattr(primary, "sorter_backend", previous_values["sorter_backend"])
+                if previous_values["card_engine_requested_backend"] is not None:
+                    setattr(primary, "card_engine_requested_backend", previous_values["card_engine_requested_backend"])
+                if config is not None and previous_values["recognition_backend"] is not None:
+                    setattr(config, "recognition_backend", previous_values["recognition_backend"])
+
     def recognize_uploaded_image(self, image_path: Path, request_payload: dict[str, Any]) -> dict[str, Any]:
         return self._recognize_image(image_path, request_payload, camera_id="web_upload", source_mode="manual_web")
 
@@ -2373,6 +2455,7 @@ class WebRuntime:
         *,
         camera_id: str,
         source_mode: str,
+        record_result: bool = True,
     ) -> dict[str, Any]:
         frame = Frame(
             frame_id=f"web-{int(time.time() * 1000)}",
@@ -2383,19 +2466,21 @@ class WebRuntime:
             camera_id=camera_id,
             source_mode=source_mode,
         )
-        result = self.orchestrator.recognizer.recognize_top_card(frame)
+        with self.recognition_lock:
+            result = self.orchestrator.recognizer.recognize_top_card(frame)
         payload = asdict(result)
-        self.last_manual_recognition = payload
-        self.orchestrator.last_recognition = {
-            "backend": result.backend,
-            "requested_mode": result.requested_mode,
-            "effective_mode": result.effective_mode,
-            "fallback_used": result.fallback_used,
-            "card_name": result.card_name,
-            "confidence": result.confidence,
-            "failure_code": result.failure_code,
-            "review_reason": result.review_reason,
-        }
+        if record_result:
+            self.last_manual_recognition = payload
+            self.orchestrator.last_recognition = {
+                "backend": result.backend,
+                "requested_mode": result.requested_mode,
+                "effective_mode": result.effective_mode,
+                "fallback_used": result.fallback_used,
+                "card_name": result.card_name,
+                "confidence": result.confidence,
+                "failure_code": result.failure_code,
+                "review_reason": result.review_reason,
+            }
         return payload
 
     def latest_camera_image(self) -> Image.Image:
@@ -2827,6 +2912,15 @@ def create_web_app(
             selected_recognition_backend=selected_backend.strip().lower(),
         )
 
+    @app.get("/benchmark")
+    def benchmark():
+        return render_template(
+            "benchmark.html",
+            benchmark_backends=BENCHMARK_BACKEND_OPTIONS,
+            default_sample_size=DEFAULT_BENCHMARK_SAMPLE_SIZE,
+            maximum_sample_size=MAX_BENCHMARK_SAMPLE_SIZE,
+        )
+
     @app.get("/card-back-training")
     def card_back_training():
         return render_template("card_back_training.html")
@@ -2994,6 +3088,24 @@ def create_web_app(
     @app.get("/api/recognition/tracked-pool")
     def api_recognition_tracked_pool():
         return jsonify(runtime.recognition_tracked_pool_payload())
+
+    @app.get("/api/recognition/benchmark")
+    def api_recognition_benchmark():
+        return jsonify(runtime.recognition_benchmark_status())
+
+    @app.post("/api/recognition/benchmark")
+    def api_recognition_benchmark_start():
+        try:
+            return jsonify(runtime.start_recognition_benchmark(request.get_json(silent=True) or {}))
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
+
+    @app.post("/api/recognition/benchmark/cancel")
+    def api_recognition_benchmark_cancel():
+        try:
+            return jsonify(runtime.cancel_recognition_benchmark())
+        except Exception as exc:
+            return jsonify({"ok": False, "message": str(exc)}), 400
 
     @app.get("/api/runs")
     def api_runs():

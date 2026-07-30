@@ -150,6 +150,20 @@ The sim camera no longer mutates pile observation state on capture by itself; ob
 
 ## Recognition replay and benchmark
 
+The web console includes a **Benchmark** page for comparing image-recognition
+backends against a shared random sample from `data/catalog/default-cards.json`.
+Choose 1–500 cards and one or more backends. The sampler excludes records marked
+`digital: true`, basic lands, and records without an image. It downloads each
+selected image once, tests it against every selected backend, deletes the
+temporary image, and reports name accuracy, exact-print accuracy, errors, and
+average recognition time. An optional seed makes a sample reproducible.
+
+The same workflow is available through:
+
+- `GET /api/recognition/benchmark`
+- `POST /api/recognition/benchmark`
+- `POST /api/recognition/benchmark/cancel`
+
 - Replay the configured backend over simulated top-card captures:
 	- `python scripts/replay_recognition.py --backend sim_truth`
 - Replay the vendored recognizer with the parent benchmark config:
