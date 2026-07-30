@@ -1761,6 +1761,147 @@ window.SorterPages = {
     refreshRecognitionPool();
     setInterval(refreshRecognitionPool, 15000);
   },
+  benchmark() {
+    const form = document.querySelector("#benchmark-form");
+    const startButton = document.querySelector("#benchmark-start");
+    const cancelButton = document.querySelector("#benchmark-cancel");
+    const statusTitle = document.querySelector("#benchmark-status-title");
+    const statusPill = document.querySelector("#benchmark-status-pill");
+    const message = document.querySelector("#benchmark-message");
+    const progress = document.querySelector("#benchmark-progress");
+    const progressText = document.querySelector("#benchmark-progress-text");
+    const details = document.querySelector("#benchmark-run-details");
+    const backendResults = document.querySelector("#benchmark-backend-results");
+    const resultCount = document.querySelector("#benchmark-result-count");
+    const cardCount = document.querySelector("#benchmark-card-count");
+    const casesRoot = document.querySelector("#benchmark-cases");
+    let refreshPending = false;
+
+    const statusLabel = value => ({
+      idle: "Idle",
+      starting: "Preparing",
+      running: "Running",
+      completed: "Completed",
+      cancelled: "Cancelled",
+      interrupted: "Interrupted",
+      failed: "Failed",
+    }[value] || String(value || "Unknown"));
+    const statusClass = state => state === "completed"
+      ? "pill good-pill"
+      : state === "failed" || state === "interrupted"
+        ? "pill bad-pill"
+        : state === "running" || state === "starting"
+          ? "pill warn-pill"
+          : "pill subtle-pill";
+    const formatAccuracy = value => `${(Number(value || 0) * 100).toFixed(1)}%`;
+
+    function renderBenchmark(state) {
+      const running = Boolean(state.running);
+      const label = statusLabel(state.status);
+      statusTitle.textContent = label;
+      statusPill.textContent = label;
+      statusPill.className = statusClass(state.status);
+      message.textContent = state.message || "--";
+      progress.value = Number(state.progress_percent || 0);
+      progressText.textContent = `${Number(state.progress_current || 0).toLocaleString()} / ${Number(state.progress_total || 0).toLocaleString()} tests · ${Number(state.progress_percent || 0).toFixed(1)}%`;
+      startButton.disabled = running;
+      cancelButton.disabled = !running;
+
+      const currentCard = state.current_card?.name || "--";
+      details.innerHTML = [
+        ["Eligible cards", state.eligible_card_count == null ? "--" : Number(state.eligible_card_count).toLocaleString()],
+        ["Sample", Number(state.sample_size || 0).toLocaleString()],
+        ["Seed", state.seed ?? "--"],
+        ["Current card", currentCard],
+        ["Current backend", state.current_backend || "--"],
+        ["Started", formatTimestamp(state.started_at_utc)],
+      ].map(([key, value]) => `<div><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("");
+
+      const summaries = Object.values(state.backend_results || {});
+      resultCount.textContent = `${Number(state.progress_current || 0).toLocaleString()} results`;
+      backendResults.innerHTML = summaries.length
+        ? summaries.map(summary => `
+          <article class="status-card benchmark-result-card">
+            <span class="muted">${escapeHtml(summary.backend)}</span>
+            <strong>${escapeHtml(formatAccuracy(summary.accuracy))}</strong>
+            <dl>
+              <div><dt>Correct</dt><dd>${Number(summary.matches || 0).toLocaleString()} / ${Number(summary.completed || 0).toLocaleString()}</dd></div>
+              <div><dt>Exact print</dt><dd>${escapeHtml(formatAccuracy(summary.printing_accuracy))}</dd></div>
+              <div><dt>Average</dt><dd>${escapeHtml(formatSeconds(summary.average_seconds))}</dd></div>
+              <div><dt>Errors</dt><dd>${Number(summary.errors || 0).toLocaleString()}</dd></div>
+            </dl>
+          </article>
+        `).join("")
+        : `<p class="muted">No benchmark results yet.</p>`;
+
+      const cards = Array.isArray(state.cards) ? state.cards : [];
+      const cases = Array.isArray(state.cases) ? state.cases : [];
+      cardCount.textContent = `${cards.length.toLocaleString()} cards`;
+      const recentCases = cases.slice(-100).reverse();
+      casesRoot.innerHTML = recentCases.length
+        ? recentCases.map(item => `
+          <tr>
+            <td>${escapeHtml(item.expected_name)}<span class="table-detail">${escapeHtml([item.expected_set, item.expected_collector_number ? `#${item.expected_collector_number}` : ""].filter(Boolean).join(" · "))}</span></td>
+            <td>${escapeHtml(item.backend)}</td>
+            <td>${escapeHtml(item.predicted_name || "--")}</td>
+            <td>${escapeHtml(formatConfidence(item.confidence))}</td>
+            <td>${escapeHtml(formatSeconds(item.elapsed_seconds))}</td>
+            <td><span class="pill ${item.error ? "bad-pill" : item.matched ? "good-pill" : "warn-pill"}">${escapeHtml(item.error ? "Error" : item.matched ? "Match" : "Miss")}</span>${item.error ? `<span class="table-detail">${escapeHtml(item.error)}</span>` : ""}</td>
+          </tr>
+        `).join("")
+        : `<tr><td colspan="6" class="muted">${cards.length ? "Waiting for the first result…" : "No cards selected yet."}</td></tr>`;
+    }
+
+    async function refreshBenchmark() {
+      if (refreshPending || document.hidden) return;
+      refreshPending = true;
+      try {
+        renderBenchmark(await json("/api/recognition/benchmark"));
+      } catch (error) {
+        message.textContent = error.message;
+      } finally {
+        refreshPending = false;
+      }
+    }
+
+    form.onsubmit = async event => {
+      event.preventDefault();
+      const data = new FormData(form);
+      const seed = String(data.get("seed") || "").trim();
+      const payload = {
+        sample_size: Number(data.get("sample_size")),
+        backends: data.getAll("backends"),
+        seed: seed ? Number(seed) : null,
+      };
+      startButton.disabled = true;
+      message.textContent = "Starting benchmark…";
+      try {
+        renderBenchmark(await json("/api/recognition/benchmark", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload),
+        }));
+      } catch (error) {
+        message.textContent = error.message;
+        startButton.disabled = false;
+      }
+    };
+    cancelButton.onclick = async () => {
+      cancelButton.disabled = true;
+      try {
+        renderBenchmark(await json("/api/recognition/benchmark/cancel", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: "{}",
+        }));
+      } catch (error) {
+        message.textContent = error.message;
+      }
+    };
+
+    refreshBenchmark();
+    setInterval(refreshBenchmark, 2000);
+  },
   cardBackTraining() {
     const modelSelect = document.querySelector("#training-model-select");
     const baseModelSelect = document.querySelector("#training-base-model");

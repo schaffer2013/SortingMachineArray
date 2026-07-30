@@ -64,7 +64,7 @@ VISUAL_INDEX_DOWNLOAD_PREFETCH = 8
 SCRYFALL_IMAGE_REQUESTS_PER_SECOND = 5.0
 VISUAL_INDEX_ETA_CARD_WINDOW = 500
 REQUEST_HEADERS = {
-    "User-Agent": "SortingMachineArray/0.8.39 (+https://github.com/schaffer2013/SortingMachineArray)",
+    "User-Agent": "SortingMachineArray/0.9.0 (+https://github.com/schaffer2013/SortingMachineArray)",
     "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
 }
 _DIAGNOSTIC_LOG_LOCK = threading.Lock()

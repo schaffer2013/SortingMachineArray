@@ -4,7 +4,9 @@ from dataclasses import replace
 from pathlib import Path
 import json
 import re
+import time
 import tomllib
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image, ImageDraw
@@ -14,12 +16,14 @@ from sorter.adapters.hardware.marlin_motion import MarlinMotionAdapter
 from sorter.adapters.hardware.marlin_transport import RecordingMarlinTransport
 from sorter.application.card_back_detection import detect_card_back, refine_card_back_corners_to_truth
 from sorter.application.card_back_training import CardBackTrainingStore
+from sorter.application.catalog_recognition_benchmark import CatalogRecognitionBenchmarkManager
 from sorter.config.calibration import CalibrationProfile
 from sorter.config.settings import AppSettings
 from sorter.interfaces import web_runner
 from sorter.interfaces.web import app as web_app_module
 from sorter.interfaces.web import create_web_app
 from sorter.ports.camera import Frame
+from sorter.ports.recognizer import RecognitionResult
 
 
 def _client(runtime_mode: str = "hardware"):
@@ -38,9 +42,101 @@ def _sim_truth_settings():
 
 def test_web_pages_render():
     client = _client()
-    for path in ("/", "/movement", "/machine", "/recognition", "/card-back-training", "/runs", "/system", "/about"):
+    for path in ("/", "/movement", "/machine", "/recognition", "/benchmark", "/card-back-training", "/runs", "/system", "/about"):
         response = client.get(path)
         assert response.status_code == 200
+
+
+def test_web_recognition_benchmark_runs_selected_catalog_sample(tmp_path):
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    catalog_path = tmp_path / "cards.json"
+    catalog_path.write_text(
+        json.dumps(
+            [
+                {
+                    "id": "alpha",
+                    "name": "Alpha",
+                    "set": "tst",
+                    "collector_number": "1",
+                    "type_line": "Creature",
+                    "digital": False,
+                    "image_uris": {"normal": "https://cards.scryfall.io/normal/alpha.jpg"},
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    runtime = app.config["runtime"]
+    runtime.recognition_benchmark = CatalogRecognitionBenchmarkManager(
+        source_path=catalog_path,
+        state_path=tmp_path / "benchmark-state.json",
+        recognize_image=lambda _path, payload: {
+            "card_name": "Alpha",
+            "confidence": 0.95,
+            "backend": payload["backend"],
+        },
+        download_image=lambda _url: b"image",
+    )
+    app.testing = True
+    client = app.test_client()
+
+    response = client.post(
+        "/api/recognition/benchmark",
+        json={"sample_size": 1, "backends": ["visual_retrieval"], "seed": 123},
+    )
+    deadline = time.monotonic() + 5
+    status = {}
+    while time.monotonic() < deadline:
+        status = client.get("/api/recognition/benchmark").get_json()
+        if not status["running"]:
+            break
+        time.sleep(0.01)
+
+    assert response.status_code == 200
+    assert status["status"] == "completed"
+    assert status["seed"] == 123
+    assert status["backend_results"]["visual_retrieval"]["accuracy"] == 1.0
+    assert status["cards"][0]["name"] == "Alpha"
+    assert "image_url" not in status["cards"][0]
+
+
+def test_web_benchmark_restores_live_recognition_backend(tmp_path):
+    settings = _sim_truth_settings()
+    orchestrator = build_sim_orchestrator(settings)
+    calibration = CalibrationProfile.from_file(settings.calibration_path)
+    app = create_web_app(orchestrator, calibration)
+    runtime = app.config["runtime"]
+    config = SimpleNamespace(recognition_backend="fuzzy_enigma")
+
+    class FakePrimary:
+        sorter_backend = "fuzzy_enigma"
+        card_engine_requested_backend = "fuzzy_enigma"
+        _recognizer = SimpleNamespace(config=config)
+
+        def recognize_top_card(self, frame):
+            backend = frame.metadata["recognition_request"]["backend"]
+            self.sorter_backend = backend
+            self.card_engine_requested_backend = backend
+            config.recognition_backend = backend
+            return RecognitionResult(card_name="Alpha", confidence=0.9, backend=backend)
+
+    primary = FakePrimary()
+    runtime.orchestrator.recognizer = SimpleNamespace(
+        primary=primary,
+        recognize_top_card=primary.recognize_top_card,
+    )
+    image_path = tmp_path / "card.jpg"
+    image_path.write_bytes(b"image")
+
+    result = runtime._recognize_benchmark_image(image_path, {"backend": "visual_retrieval"})
+
+    assert result["backend"] == "visual_retrieval"
+    assert primary.sorter_backend == "fuzzy_enigma"
+    assert primary.card_engine_requested_backend == "fuzzy_enigma"
+    assert config.recognition_backend == "fuzzy_enigma"
 
 
 def test_card_back_training_defaults_to_local_data():
@@ -1567,6 +1663,15 @@ def test_api_docs_and_openapi_pages_are_available():
     assert "/api/system" in spec["paths"]
     assert "/api/system/visual-index/refresh" in spec["paths"]
     assert "/api/system/visual-index/diagnostics" in spec["paths"]
+    assert "/api/recognition/benchmark" in spec["paths"]
+    assert "/api/recognition/benchmark/cancel" in spec["paths"]
+    benchmark_schema = spec["paths"]["/api/recognition/benchmark"]["post"]["requestBody"]["content"]["application/json"]["schema"]
+    assert benchmark_schema["properties"]["sample_size"]["maximum"] == 500
+    assert benchmark_schema["properties"]["backends"]["items"]["enum"] == [
+        "fuzzy_enigma",
+        "visual_retrieval",
+        "moss_machine",
+    ]
     assert "/api/docs" not in spec["paths"]
 
     assert docs_response.status_code == 200

@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Recognition benchmark · Sorter Console{% endblock %}
+{% block content %}
+<section class="two-column benchmark-layout">
+  <article class="panel">
+    <p class="eyebrow">Test set</p>
+    <h2>Random paper cards</h2>
+    <p class="muted">
+      The same randomly selected cards are tested against every chosen backend.
+      Digital-only cards and basic lands are excluded.
+    </p>
+    <form id="benchmark-form">
+      <div class="form-grid">
+        <label>Number of cards
+          <input name="sample_size" type="number" min="1" max="{{ maximum_sample_size }}" step="1" value="{{ default_sample_size }}" required>
+        </label>
+        <label>Seed <span class="muted">(optional)</span>
+          <input name="seed" type="number" step="1" placeholder="Random">
+        </label>
+      </div>
+      <fieldset class="benchmark-backends">
+        <legend>Backends</legend>
+        <div class="checkbox-row">
+          {% for backend in benchmark_backends %}
+          <label><input type="checkbox" name="backends" value="{{ backend }}" checked> {{ backend }}</label>
+          {% endfor %}
+        </div>
+      </fieldset>
+      <div class="button-row">
+        <button id="benchmark-start" type="submit">Start benchmark</button>
+        <button id="benchmark-cancel" class="secondary" type="button" disabled>Cancel</button>
+      </div>
+    </form>
+  </article>
+  <article class="panel">
+    <div class="panel-heading">
+      <div>
+        <p class="eyebrow">Run status</p>
+        <h2 id="benchmark-status-title">Idle</h2>
+      </div>
+      <span id="benchmark-status-pill" class="pill subtle-pill">Idle</span>
+    </div>
+    <p id="benchmark-message" class="muted">Loading benchmark status…</p>
+    <progress id="benchmark-progress" max="100" value="0"></progress>
+    <div id="benchmark-progress-text" class="muted">0 / 0 tests</div>
+    <dl id="benchmark-run-details" class="metric-list"></dl>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-heading">
+    <div>
+      <p class="eyebrow">Comparison</p>
+      <h2>Backend results</h2>
+    </div>
+    <span id="benchmark-result-count" class="pill subtle-pill">0 results</span>
+  </div>
+  <div id="benchmark-backend-results" class="benchmark-result-grid">
+    <p class="muted">No benchmark results yet.</p>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-heading">
+    <div>
+      <p class="eyebrow">Selected sample</p>
+      <h2>Cards and predictions</h2>
+    </div>
+    <span id="benchmark-card-count" class="pill subtle-pill">0 cards</span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Expected</th>
+          <th>Backend</th>
+          <th>Prediction</th>
+          <th>Confidence</th>
+          <th>Time</th>
+          <th>Result</th>
+        </tr>
+      </thead>
+      <tbody id="benchmark-cases">
+        <tr><td colspan="6" class="muted">No cards selected yet.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>window.SorterPages.benchmark();</script>
+{% endblock %}
