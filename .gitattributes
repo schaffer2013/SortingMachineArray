@@ -1,2 +1,4 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+artifacts/visual-index/card_embeddings.npz filter=lfs diff=lfs merge=lfs -text
+artifacts/visual-index/card_embeddings.jsonl filter=lfs diff=lfs merge=lfs -text
