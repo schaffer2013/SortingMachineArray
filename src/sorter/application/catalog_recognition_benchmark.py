@@ -7,7 +7,7 @@ import random
 import tempfile
 import threading
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 
 BENCHMARK_BACKEND_OPTIONS = ("fuzzy_enigma", "visual_retrieval", "moss_machine")
@@ -19,14 +19,10 @@ DownloadImage = Callable[[str], bytes]
 
 
 def eligible_catalog_cards(source_path: Path) -> list[dict[str, Any]]:
-    payload = json.loads(source_path.read_text(encoding="utf-8"))
-    cards = payload if isinstance(payload, list) else payload.get("cards", [])
-    if not isinstance(cards, list):
-        raise ValueError(f"Catalog did not contain a card list: {source_path}")
     return [
         _benchmark_card(card)
-        for card in cards
-        if isinstance(card, dict) and _is_benchmark_eligible(card)
+        for card in _iter_catalog_cards(source_path)
+        if _is_benchmark_eligible(card)
     ]
 
 
@@ -36,12 +32,84 @@ def choose_benchmark_cards(
     sample_size: int,
     seed: int,
 ) -> tuple[list[dict[str, Any]], int]:
-    eligible = eligible_catalog_cards(source_path)
-    if sample_size > len(eligible):
+    randomizer = random.Random(seed)
+    selected: list[dict[str, Any]] = []
+    eligible_count = 0
+    for card in _iter_catalog_cards(source_path):
+        if not _is_benchmark_eligible(card):
+            continue
+        eligible_count += 1
+        benchmark_card = _benchmark_card(card)
+        if len(selected) < sample_size:
+            selected.append(benchmark_card)
+            continue
+        replacement_index = randomizer.randrange(eligible_count)
+        if replacement_index < sample_size:
+            selected[replacement_index] = benchmark_card
+
+    if sample_size > eligible_count:
         raise ValueError(
-            f"Requested {sample_size:,} cards, but only {len(eligible):,} eligible paper cards are available"
+            f"Requested {sample_size:,} cards, but only {eligible_count:,} eligible paper cards are available"
         )
-    return random.Random(seed).sample(eligible, sample_size), len(eligible)
+    randomizer.shuffle(selected)
+    return selected, eligible_count
+
+
+def _iter_catalog_cards(source_path: Path) -> Iterator[dict[str, Any]]:
+    decoder = json.JSONDecoder()
+    chunk_size = 1024 * 1024
+    with source_path.open(encoding="utf-8") as stream:
+        buffer = ""
+        position = 0
+        finished = False
+
+        while True:
+            if not finished and len(buffer) - position < chunk_size:
+                buffer = buffer[position:]
+                position = 0
+                chunk = stream.read(chunk_size)
+                if chunk:
+                    buffer += chunk
+                else:
+                    finished = True
+
+            while position < len(buffer) and buffer[position].isspace():
+                position += 1
+            if position >= len(buffer):
+                if finished:
+                    raise ValueError(f"Catalog did not contain a card list: {source_path}")
+                continue
+            if buffer[position] != "[":
+                payload = json.loads(buffer[position:] + stream.read())
+                cards = payload.get("cards", []) if isinstance(payload, dict) else None
+                if not isinstance(cards, list):
+                    raise ValueError(f"Catalog did not contain a card list: {source_path}")
+                yield from (card for card in cards if isinstance(card, dict))
+                return
+            position += 1
+            break
+
+        while True:
+            while position < len(buffer) and (buffer[position].isspace() or buffer[position] == ","):
+                position += 1
+            if position < len(buffer) and buffer[position] == "]":
+                return
+            try:
+                card, end = decoder.raw_decode(buffer, position)
+            except json.JSONDecodeError:
+                if finished:
+                    raise ValueError(f"Catalog contained invalid JSON: {source_path}") from None
+                buffer = buffer[position:]
+                position = 0
+                chunk = stream.read(chunk_size)
+                if chunk:
+                    buffer += chunk
+                else:
+                    finished = True
+                continue
+            position = end
+            if isinstance(card, dict):
+                yield card
 
 
 class CatalogRecognitionBenchmarkManager:
