@@ -90,6 +90,37 @@ def test_catalog_selection_excludes_digital_basic_lands_and_missing_images(tmp_p
     assert eligible_count == 2
 
 
+def test_catalog_selection_streams_records_larger_than_a_read_chunk(tmp_path):
+    catalog_path = tmp_path / "large-cards.json"
+    cards = [
+        {
+            "id": "large",
+            "name": "Large Record",
+            "set": "tst",
+            "collector_number": "1",
+            "type_line": "Instant",
+            "digital": False,
+            "oracle_text": "x" * (1024 * 1024 + 100),
+            "image_uris": {"normal": "https://cards.scryfall.io/normal/large.jpg"},
+        },
+        {
+            "id": "small",
+            "name": "Small Record",
+            "set": "tst",
+            "collector_number": "2",
+            "type_line": "Creature",
+            "digital": False,
+            "image_uris": {"normal": "https://cards.scryfall.io/normal/small.jpg"},
+        },
+    ]
+    catalog_path.write_text(json.dumps(cards), encoding="utf-8")
+
+    selected, eligible_count = choose_benchmark_cards(catalog_path, sample_size=2, seed=9)
+
+    assert eligible_count == 2
+    assert {card["name"] for card in selected} == {"Large Record", "Small Record"}
+
+
 def test_catalog_benchmark_reuses_each_download_across_backends_and_persists_results(tmp_path):
     catalog_path = tmp_path / "cards.json"
     state_path = tmp_path / "benchmark.json"
