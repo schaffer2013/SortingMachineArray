@@ -1498,7 +1498,11 @@ def refresh_visual_index_from_catalog(
     changed_cards = sorted(
         key
         for key, metadata in existing_cards.items()
-        if key in source_cards and str((_extract_image_urls(source_cards[key]) or [""])[0]) != str(metadata.get("image_url") or "")
+        if key in source_cards
+        and not _visual_index_image_urls_equivalent(
+            str((_extract_image_urls(source_cards[key]) or [""])[0]),
+            str(metadata.get("image_url") or ""),
+        )
     )
     if removed_cards or changed_cards:
         raise FullVisualIndexRebuildRequired(
@@ -1540,6 +1544,30 @@ def refresh_visual_index_from_catalog(
         progress_label="new cards",
         progress_callback=progress_callback,
     )
+
+
+def _visual_index_image_urls_equivalent(source_url: str, indexed_url: str) -> bool:
+    if source_url == indexed_url:
+        return True
+    source_asset = _scryfall_image_asset_key(source_url)
+    indexed_asset = _scryfall_image_asset_key(indexed_url)
+    return source_asset is not None and source_asset == indexed_asset
+
+
+def _scryfall_image_asset_key(image_url: str) -> tuple[str, str, str] | None:
+    parsed = urlparse(image_url)
+    if parsed.hostname != "cards.scryfall.io":
+        return None
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if len(path_parts) < 3:
+        return None
+    asset_name = path_parts[-1].rsplit(".", 1)[0]
+    if not asset_name:
+        return None
+    # The first segment and filename extension select a rendition such as
+    # /png/.../*.png or /normal/.../*.jpg. The rest identifies the image.
+    asset_path = "/".join([*path_parts[1:-1], asset_name])
+    return parsed.hostname, asset_path, parsed.query
 
 
 def visual_index_refresh_needed(

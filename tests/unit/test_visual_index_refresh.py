@@ -182,7 +182,12 @@ def test_refresh_visual_index_from_catalog_appends_new_cards(tmp_path, monkeypat
                     "id": "aaaaaaaa-0000-0000-0000-000000000001",
                     "set": "alp",
                     "collector_number": "1",
-                    "image_uris": {"png": "https://example.invalid/alpha.png"},
+                    "image_uris": {
+                        "normal": (
+                            "https://cards.scryfall.io/normal/front/a/a/"
+                            "aaaaaaaa-0000-0000-0000-000000000001.jpg?123"
+                        )
+                    },
                 },
                 {
                     "name": "Beta",
@@ -210,7 +215,10 @@ def test_refresh_visual_index_from_catalog_appends_new_cards(tmp_path, monkeypat
                 "oracle_id": "oracle-alpha",
                 "set_code": "alp",
                 "collector_number": "1",
-                "image_url": "https://example.invalid/alpha.png",
+                "image_url": (
+                    "https://cards.scryfall.io/png/front/a/a/"
+                    "aaaaaaaa-0000-0000-0000-000000000001.png?123"
+                ),
                 "image_path": "data/index/reference_images/alpha.png",
                 "crop_type": "full_card",
             }
@@ -244,6 +252,24 @@ def test_refresh_visual_index_from_catalog_appends_new_cards(tmp_path, monkeypat
     assert len(loaded.metadata) == 2
     assert [item["name"] for item in loaded.metadata] == ["Alpha", "Beta"]
     assert not (project_root / "data/index/visual_index_checkpoint.sqlite3").exists()
+
+
+def test_visual_index_scryfall_renditions_require_matching_revision():
+    normal_url = (
+        "https://cards.scryfall.io/normal/front/a/a/"
+        "aaaaaaaa-0000-0000-0000-000000000001.jpg?123"
+    )
+    png_url = (
+        "https://cards.scryfall.io/png/front/a/a/"
+        "aaaaaaaa-0000-0000-0000-000000000001.png?123"
+    )
+    revised_png_url = (
+        "https://cards.scryfall.io/png/front/a/a/"
+        "aaaaaaaa-0000-0000-0000-000000000001.png?456"
+    )
+
+    assert refresh_module._visual_index_image_urls_equivalent(normal_url, png_url)
+    assert not refresh_module._visual_index_image_urls_equivalent(normal_url, revised_png_url)
 
 
 def test_build_visual_index_from_catalog_recovers_corrupted_cached_reference_image(tmp_path, monkeypatch):
